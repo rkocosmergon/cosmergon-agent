@@ -2,7 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, fields as dc_fields
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_construct(cls: type, data: dict) -> Any:
+    """Construct a dataclass from a dict, ignoring unknown fields (C3).
+
+    Unknown fields are silently dropped for forward-compatibility.
+    Missing fields use dataclass defaults.
+    """
+    known = {f.name for f in dc_fields(cls)}
+    filtered = {k: v for k, v in data.items() if k in known}
+    return cls(**filtered)
 
 
 @dataclass(frozen=True)
@@ -24,7 +39,7 @@ class Cube:
     """A spatial container for game fields."""
 
     id: str
-    name: str
+    name: str = ""
     space_id: str | None = None
     cube_x: int = 0
     cube_y: int = 0
@@ -68,17 +83,21 @@ class GameState:
 
     @classmethod
     def from_api(cls, data: dict) -> GameState:
-        """Parse API response into GameState."""
-        fields = [Field(**f) for f in data.get("fields", [])]
-        cubes = [Cube(**c) for c in data.get("cubes", [])]
-        universe_cubes = [Cube(**c) for c in data.get("universe_cubes", [])]
-        ranking = Ranking(**data.get("ranking", {}))
-        focus = Focus(**data.get("focus", {}))
+        """Parse API response into GameState.
+
+        Uses defensive parsing: unknown fields are ignored,
+        missing fields use defaults (forward-compatibility, C3).
+        """
+        fields = [_safe_construct(Field, f) for f in data.get("fields", [])]
+        cubes = [_safe_construct(Cube, c) for c in data.get("cubes", [])]
+        universe_cubes = [_safe_construct(Cube, c) for c in data.get("universe_cubes", [])]
+        ranking = _safe_construct(Ranking, data.get("ranking", {}))
+        focus = _safe_construct(Focus, data.get("focus", {}))
 
         return cls(
-            agent_id=data["agent_id"],
+            agent_id=data.get("agent_id", "unknown"),
             agent_type=data.get("agent_type", "independent_agent"),
-            energy=data.get("energy_balance", 0.0),
+            energy=float(data.get("energy_balance", data.get("energy", 0.0))),
             fields=fields,
             cubes=cubes,
             universe_cubes=universe_cubes,

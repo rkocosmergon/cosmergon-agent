@@ -42,6 +42,9 @@ Homepage = "https://cosmergon.com"
 Documentation = "https://docs.cosmergon.com/sdk"
 Repository = "https://github.com/cosmergon/cosmergon-agent"
 
+[tool.setuptools.package-data]
+cosmergon_agent = ["py.typed"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

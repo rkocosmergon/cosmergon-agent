@@ -4,16 +4,42 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import random
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
 
+from cosmergon_agent import __version__
 from cosmergon_agent.action import ActionResult
+from cosmergon_agent.exceptions import (
+    AuthenticationError,
+    ConnectionError as CsgConnectionError,
+    CosmergonError,
+    RateLimitError,
+    ServerError,
+)
 from cosmergon_agent.state import GameState
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_MAX_RETRIES = 3
+_INITIAL_BACKOFF = 0.5
+_MAX_BACKOFF = 30.0
+
+
+class _SensitiveStr(str):
+    """String that masks its value in repr/str to prevent accidental logging."""
+
+    def __repr__(self) -> str:
+        if len(self) <= 8:
+            return "'***'"
+        return f"'{self[:4]}...{self[-4:]}'"
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
 
 class CosmergonAgent:
@@ -33,16 +59,29 @@ class CosmergonAgent:
 
     def __init__(
         self,
-        api_key: str,
-        base_url: str,
+        api_key: str | None = None,
+        base_url: str = "http://localhost:8082",
         agent_id: str | None = None,
         poll_interval: float = 10.0,
+        max_retries: int = _DEFAULT_MAX_RETRIES,
         auto_reconnect: bool = True,
     ) -> None:
-        self.api_key = api_key
+        # C1: Resolve API key from env var fallback (M2)
+        resolved_key = api_key or os.environ.get("COSMERGON_API_KEY", "")
+        if not resolved_key or not resolved_key.strip():
+            raise ValueError(
+                "api_key must be provided or set via COSMERGON_API_KEY env var"
+            )
+        # M1: Input validation
+        if not base_url.startswith(("http://", "https://")):
+            raise ValueError("base_url must start with http:// or https://")
+
+        # C1: Store key as _SensitiveStr to prevent accidental logging
+        self._api_key = _SensitiveStr(resolved_key)
         self.base_url = base_url.rstrip("/")
         self.agent_id = agent_id
         self.poll_interval = poll_interval
+        self.max_retries = max_retries
         self.auto_reconnect = auto_reconnect
 
         self._tick_handler: Callable[[GameState], Awaitable[None]] | None = None
@@ -53,6 +92,14 @@ class CosmergonAgent:
         self._running = False
         self._state: GameState | None = None
         self._memory: dict[str, Any] = {}
+
+    def __repr__(self) -> str:
+        """Safe repr that never exposes the full API key."""
+        return (
+            f"CosmergonAgent(api_key={self._api_key!r}, "
+            f"base_url={self.base_url!r}, "
+            f"agent_id={self.agent_id!r})"
+        )
 
     # --- Decorators (Discord.py pattern) ---
 
@@ -93,20 +140,23 @@ class CosmergonAgent:
     # --- Actions (Screeps pattern) ---
 
     async def act(self, action: str, **params: Any) -> ActionResult:
-        """Execute a game action. Returns ActionResult with success/failure."""
-        if not self._client:
-            raise RuntimeError("Agent not connected. Call run() first.")
+        """Execute a game action. Returns ActionResult with success/failure.
 
-        headers = {"X-Idempotency-Key": str(uuid.uuid4())}
+        Raises CosmergonError subclasses on server errors (4xx/5xx).
+        """
+        idem_key = str(uuid.uuid4())
         body = {"action": action, **params}
 
-        resp = await self._client.post(
-            f"{self.base_url}/api/v1/agents/{self.agent_id}/action",
+        resp = await self._request(
+            "POST",
+            f"/api/v1/agents/{self.agent_id}/action",
             json=body,
-            headers=headers,
+            headers={"X-Idempotency-Key": idem_key},
         )
 
-        result = ActionResult.from_response(action, resp.status_code, resp.json())
+        result = ActionResult.from_response(
+            action, resp.status_code, resp.json(), idempotency_key=idem_key,
+        )
 
         if not result.success and self._error_handler:
             await self._error_handler(result)
@@ -121,14 +171,10 @@ class CosmergonAgent:
 
     async def start(self) -> None:
         """Start the agent (async, non-blocking)."""
-        self._client = httpx.AsyncClient(
-            headers={"Authorization": f"api-key {self.api_key}"},
-            timeout=30.0,
-        )
+        self._client = self._create_client()
         self._running = True
 
         try:
-            # Resolve agent_id from API key if not provided
             if not self.agent_id:
                 await self._resolve_agent_id()
 
@@ -151,10 +197,7 @@ class CosmergonAgent:
             self._client = None
 
     async def __aenter__(self) -> CosmergonAgent:
-        self._client = httpx.AsyncClient(
-            headers={"Authorization": f"api-key {self.api_key}"},
-            timeout=30.0,
-        )
+        self._client = self._create_client()
         if not self.agent_id:
             await self._resolve_agent_id()
         return self
@@ -164,26 +207,80 @@ class CosmergonAgent:
 
     # --- Internal ---
 
+    def _create_client(self) -> httpx.AsyncClient:
+        """Single point of HTTP client creation (H3: DRY + consistent config)."""
+        return httpx.AsyncClient(
+            headers={
+                "Authorization": f"api-key {str.__str__(self._api_key)}",
+                "User-Agent": f"cosmergon-agent-python/{__version__}",
+                "X-Cosmergon-SDK-Version": __version__,
+            },
+            timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0),
+            verify=True,
+            max_redirects=3,
+        )
+
+    async def _request(
+        self, method: str, path: str, **kwargs: Any,
+    ) -> httpx.Response:
+        """HTTP request with retry, backoff, and rate-limit handling (C2)."""
+        if self._client is None:
+            raise RuntimeError("Agent not connected. Call run() or use async with.")
+
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                resp = await self._client.request(
+                    method, f"{self.base_url}{path}", **kwargs,
+                )
+
+                if resp.status_code == 429:
+                    retry_after = float(resp.headers.get("Retry-After", "1"))
+                    logger.warning("Rate limited, waiting %.1fs", retry_after)
+                    await asyncio.sleep(retry_after)
+                    continue
+
+                if resp.status_code >= 500 and attempt < self.max_retries:
+                    delay = min(_INITIAL_BACKOFF * (2 ** attempt) + random.random(), _MAX_BACKOFF)
+                    logger.warning("Server error %d, retry in %.1fs", resp.status_code, delay)
+                    await asyncio.sleep(delay)
+                    continue
+
+                return resp
+
+            except httpx.TransportError as exc:
+                last_exc = exc
+                if attempt < self.max_retries:
+                    delay = min(_INITIAL_BACKOFF * (2 ** attempt) + random.random(), _MAX_BACKOFF)
+                    logger.warning("Transport error, retry in %.1fs: %s", delay, exc)
+                    await asyncio.sleep(delay)
+
+        raise CsgConnectionError(
+            f"Failed after {self.max_retries + 1} attempts"
+        ) from last_exc
+
     async def _resolve_agent_id(self) -> None:
         """Get agent_id from the API key's associated agent."""
-        assert self._client is not None
-        resp = await self._client.get(f"{self.base_url}/api/v1/agents/")
+        if self._client is None:
+            raise RuntimeError("Agent not connected")
+        resp = await self._request("GET", "/api/v1/agents/")
         if resp.status_code == 200:
             agents = resp.json()
             if agents:
                 self.agent_id = agents[0]["id"]
                 return
-        raise RuntimeError("Could not resolve agent_id from API key")
+        raise AuthenticationError("Could not resolve agent_id from API key")
 
     async def _poll_loop(self) -> None:
         """Main loop: fetch state, call handler, sleep."""
-        assert self._client is not None
+        if self._client is None:
+            raise RuntimeError("Agent not connected")
         last_tick = -1
 
         while self._running:
             try:
-                resp = await self._client.get(
-                    f"{self.base_url}/api/v1/agents/{self.agent_id}/state"
+                resp = await self._request(
+                    "GET", f"/api/v1/agents/{self.agent_id}/state",
                 )
                 if resp.status_code != 200:
                     logger.warning("State fetch failed: %d", resp.status_code)
@@ -196,9 +293,11 @@ class CosmergonAgent:
                     last_tick = self._state.tick
                     await self._tick_handler(self._state)
 
-            except httpx.ConnectError:
-                logger.warning("Connection lost, retrying in %ds", self.poll_interval)
+            except CsgConnectionError:
+                logger.warning("Connection lost, retrying in %.0fs", self.poll_interval)
+            except CosmergonError as exc:
+                logger.error("API error in poll loop: %s", exc.message)
             except Exception:
-                logger.exception("Error in agent loop")
+                logger.exception("Unexpected error in agent loop")
 
             await asyncio.sleep(self.poll_interval)
