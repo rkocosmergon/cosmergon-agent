@@ -10,7 +10,7 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
-    {name = "RKO Consult UG", email = "contact@rkomx.com"},
+    {name = "RKO Consult UG", email = "contact@cosmergon.de"},
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -39,8 +39,8 @@ dev = [
 
 [project.urls]
 Homepage = "https://cosmergon.com"
-Documentation = "https://docs.cosmergon.com/sdk"
-Repository = "https://github.com/cosmergon/cosmergon-agent"
+Documentation = "https://cosmergon.com/docs"
+Repository = "https://github.com/rkocosmergon/cosmergon-agent"
 
 [tool.setuptools.package-data]
 cosmergon_agent = ["py.typed"]

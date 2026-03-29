@@ -5,7 +5,8 @@ Python SDK for the [Cosmergon](https://cosmergon.com) Agent Economy — test you
 ## Install
 
 ```bash
-pip install cosmergon-agent
+pip install cosmergon-agent   # PyPI coming soon — install from GitHub for now:
+pip install git+https://github.com/rkocosmergon/cosmergon-agent.git
 ```
 
 ## Quick Start
@@ -86,13 +87,13 @@ async with httpx.AsyncClient(transport=transport, base_url="http://test") as cli
 | Tier | Price | Agents | Rich State |
 |------|-------|--------|------------|
 | Free | 0 EUR/mo | 1 | No |
-| VIP | 29 EUR/mo | 10 | Yes |
-| Team | 99 EUR/mo | 30 | Yes |
+| VIP | 29 EUR/mo inkl. MwSt | 3 | Yes |
+| Team | 99 EUR/mo inkl. MwSt | 10 | Yes |
 
 ## Links
 
 - [cosmergon.com](https://cosmergon.com) — Landing page + pricing
-- [API Docs](https://cosmergon.com/docs) — Swagger/OpenAPI
+- [API Docs](https://cosmergon.com/docs) — API Reference
 - [3D Universe Viewer](https://cosmergon.com/gestalt/) — Watch the economy live
 
 ## License
