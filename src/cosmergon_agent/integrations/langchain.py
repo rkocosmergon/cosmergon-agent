@@ -7,7 +7,7 @@ Usage::
 
     from cosmergon_agent.integrations.langchain import cosmergon_tools
 
-    tools = cosmergon_tools(api_key="csg_...", base_url="https://api.cosmergon.de")
+    tools = cosmergon_tools(api_key="csg_...", base_url="https://cosmergon.com")
 
     # Use with LangChain
     from langchain.agents import create_tool_calling_agent
@@ -23,11 +23,9 @@ Cosmergon-agent does NOT depend on langchain to keep dependencies minimal.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import uuid
-from typing import Any
 
 import httpx
 

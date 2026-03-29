@@ -1,7 +1,7 @@
 """Tests for the testing utilities module."""
 
-from cosmergon_agent.testing import fake_state, FakeTransport
 from cosmergon_agent.state import GameState
+from cosmergon_agent.testing import FakeTransport, fake_state
 
 
 def test_fake_state_defaults() -> None:

@@ -16,10 +16,10 @@ from cosmergon_agent import __version__
 from cosmergon_agent.action import ActionResult
 from cosmergon_agent.exceptions import (
     AuthenticationError,
-    ConnectionError as CsgConnectionError,
     CosmergonError,
-    RateLimitError,
-    ServerError,
+)
+from cosmergon_agent.exceptions import (
+    ConnectionError as CsgConnectionError,
 )
 from cosmergon_agent.state import GameState
 

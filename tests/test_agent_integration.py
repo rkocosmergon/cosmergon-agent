@@ -4,12 +4,11 @@ Tests the agent's core loop, retry logic, and error handling
 without a real server.
 """
 
-import asyncio
 
 import httpx
 import pytest
 
-from cosmergon_agent.agent import CosmergonAgent, _SensitiveStr
+from cosmergon_agent.agent import CosmergonAgent
 from cosmergon_agent.testing import FakeTransport
 
 

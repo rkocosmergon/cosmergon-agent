@@ -1,6 +1,5 @@
 """Tests for CosmergonAgent — constructor, repr, sensitive str."""
 
-import os
 
 import pytest
 

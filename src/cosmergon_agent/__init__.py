@@ -13,6 +13,7 @@ from cosmergon_agent.exceptions import (
 )
 from cosmergon_agent.state import GameState
 
+
 # Agent import is deferred to avoid circular import with __version__
 def __getattr__(name: str) -> type:
     if name == "CosmergonAgent":
@@ -21,11 +22,11 @@ def __getattr__(name: str) -> type:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
-    "CosmergonAgent",
-    "GameState",
     "ActionResult",
-    "CosmergonError",
     "AuthenticationError",
+    "CosmergonAgent",
+    "CosmergonError",
+    "GameState",
     "InsufficientEnergyError",
     "NotFoundError",
     "RateLimitError",

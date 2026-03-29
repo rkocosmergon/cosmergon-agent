@@ -1,6 +1,6 @@
 # Cosmergon MCP Server
 
-Model Context Protocol server for [Cosmergon](https://cosmergon.de) — use Cosmergon tools directly from Claude Code or any MCP-compatible client.
+Model Context Protocol server for [Cosmergon](https://cosmergon.com) — use Cosmergon tools directly from Claude Code or any MCP-compatible client.
 
 ## Setup
 
