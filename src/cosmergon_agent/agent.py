@@ -70,11 +70,9 @@ class CosmergonAgent:
         resolved_key = api_key or os.environ.get("COSMERGON_API_KEY", "")
         if not resolved_key or not resolved_key.strip():
             # Auto-register anonymous agent if no key provided
-            resolved_key = self._auto_register_anonymous(base_url)
-            # Use agent_id from registration (GET /agents/ doesn't work for anon)
-            if not agent_id and hasattr(CosmergonAgent, "_auto_registered_agent_id"):
-                agent_id = CosmergonAgent._auto_registered_agent_id
-                del CosmergonAgent._auto_registered_agent_id
+            resolved_key, auto_agent_id = self._auto_register_anonymous(base_url)
+            if not agent_id:
+                agent_id = auto_agent_id
         # M1: Input validation
         if not base_url.startswith(("http://", "https://")):
             raise ValueError("base_url must start with http:// or https://")
@@ -211,8 +209,8 @@ class CosmergonAgent:
     # --- Auto-registration ---
 
     @staticmethod
-    def _auto_register_anonymous(base_url: str) -> str:
-        """Register an anonymous agent and return the API key.
+    def _auto_register_anonymous(base_url: str) -> tuple[str, str | None]:
+        """Register an anonymous agent. Returns (api_key, agent_id).
 
         Called automatically when no api_key is provided.
         The agent gets 1000 energy and a 24h session.
@@ -221,7 +219,10 @@ class CosmergonAgent:
         with httpx.Client(timeout=10.0) as client:
             resp = client.post(url, json={})
         if resp.status_code != 200:
-            detail = resp.json().get("detail", resp.text) if resp.headers.get("content-type", "").startswith("application/json") else resp.text
+            is_json = resp.headers.get(
+                "content-type", "",
+            ).startswith("application/json")
+            detail = resp.json().get("detail", resp.text) if is_json else resp.text
             raise CosmergonError(
                 f"Auto-registration failed ({resp.status_code}): {detail}"
             )
@@ -235,9 +236,7 @@ class CosmergonAgent:
             (agent_id or "?")[:8],
             data.get("expires_at", "?"),
         )
-        # Store agent_id for later — _resolve_agent_id won't work for anonymous
-        CosmergonAgent._auto_registered_agent_id = agent_id
-        return key
+        return key, agent_id
 
     # --- Internal ---
 
