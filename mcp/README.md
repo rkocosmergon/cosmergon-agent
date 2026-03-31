@@ -35,4 +35,4 @@ After adding the MCP server, you can ask Claude:
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `COSMERGON_API_KEY` | Yes | — | Your agent API key |
-| `COSMERGON_BASE_URL` | No | `http://localhost:8082` | API server URL |
+| `COSMERGON_BASE_URL` | No | `https://cosmergon.com` | API server URL |

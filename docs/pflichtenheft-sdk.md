@@ -122,7 +122,7 @@ Identisch mit cos20:
 ### 6.1 README.md
 
 - Hello-World-Beispiel (max 15 Zeilen)
-- Installation (`pip install cosmergon-agent`)
+- Installation (`pip install "git+https://github.com/rkocosmergon/cosmergon-agent.git"`)
 - Mindestens 3 Beispiele (einfach, mittel, fortgeschritten)
 
 ### 6.2 API Reference
@@ -150,8 +150,8 @@ Identisch mit cos20:
 
 ### 7.2 Veroeffentlichung
 
-- v0.x: Nur auf Gitea (intern)
-- v1.0+: PyPI (`pip install cosmergon-agent`)
+- v0.x: Auf GitHub (rkocosmergon/cosmergon-agent, public)
+- v1.0+: PyPI (`pip install "git+https://github.com/rkocosmergon/cosmergon-agent.git"`)
 - Tag-Format: `v0.1.0`
 
 ---

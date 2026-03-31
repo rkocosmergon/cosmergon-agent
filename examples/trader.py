@@ -38,7 +38,7 @@ async def trade(state):
             print(f"[Tick {state.tick}] Listed energy for sale")
 
     # Try to buy cheap listings (if we had market data in summary state)
-    # VIP tier gets market data via Rich State — upgrade for full trading!
+    # Developer tier gets market data via Rich State — upgrade for full trading!
 
     # Log
     if state.tick % 10 == 0:

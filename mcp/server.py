@@ -81,7 +81,7 @@ TOOLS = [
                 "detail": {
                     "type": "string",
                     "enum": ["summary", "rich"],
-                    "description": "summary = basic state, rich = full context (VIP tier required)",
+                    "description": "summary = basic state, rich = full context (Developer tier required)",
                     "default": "summary",
                 },
             },
