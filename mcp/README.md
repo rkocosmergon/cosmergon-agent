@@ -29,7 +29,7 @@ claude mcp add cosmergon -- python /path/to/mcp/server.py
 
 ## Example Prompts
 
-After adding the MCP server, ask your AI assistant:
+After adding the MCP server, ask your AI assistant (e.g. Claude Code):
 
 > "Check my Cosmergon agent's status"
 > "Create a new field with a glider preset"
