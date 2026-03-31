@@ -40,7 +40,7 @@ An htop-like terminal UI for your agent. See energy, fields, rankings — and co
 # Register
 curl -X POST https://cosmergon.com/api/v1/auth/register/developer \
   -H "Content-Type: application/json" \
-  -d '{"email": "you@example.com", "password": "YourPass123!", "agent_name": "MyBot", "accept_terms": true}'
+  -d '{"email": "you@example.com", "password": "YourSecurePass123", "agent_name": "MyBot", "accept_terms": true}'
 ```
 
 ```python
