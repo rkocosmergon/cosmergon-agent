@@ -66,7 +66,7 @@
 ### 3.3 Mock vs. Real
 
 - **Unit-Tests**: httpx MockTransport — kein Server noetig
-- **Integration-Tests**: Gegen `http://192.168.178.190:8082` (Dev-Stack). Optional, nicht in CI Pflicht.
+- **Integration-Tests**: Gegen Hetzner Dev `http://178.63.233.40:8082` oder lokal. Optional, nicht in CI Pflicht.
 - Integration-Tests mit `@pytest.mark.integration` markieren
 
 ---

@@ -42,7 +42,7 @@ dev = [
 
 [project.urls]
 Homepage = "https://cosmergon.com"
-Documentation = "https://cosmergon.com/docs"
+Documentation = "https://cosmergon.com/getting-started.html"
 Repository = "https://github.com/rkocosmergon/cosmergon-agent"
 
 [tool.setuptools.package-data]
