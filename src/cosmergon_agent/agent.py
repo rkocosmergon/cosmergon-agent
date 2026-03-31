@@ -60,7 +60,7 @@ class CosmergonAgent:
     def __init__(
         self,
         api_key: str | None = None,
-        base_url: str = "http://localhost:8082",
+        base_url: str = "https://cosmergon.com",
         agent_id: str | None = None,
         poll_interval: float = 10.0,
         max_retries: int = _DEFAULT_MAX_RETRIES,
@@ -69,9 +69,12 @@ class CosmergonAgent:
         # C1: Resolve API key from env var fallback (M2)
         resolved_key = api_key or os.environ.get("COSMERGON_API_KEY", "")
         if not resolved_key or not resolved_key.strip():
-            raise ValueError(
-                "api_key must be provided or set via COSMERGON_API_KEY env var"
-            )
+            # Auto-register anonymous agent if no key provided
+            resolved_key = self._auto_register_anonymous(base_url)
+            # Use agent_id from registration (GET /agents/ doesn't work for anon)
+            if not agent_id and hasattr(CosmergonAgent, "_auto_registered_agent_id"):
+                agent_id = CosmergonAgent._auto_registered_agent_id
+                del CosmergonAgent._auto_registered_agent_id
         # M1: Input validation
         if not base_url.startswith(("http://", "https://")):
             raise ValueError("base_url must start with http:// or https://")
@@ -204,6 +207,37 @@ class CosmergonAgent:
 
     async def __aexit__(self, *args: Any) -> None:
         await self.close()
+
+    # --- Auto-registration ---
+
+    @staticmethod
+    def _auto_register_anonymous(base_url: str) -> str:
+        """Register an anonymous agent and return the API key.
+
+        Called automatically when no api_key is provided.
+        The agent gets 1000 energy and a 24h session.
+        """
+        url = f"{base_url.rstrip('/')}/api/v1/auth/register/anonymous-agent"
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(url, json={})
+        if resp.status_code != 200:
+            detail = resp.json().get("detail", resp.text) if resp.headers.get("content-type", "").startswith("application/json") else resp.text
+            raise CosmergonError(
+                f"Auto-registration failed ({resp.status_code}): {detail}"
+            )
+        data = resp.json()
+        key = data.get("api_key", "")
+        if not key:
+            raise CosmergonError("Auto-registration returned no API key")
+        agent_id = data.get("agent_id")
+        logger.info(
+            "Auto-registered anonymous agent: %s (expires %s)",
+            (agent_id or "?")[:8],
+            data.get("expires_at", "?"),
+        )
+        # Store agent_id for later — _resolve_agent_id won't work for anonymous
+        CosmergonAgent._auto_registered_agent_id = agent_id
+        return key
 
     # --- Internal ---
 
