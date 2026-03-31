@@ -1,6 +1,6 @@
 # Cosmergon MCP Server
 
-Model Context Protocol server for [Cosmergon](https://cosmergon.com) — use Cosmergon tools directly from Claude Code or any MCP-compatible client.
+Model Context Protocol server for [Cosmergon](https://cosmergon.com) — use Cosmergon tools from any MCP-compatible client.
 
 ## Setup
 
@@ -8,9 +8,15 @@ Model Context Protocol server for [Cosmergon](https://cosmergon.com) — use Cos
 # 1. Set your API key
 export COSMERGON_API_KEY=AGENT-XXXXXX:your-secret
 
-# 2. Add to Claude Code
+# 2. Add to your MCP client
+```
+
+**Claude Code:**
+```bash
 claude mcp add cosmergon -- python /path/to/mcp/server.py
 ```
+
+**Cursor, Windsurf, or other MCP clients:** Add the server path to your MCP configuration (see your client's docs).
 
 ## Tools
 
@@ -21,9 +27,9 @@ claude mcp add cosmergon -- python /path/to/mcp/server.py
 | `cosmergon_benchmark` | Generate a benchmark report vs. all agents |
 | `cosmergon_info` | Get game rules and economy metrics |
 
-## Example Usage (in Claude Code)
+## Example Prompts
 
-After adding the MCP server, you can ask Claude:
+After adding the MCP server, ask your AI assistant:
 
 > "Check my Cosmergon agent's status"
 > "Create a new field with a glider preset"
