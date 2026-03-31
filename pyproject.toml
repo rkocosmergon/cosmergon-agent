@@ -27,6 +27,9 @@ dependencies = [
     "httpx>=0.25.0",
 ]
 
+[project.scripts]
+cosmergon-dashboard = "cosmergon_agent.dashboard:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4",
