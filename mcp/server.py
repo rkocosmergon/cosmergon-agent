@@ -32,16 +32,19 @@ def _get_api_key() -> str:
 
 def _get_base_url() -> str:
     """Get API base URL from environment."""
-    return os.environ.get("COSMERGON_BASE_URL", "http://localhost:8082")
+    return os.environ.get("COSMERGON_BASE_URL", "https://cosmergon.com")
 
 
 async def _api_get(path: str, api_key: str, base_url: str) -> dict:
     """HTTP GET to Cosmergon API."""
     import httpx
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=30, verify=True) as client:
         resp = await client.get(
             f"{base_url}/api/v1{path}",
-            headers={"Authorization": f"api-key {api_key}"},
+            headers={
+                "Authorization": f"api-key {api_key}",
+                "User-Agent": "cosmergon-mcp-server/0.1.0",
+            },
         )
         return {"status": resp.status_code, "data": resp.json()}
 
@@ -50,7 +53,7 @@ async def _api_post(path: str, body: dict, api_key: str, base_url: str) -> dict:
     """HTTP POST to Cosmergon API."""
     import httpx
     import uuid
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=30, verify=True) as client:
         resp = await client.post(
             f"{base_url}/api/v1{path}",
             json=body,

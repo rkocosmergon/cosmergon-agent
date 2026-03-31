@@ -76,6 +76,8 @@ class CosmergonAgent:
         # M1: Input validation
         if not base_url.startswith(("http://", "https://")):
             raise ValueError("base_url must start with http:// or https://")
+        if base_url.startswith("http://") and "localhost" not in base_url and "127.0.0.1" not in base_url:
+            logger.warning("Using unencrypted HTTP — API key will be sent in plaintext")
 
         # C1: Store key as _SensitiveStr to prevent accidental logging
         self._api_key = _SensitiveStr(resolved_key)
@@ -268,7 +270,10 @@ class CosmergonAgent:
                 )
 
                 if resp.status_code == 429:
-                    retry_after = float(resp.headers.get("Retry-After", "1"))
+                    retry_after = min(
+                        float(resp.headers.get("Retry-After", "1")),
+                        _MAX_BACKOFF,
+                    )
                     logger.warning("Rate limited, waiting %.1fs", retry_after)
                     await asyncio.sleep(retry_after)
                     continue

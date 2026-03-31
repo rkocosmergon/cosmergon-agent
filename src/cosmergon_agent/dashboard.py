@@ -120,8 +120,10 @@ class Dashboard:
             agent_task.cancel()
             try:
                 await agent_task
-            except (asyncio.CancelledError, Exception):
-                logger.debug("Agent task ended")
+            except asyncio.CancelledError:
+                logger.debug("Agent task cancelled")
+            except Exception as exc:
+                logger.warning("Agent task ended with error: %s", exc)
             await self.agent.close()
 
     # --- Key handling ---

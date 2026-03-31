@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
+from cosmergon_agent.exceptions import AuthenticationError
+
 
 class TestLangchainImportError:
     def test_cosmergon_tools_raises_without_langchain(self) -> None:
@@ -72,7 +74,7 @@ class TestResolveAgentId:
         mock_resp.json.return_value = []
         mock_client.get.return_value = mock_resp
 
-        with pytest.raises(ValueError, match="Could not resolve"):
+        with pytest.raises(AuthenticationError, match="Could not resolve"):
             _resolve_agent_id(mock_client)
 
     def test_resolve_agent_id_non_200(self) -> None:
@@ -85,7 +87,7 @@ class TestResolveAgentId:
         mock_resp.json.return_value = {"error": "unauthorized"}
         mock_client.get.return_value = mock_resp
 
-        with pytest.raises(ValueError, match="Could not resolve"):
+        with pytest.raises(AuthenticationError, match="Could not resolve"):
             _resolve_agent_id(mock_client)
 
 
