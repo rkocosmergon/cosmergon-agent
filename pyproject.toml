@@ -76,6 +76,7 @@ markers = [
 
 [tool.coverage.run]
 source = ["src/cosmergon_agent"]
+omit = ["src/cosmergon_agent/dashboard.py"]  # curses UI — requires real terminal
 
 [tool.coverage.report]
 exclude_lines = [

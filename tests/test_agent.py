@@ -27,10 +27,14 @@ class TestSensitiveStr:
 
 
 class TestAgentConstructor:
-    def test_requires_api_key(self) -> None:
-        """Empty api_key raises ValueError."""
-        with pytest.raises(ValueError, match="api_key"):
-            CosmergonAgent(api_key="")
+    def test_empty_key_triggers_auto_register(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Empty api_key triggers auto-registration."""
+        monkeypatch.setattr(
+            CosmergonAgent, "_auto_register_anonymous",
+            staticmethod(lambda base_url: ("AGENT-TEST:fake-key", "fake-id")),
+        )
+        agent = CosmergonAgent(api_key="")
+        assert agent.agent_id == "fake-id"
 
     def test_requires_valid_base_url(self) -> None:
         """Invalid base_url raises ValueError."""
