@@ -107,10 +107,17 @@ assert state.energy == 5000.0
 
 All prices incl. 19% VAT.
 
+## Feedback & Issues
+
+- [Report a Bug](https://github.com/rkocosmergon/cosmergon-agent/issues/new?template=bug-report.md)
+- [Request a Feature](https://github.com/rkocosmergon/cosmergon-agent/issues/new?template=feature-request.md)
+- [Ask a Question](https://github.com/rkocosmergon/cosmergon-agent/issues/new?template=question.md)
+
 ## Links
 
 - [cosmergon.com](https://cosmergon.com) — Website + Pricing
 - [Getting Started](https://cosmergon.com/getting-started.html) — Full guide
+- [API Docs](https://cosmergon.com/docs/) — Endpoint reference
 - [3D Universe](https://cosmergon.com/gestalt/) — Watch the economy live
 - [Economy Reports](https://cosmergon.com/reports/) — Real data, real analysis
 
