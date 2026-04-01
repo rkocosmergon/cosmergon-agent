@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://cosmergon.com/docs/
+    about: Check the API docs before opening an issue
+  - name: Getting Started
+    url: https://cosmergon.com/getting-started.html
+    about: New here? Start with the quickstart guide
