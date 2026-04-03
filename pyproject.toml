@@ -25,6 +25,7 @@ classifiers = [
 ]
 dependencies = [
     "httpx>=0.25.0",
+    "textual>=0.70.0",
 ]
 
 [project.scripts]
@@ -76,7 +77,7 @@ markers = [
 
 [tool.coverage.run]
 source = ["src/cosmergon_agent"]
-omit = ["src/cosmergon_agent/dashboard.py"]  # curses UI — requires real terminal
+omit = ["src/cosmergon_agent/dashboard.py"]  # Textual UI — requires real terminal
 
 [tool.coverage.report]
 exclude_lines = [

@@ -1,4 +1,4 @@
-"""Terminal dashboard for Cosmergon agents — htop for AI agents.
+"""Terminal dashboard for Cosmergon agents — btop-inspired Textual UI.
 
 Usage:
     cosmergon-dashboard                    # auto-register and connect
@@ -15,44 +15,31 @@ Hotkeys:
 Themes: cosmergon (default), matrix, mono, high-contrast
 Config: COSMERGON_THEME env var  |  ~/.cosmergon/dashboard.toml
 """
-
 from __future__ import annotations
 
 import argparse
-import asyncio
-import curses
 import logging
 import os
 import webbrowser
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
+
+from textual import work
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Horizontal
+from textual.screen import ModalScreen
+from textual.widgets import Footer, Label, Static
 
 from cosmergon_agent import CosmergonAgent, __version__
 from cosmergon_agent.state import GameState
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-_CHECK = "✓"
-_CROSS = "✗"
-_BULLET_ON = "●"
-_BULLET_OFF = "○"
-_ARROW = "→"
-
-_DRAW_INTERVAL = 0.1  # seconds between redraws (10 fps)
-_MAX_LOG = 50
+_MAX_LOG = 80
 _MAX_FIELDS = 5
-_MAX_SELECT = 9
-_ENERGY_FLASH_TICKS = 5  # 0.5 s at 10 fps
-_HEARTBEAT_TICKS = 20  # 2 s period
-
 _PRESETS = ["block", "blinker", "toad", "glider", "r_pentomino", "pentadecathlon", "pulsar"]
-
 _COMPASS_PRESETS = ["attack", "defend", "grow", "trade", "cooperate", "explore", "autonomous"]
 _COMPASS_DISPLAY = {
     "attack": "⚔  Attack",
@@ -64,190 +51,57 @@ _COMPASS_DISPLAY = {
     "autonomous": "~  Autonomous",
 }
 
-# ---------------------------------------------------------------------------
-# Theme system
-# ---------------------------------------------------------------------------
 
-# curses color-pair indices — semantic names, never use raw numbers in drawing code
-_CP_RED = 1
-_CP_YELLOW = 2
-_CP_GREEN = 3
-_CP_CYAN = 4
-_CP_WHITE = 5
-_CP_MAGENTA = 6
-_CP_ORANGE = 7  # 256-color orange; falls back to yellow on 8-color terminals
+# ---------------------------------------------------------------------------
+# Theme system — Rich markup color names
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class Theme:
-    """Named color slots. Every draw call uses these — no magic numbers."""
-
     name: str
-    cmd: int  # Hotkeys / clickable actions
-    guide: int  # Onboarding hints, first-action highlight
-    pos: int  # Positive / gain
-    warn: int  # Warning / loss / error
-    struct: int  # Headers, separators
-    data: int  # Neutral data text
+    cmd: str    # hotkeys / clickable
+    guide: str  # onboarding highlight
+    pos: str    # positive / gain
+    warn: str   # warning / loss
+    struct: str # headers / separators
+    data: str   # neutral data text
 
 
 THEMES: dict[str, Theme] = {
-    "cosmergon": Theme(
-        name="cosmergon",
-        cmd=_CP_CYAN,
-        guide=_CP_ORANGE,  # orange if 256-color, else yellow
-        pos=_CP_GREEN,
-        warn=_CP_RED,
-        struct=_CP_WHITE,
-        data=_CP_WHITE,
-    ),
-    "matrix": Theme(
-        name="matrix",
-        cmd=_CP_GREEN,
-        guide=_CP_GREEN,
-        pos=_CP_GREEN,
-        warn=_CP_RED,
-        struct=_CP_GREEN,
-        data=_CP_GREEN,
-    ),
-    "mono": Theme(
-        name="mono",
-        cmd=_CP_WHITE,
-        guide=_CP_WHITE,
-        pos=_CP_WHITE,
-        warn=_CP_WHITE,
-        struct=_CP_WHITE,
-        data=_CP_WHITE,
-    ),
-    "high-contrast": Theme(
-        name="high-contrast",
-        cmd=_CP_YELLOW,
-        guide=_CP_CYAN,
-        pos=_CP_GREEN,
-        warn=_CP_RED,
-        struct=_CP_WHITE,
-        data=_CP_WHITE,
-    ),
-}
-
-_COLOR_NAMES: dict[str, int] = {
-    "red": _CP_RED,
-    "yellow": _CP_YELLOW,
-    "green": _CP_GREEN,
-    "cyan": _CP_CYAN,
-    "white": _CP_WHITE,
-    "magenta": _CP_MAGENTA,
-    "orange": _CP_ORANGE,
+    "cosmergon": Theme("cosmergon", "cyan", "yellow", "green", "red", "white", "white"),
+    "matrix":    Theme("matrix", "green", "bright_green", "green", "red", "green", "green"),
+    "mono":      Theme("mono", "white", "white", "white", "white", "white", "white"),
+    "high-contrast": Theme("high-contrast", "yellow", "cyan", "green", "red", "white", "white"),
 }
 
 
 def _load_theme(cli_theme: str | None = None) -> Theme:
     """Resolve theme: CLI arg > COSMERGON_THEME env > ~/.cosmergon/dashboard.toml > default."""
-    if cli_theme:
-        return THEMES.get(cli_theme, THEMES["cosmergon"])
-
+    if cli_theme and cli_theme in THEMES:
+        return THEMES[cli_theme]
     env = os.environ.get("COSMERGON_THEME")
-    if env:
-        return THEMES.get(env, THEMES["cosmergon"])
-
+    if env and env in THEMES:
+        return THEMES[env]
     cfg = Path.home() / ".cosmergon" / "dashboard.toml"
     if cfg.exists():
         try:
             try:
-                import tomllib  # Python 3.11+
+                import tomllib
             except ImportError:
-                try:
-                    import tomli as tomllib  # type: ignore[no-redef]
-                except ImportError:
-                    return THEMES["cosmergon"]
+                import tomli as tomllib  # type: ignore[no-redef]
             with cfg.open("rb") as fh:
                 data = tomllib.load(fh)
-            dash = data.get("dashboard", {})
-            name = dash.get("theme")
+            name = data.get("dashboard", {}).get("theme")
             if name and name in THEMES:
                 return THEMES[name]
-            # Custom theme: inherit from cosmergon, override named slots
-            custom = dash.get("custom", {})
-            if custom:
-                base = THEMES["cosmergon"]
-                slots = {
-                    s: _COLOR_NAMES.get(custom[s], getattr(base, s))
-                    for s in ("cmd", "guide", "pos", "warn", "struct", "data")
-                    if s in custom
-                }
-                return Theme(
-                    name="custom",
-                    **{
-                        **{
-                            "cmd": base.cmd,
-                            "guide": base.guide,
-                            "pos": base.pos,
-                            "warn": base.warn,
-                            "struct": base.struct,
-                            "data": base.data,
-                        },
-                        **slots,
-                    },
-                )
         except Exception:
             pass
-
     return THEMES["cosmergon"]
 
 
-def _init_colors(theme: Theme) -> None:
-    """Initialise all curses color pairs. Call once after curses.start_color()."""
-    curses.start_color()
-    curses.use_default_colors()
-    curses.init_pair(_CP_RED, curses.COLOR_RED, -1)
-    curses.init_pair(_CP_YELLOW, curses.COLOR_YELLOW, -1)
-    curses.init_pair(_CP_GREEN, curses.COLOR_GREEN, -1)
-    curses.init_pair(_CP_CYAN, curses.COLOR_CYAN, -1)
-    curses.init_pair(_CP_WHITE, curses.COLOR_WHITE, -1)
-    curses.init_pair(_CP_MAGENTA, curses.COLOR_MAGENTA, -1)
-    # Orange: xterm-256 color 208 if available, else yellow
-    orange_fg = 208 if curses.COLORS >= 256 else curses.COLOR_YELLOW
-    curses.init_pair(_CP_ORANGE, orange_fg, -1)
-
-
-# ---------------------------------------------------------------------------
-# Animation state
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class _AnimState:
-    """All animation counters in one place. Driven by the draw loop (no extra tasks)."""
-
-    draw_tick: int = 0
-    energy_flash: int = 0
-    energy_flash_positive: bool = True
-    last_energy: float = 0.0
-    pending: dict[str, str] = field(default_factory=dict)  # log_id → label
-
-    def tick(self) -> None:
-        self.draw_tick += 1
-        if self.energy_flash > 0:
-            self.energy_flash -= 1
-
-    @property
-    def spinner(self) -> str:
-        return _SPINNER[self.draw_tick % len(_SPINNER)]
-
-    @property
-    def heartbeat(self) -> str:
-        return _BULLET_ON if (self.draw_tick // _HEARTBEAT_TICKS) % 2 == 0 else _BULLET_OFF
-
-    def note_energy(self, energy: float) -> None:
-        if self.last_energy and energy != self.last_energy:
-            self.energy_flash = _ENERGY_FLASH_TICKS
-            self.energy_flash_positive = energy > self.last_energy
-        self.last_energy = energy
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def _c(color: str, text: str) -> str:
+    return f"[{color}]{text}[/{color}]"
 
 
 def _energy_bar(energy: float, max_e: float = 5000.0, width: int = 8) -> str:
@@ -257,202 +111,385 @@ def _energy_bar(energy: float, max_e: float = 5000.0, width: int = 8) -> str:
     return "▓" * full + ("▒" if half else "") + "░" * max(0, width - full - half)
 
 
-class _QuitDashboardError(Exception):
-    pass
-
-
 # ---------------------------------------------------------------------------
-# Dashboard
+# Modals
 # ---------------------------------------------------------------------------
 
 
-class Dashboard:
-    """Curses-based agent dashboard wrapping CosmergonAgent."""
+class SelectModal(ModalScreen):
+    """Numbered selection overlay — dismisses with index (int) or None (Esc)."""
 
-    def __init__(
-        self,
-        api_key: str | None = None,
-        base_url: str = "https://cosmergon.com",
-        theme: Theme | None = None,
-    ) -> None:
-        self.agent = CosmergonAgent(api_key=api_key, base_url=base_url, poll_interval=10.0)
-        self._theme = theme or THEMES["cosmergon"]
-        self._anim = _AnimState()
-        self._log: list[tuple[str, int]] = []  # (text, color_pair_index)
+    DEFAULT_CSS = """
+    SelectModal {
+        align: center middle;
+    }
+    SelectModal > #dialog {
+        width: 44;
+        height: auto;
+        max-height: 20;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    """
+
+    def __init__(self, title: str, options: list[str]) -> None:
+        super().__init__()
+        self._title = title
+        self._options = options[:9]
+
+    def compose(self) -> ComposeResult:
+        with Static(id="dialog"):
+            yield Label(f"[bold]{self._title}[/bold]")
+            yield Label("")
+            for i, opt in enumerate(self._options):
+                yield Label(f"[cyan][{i + 1}][/cyan] {opt}")
+            yield Label("")
+            yield Label("[dim][1-9] wählen  [Esc] zurück[/dim]")
+
+    def on_key(self, event: Any) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+        elif event.key.isdigit():
+            idx = int(event.key) - 1
+            if 0 <= idx < len(self._options):
+                self.dismiss(idx)
+
+
+class HelpModal(ModalScreen):
+    """Help overlay."""
+
+    DEFAULT_CSS = """
+    HelpModal {
+        align: center middle;
+    }
+    HelpModal > #dialog {
+        width: 52;
+        height: auto;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    """
+
+    def __init__(self, theme_name: str) -> None:
+        super().__init__()
+        self._theme_name = theme_name
+
+    def compose(self) -> ComposeResult:
+        lines = [
+            "[bold]COSMERGON DASHBOARD[/bold]",
+            "",
+            "[cyan][C][/cyan]  Compass-Richtung setzen",
+            "[cyan][P][/cyan]  Zellen auf Feld platzieren",
+            "[cyan][F][/cyan]  Neues Feld erstellen",
+            "[cyan][E][/cyan]  Entity weiterentwickeln",
+            "[cyan][Space][/cyan]  Pause / Fortsetzen",
+            "[cyan][U][/cyan]  Upgrade → Developer (öffnet Browser)",
+            "[cyan][R][/cyan]  Daten aktualisieren",
+            "[cyan][Q][/cyan]  Beenden",
+            "",
+            f"[dim]Theme: {self._theme_name}   SDK: {__version__}[/dim]",
+            "[dim]Themes: cosmergon  matrix  mono  high-contrast[/dim]",
+            "",
+            "[dim]Taste drücken zum Schließen[/dim]",
+        ]
+        with Static(id="dialog"):
+            for line in lines:
+                yield Label(line)
+
+    def on_key(self, event: Any) -> None:
+        self.dismiss(None)
+
+
+# ---------------------------------------------------------------------------
+# Dashboard App
+# ---------------------------------------------------------------------------
+
+
+class CosmergonDashboard(App):
+    """btop-inspired Textual dashboard for Cosmergon agents."""
+
+    DEFAULT_CSS = """
+    Screen {
+        background: #0d0d0d;
+        layout: vertical;
+    }
+
+    #top-row {
+        height: 14;
+        min-height: 10;
+    }
+
+    #agent-panel {
+        width: 1fr;
+        border: solid #2a2a2a;
+        padding: 0 1;
+        overflow: hidden hidden;
+    }
+
+    #economy-panel {
+        width: 1fr;
+        border: solid #2a2a2a;
+        padding: 0 1;
+        overflow: hidden hidden;
+    }
+
+    #journal-panel {
+        border: solid #2a2a2a;
+        padding: 0 1;
+        height: 1fr;
+        overflow: hidden hidden;
+    }
+
+    #status-bar {
+        height: 1;
+        background: #111111;
+        padding: 0 1;
+    }
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("c", "compass", "Compass", show=True),
+        Binding("p", "place_cells", "Place", show=True),
+        Binding("f", "create_field", "Field", show=True),
+        Binding("e", "evolve", "Evolve", show=True),
+        Binding("u", "upgrade", "Upgrade", show=True),
+        Binding("space", "pause", "Pause", show=True),
+        Binding("r", "refresh_now", "Refresh", show=False),
+        Binding("question_mark", "help", "Help", show=True),
+        Binding("q", "quit", "Quit", show=True),
+    ]
+
+    def __init__(self, agent: CosmergonAgent, theme: Theme) -> None:
+        super().__init__()
+        self.agent = agent
+        self._theme = theme
+        self._log: list[str] = []
         self._paused = False
-        self._compass_preset: str = "autonomous"
-        self._compass_ever_set: bool = False
-        self._last_decision: dict | None = None
-        self._register_handlers()
+        self._compass_preset = "autonomous"
+        self._compass_ever_set = False
+        self._last_energy: float = 0.0
 
-    def _register_handlers(self) -> None:
+    def compose(self) -> ComposeResult:
+        with Horizontal(id="top-row"):
+            yield Static("", id="agent-panel")
+            yield Static("", id="economy-panel")
+        yield Static("", id="journal-panel")
+        yield Static("", id="status-bar")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self._register_agent_handlers()
+        self._run_agent()
+        self.set_interval(0.5, self._redraw)
+        self._add_log(_c(self._theme.guide, "Connecting to cosmergon.com..."))
+
+    def _register_agent_handlers(self) -> None:
         @self.agent.on_tick
         async def _tick(state: GameState) -> None:
-            self._anim.note_energy(state.energy)
-            delta = state.energy - self._anim.last_energy
+            delta = state.energy - self._last_energy
+            self._last_energy = state.energy
             sign = "+" if delta >= 0 else ""
             color = self._theme.pos if delta >= 0 else self._theme.warn
-            self._add_log(f"[{state.tick}] {sign}{delta:.0f}E  energy {state.energy:.0f}", color)
-            # Fetch last decision without blocking the tick handler
-            asyncio.create_task(self._refresh_decision())  # noqa: RUF006
+            self._add_log(
+                _c(color, f"[tick {state.tick}] {sign}{delta:.0f}E  {state.energy:,.0f} total")
+            )
 
         @self.agent.on_error
         async def _error(result: Any) -> None:
-            self._add_log(f"{_CROSS} {result.action}: {result.error_message}", self._theme.warn)
+            self._add_log(_c(self._theme.warn, f"✗ {result.action}: {result.error_message}"))
 
-    async def _refresh_decision(self) -> None:
+    @work(exclusive=True)
+    async def _run_agent(self) -> None:
         try:
-            d = await self.agent.get_last_decision()
-            if d:
-                self._last_decision = d
-        except Exception:
-            pass
+            await self.agent.start()
+        except Exception as exc:
+            self._add_log(_c(self._theme.warn, f"Agent error: {exc}"))
 
-    def _add_log(self, msg: str, color: int) -> None:
-        self._log.append((msg, color))
+    def _add_log(self, msg: str) -> None:
+        self._log.append(msg)
         if len(self._log) > _MAX_LOG:
             self._log = self._log[-_MAX_LOG:]
 
-    def run(self) -> None:
-        try:
-            curses.wrapper(self._main)
-        except KeyboardInterrupt:
-            pass
+    # --- Redraw ---
 
-    def _main(self, stdscr: curses.window) -> None:
-        stdscr.nodelay(True)
-        curses.curs_set(0)
-        _init_colors(self._theme)
-        asyncio.run(self._loop(stdscr))
+    def _redraw(self) -> None:
+        state = self.agent.state
+        self._draw_agent_panel(state)
+        self._draw_economy_panel(state)
+        self._draw_journal_panel(state)
+        self._draw_status_bar(state)
 
-    async def _loop(self, stdscr: curses.window) -> None:
-        agent_task = asyncio.create_task(self.agent.start())
-        self._add_log("Connecting...", self._theme.data)
-        try:
-            while True:
-                key = stdscr.getch()
-                if key != -1 and await self._handle_key(key, stdscr) == "quit":
-                    break
-                self._anim.tick()
-                self._draw(stdscr)
-                await asyncio.sleep(_DRAW_INTERVAL)
-        except _QuitDashboardError:
-            pass
-        finally:
-            self.agent._running = False
-            agent_task.cancel()
-            try:
-                await agent_task
-            except (asyncio.CancelledError, Exception):
-                pass
-            await self.agent.close()
+    def _draw_agent_panel(self, state: GameState | None) -> None:
+        t = self._theme
+        lines = [_c(t.struct, "[bold]═ AGENT[/bold]")]
 
-    # --- Key handling ---
+        if not state:
+            lines.append(_c(t.guide, "Connecting..."))
+            self.query_one("#agent-panel", Static).update("\n".join(lines))
+            return
 
-    async def _handle_key(self, key: int, stdscr: curses.window) -> str | None:
-        ch = chr(key).upper() if 32 <= key < 127 else ""
-        if ch == "Q":
-            return "quit"
-        if ch == "C":
-            await self._action_compass(stdscr)
-        elif ch == "P":
-            await self._action_place_cells(stdscr)
-        elif ch == "F":
-            await self._action_create_field(stdscr)
-        elif ch == "E":
-            await self._action_evolve(stdscr)
-        elif ch == "U":
-            await self._action_upgrade()
-        elif ch == " ":
-            await self._toggle_pause()
-        elif ch == "R":
-            asyncio.create_task(self._refresh_decision())  # noqa: RUF006
-            self._add_log("Refreshing...", self._theme.data)
-        elif ch == "?":
-            self._show_help(stdscr)
-        return None
+        # Status + energy
+        status = "PAUSED" if self._paused else "AKTIV"
+        sc = t.warn if self._paused else t.pos
+        bar = _energy_bar(state.energy)
+        lines.append(f"{_c(sc, f'● {status}')}  {_c(t.data, f'{state.energy:,.0f} E  {bar}')}")
 
-    async def _toggle_pause(self) -> None:
-        action = "resume" if self._paused else "pause"
-        r = await self.agent.act(action)
-        self._paused = not self._paused
-        color = self._theme.pos if r.success else self._theme.warn
-        self._add_log(f"{_CHECK if r.success else _CROSS} {action}", color)
+        if state.ranking:
+            lines.append(
+                _c(t.data, f"T{state.ranking.player_tier} {state.ranking.tier_name}"
+                   f"  Score: {state.ranking.player_score:,.0f}")
+            )
+        lines.append(_c("dim", f"Agent: {(self.agent.agent_id or '?')[:24]}"))
+        lines.append("")
 
-    async def _action_compass(self, stdscr: curses.window) -> None:
+        # Compass
+        compass_label = _COMPASS_DISPLAY.get(self._compass_preset, self._compass_preset)
+        lines.append(_c(t.data, f"Compass: {compass_label}"))
+        if not self._compass_ever_set:
+            lines.append(_c(t.guide, "[bold]→ [C] Richtung setzen[/bold]"))
+        else:
+            lines.append(_c(t.cmd, "[C] ändern"))
+
+        # Fields
+        if state.fields:
+            lines.append("")
+            lines.append(_c(t.struct, "[bold]═ FELDER[/bold]"))
+            for f in state.fields[:_MAX_FIELDS]:
+                tier = f"T{f.entity_tier or 0}"
+                etype = (f.entity_type or "novice")[:8]
+                bar_f = _energy_bar(f.active_cell_count, 200, 6)
+                lines.append(
+                    _c(t.data, f"  {f.id[:8]} {tier} {etype:8s} {bar_f} {f.active_cell_count}c")
+                )
+
+        self.query_one("#agent-panel", Static).update("\n".join(lines))
+
+    def _draw_economy_panel(self, state: GameState | None) -> None:
+        t = self._theme
+        lines = [_c(t.struct, "[bold]═ WIRTSCHAFT[/bold]")]
+
+        if state and state.world_briefing:
+            wb = state.world_briefing
+            lines.append(_c(t.data, f"Rang:  #{wb.your_rank} / {wb.total_agents}"))
+            if wb.top_agent:
+                lines.append(_c(t.data, f"Top:   {wb.top_agent[:32]}"))
+            lines.append(_c(t.data, f"Markt: {wb.market_summary[:32]}"))
+            if wb.last_event:
+                lines.append(_c(t.warn, f"Event: {wb.last_event[:32]}"))
+            if wb.tip:
+                lines.append("")
+                lines.append(_c(t.data, f"→ {wb.tip[:42]}"))
+
+        if state and state.subscription_tier == "free":
+            lines.append("")
+            lines.append(_c(t.guide, "[bold][U] Upgrade → Developer[/bold]"))
+
+        self.query_one("#economy-panel", Static).update("\n".join(lines))
+
+    def _draw_journal_panel(self, state: GameState | None) -> None:
+        t = self._theme
+        lines = [_c(t.struct, "[bold]═ JOURNAL[/bold]")]
+
+        # Learned rules — show last 3
+        learned = (state.learned_rules if state else None) or []
+        if learned:
+            lines.append(_c(t.struct, "Learned Rules:"))
+            for rule in learned[-3:]:
+                lines.append(_c(t.data, f"  • {rule[:90]}"))
+            lines.append("")
+
+        # Activity feed
+        lines.append(_c(t.struct, "Activity:"))
+        feed = self._log[-10:]
+        if feed:
+            lines.extend(feed)
+        else:
+            lines.append("[dim]Warte auf erste Ereignisse...[/dim]")
+
+        self.query_one("#journal-panel", Static).update("\n".join(lines))
+
+    def _draw_status_bar(self, state: GameState | None) -> None:
+        agent_id = (self.agent.agent_id or "?")[:8]
+        tier = (state.subscription_tier if state else "?")
+        tick = state.tick if state else "-"
+        sep = " │ "
+        tname = self._theme.name
+        segments = [agent_id, f"tick {tick}", f"tier {tier}", f"sdk {__version__}",
+                    f"theme {tname}"]
+        self.query_one("#status-bar", Static).update(f"[dim]{sep.join(segments)}[/dim]")
+
+    # --- Actions ---
+
+    async def action_compass(self) -> None:
         labels = [_COMPASS_DISPLAY.get(p, p) for p in _COMPASS_PRESETS]
-        idx = self._select(stdscr, "Compass — Richtung wählen", labels)
+        idx = await self.push_screen_wait(SelectModal("Compass — Richtung wählen", labels))
         if idx is None:
             return
         preset = _COMPASS_PRESETS[idx]
-        log_id = f"compass_{preset}"
-        self._anim.pending[log_id] = f"Compass → {preset}"
-        self._add_log(f"{self._anim.spinner} compass → {preset}...", self._theme.guide)
+        self._add_log(_c(self._theme.guide, f"⠋ compass → {preset}..."))
         try:
             result = await self.agent.set_compass(preset)
             self._compass_preset = preset
             self._compass_ever_set = True
             explanation = (result.get("explanation") or "")[:60]
-            self._add_log(f"{_CHECK} compass: {preset}  {explanation}", self._theme.pos)
+            self._add_log(_c(self._theme.pos, f"✓ compass: {preset}  {explanation}"))
         except Exception as exc:
-            self._add_log(f"{_CROSS} compass failed: {exc}", self._theme.warn)
-        finally:
-            self._anim.pending.pop(log_id, None)
+            self._add_log(_c(self._theme.warn, f"✗ compass failed: {exc}"))
 
-    async def _action_place_cells(self, stdscr: curses.window) -> None:
+    async def action_place_cells(self) -> None:
         state = self.agent.state
         if not state or not state.fields:
-            self._add_log("No fields — press [F] first", self._theme.warn)
+            self._add_log(_c(self._theme.warn, "No fields — press [F] first"))
             return
-        fi = self._select(
-            stdscr,
-            "Field",
-            [f"{f.id[:8]} T{f.entity_tier or 0} ({f.active_cell_count}c)" for f in state.fields],
-        )
+        field_labels = [
+            f"{f.id[:8]} T{f.entity_tier or 0} ({f.active_cell_count}c)" for f in state.fields
+        ]
+        fi = await self.push_screen_wait(SelectModal("Field", field_labels))
         if fi is None:
             return
-        pi = self._select(stdscr, "Preset", _PRESETS)
+        pi = await self.push_screen_wait(SelectModal("Preset", _PRESETS))
         if pi is None:
             return
         r = await self.agent.act("place_cells", field_id=state.fields[fi].id, preset=_PRESETS[pi])
-        color = self._theme.pos if r.success else self._theme.warn
-        self._add_log(f"{_CHECK if r.success else _CROSS} place_cells({_PRESETS[pi]})", color)
+        icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
+        self._add_log(_c(color, f"{icon} place_cells({_PRESETS[pi]})"))
 
-    async def _action_create_field(self, stdscr: curses.window) -> None:
+    async def action_create_field(self) -> None:
         state = self.agent.state
         if not state:
             return
         cubes = state.cubes or state.universe_cubes
         if not cubes:
-            self._add_log("No cubes available", self._theme.warn)
+            self._add_log(_c(self._theme.warn, "No cubes available"))
             return
-        ci = self._select(stdscr, "Cube", [f"{c.id[:8]} {c.name}" for c in cubes])
+        cube_labels = [f"{c.id[:8]} {c.name}" for c in cubes]
+        ci = await self.push_screen_wait(SelectModal("Cube", cube_labels))
         if ci is None:
             return
         r = await self.agent.act("create_field", cube_id=cubes[ci].id)
-        color = self._theme.pos if r.success else self._theme.warn
-        self._add_log(f"{_CHECK if r.success else _CROSS} create_field", color)
+        icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
+        self._add_log(_c(color, f"{icon} create_field"))
 
-    async def _action_evolve(self, stdscr: curses.window) -> None:
+    async def action_evolve(self) -> None:
         state = self.agent.state
         if not state or not state.fields:
-            self._add_log("No fields to evolve", self._theme.warn)
+            self._add_log(_c(self._theme.warn, "No fields to evolve"))
             return
-        fi = self._select(
-            stdscr,
-            "Evolve",
-            [f"{f.id[:8]} T{f.entity_tier or 0} reife={f.reife_score}" for f in state.fields],
-        )
+        evolve_labels = [
+            f"{f.id[:8]} T{f.entity_tier or 0} reife={f.reife_score}" for f in state.fields
+        ]
+        fi = await self.push_screen_wait(SelectModal("Evolve", evolve_labels))
         if fi is None:
             return
         r = await self.agent.act("evolve", field_id=state.fields[fi].id)
-        color = self._theme.pos if r.success else self._theme.warn
+        icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
         msg = r.error_message or "ok"
-        self._add_log(f"{_CHECK if r.success else _CROSS} evolve -> {msg}", color)
+        self._add_log(_c(color, f"{icon} evolve → {msg}"))
 
-    async def _action_upgrade(self) -> None:
-        """Open Stripe Checkout in browser via the authenticated upgrade-link endpoint."""
-        self._add_log(f"{self._anim.spinner} Upgrade-Seite wird geöffnet...", self._theme.guide)
+    async def action_upgrade(self) -> None:
+        self._add_log(_c(self._theme.guide, "⠋ Upgrade-Seite wird geöffnet..."))
         try:
             resp = await self.agent._request(
                 "GET",
@@ -462,292 +499,22 @@ class Dashboard:
             )
             url = resp.headers.get("location", "https://cosmergon.com/pricing")
             webbrowser.open(url)
-            short = url[:70] + "…" if len(url) > 70 else url
-            self._add_log(f"{_CHECK} Browser geöffnet", self._theme.pos)
-            self._add_log(f"  {short}", self._theme.data)
+            self._add_log(_c(self._theme.pos, "✓ Browser geöffnet"))
         except Exception as exc:
-            self._add_log(f"{_CROSS} Upgrade-Link Fehler: {exc}", self._theme.warn)
+            self._add_log(_c(self._theme.warn, f"✗ Upgrade-Link Fehler: {exc}"))
 
-    # --- Drawing ---
+    async def action_pause(self) -> None:
+        action = "resume" if self._paused else "pause"
+        r = await self.agent.act(action)
+        self._paused = not self._paused
+        icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
+        self._add_log(_c(color, f"{icon} {action}"))
 
-    def _draw(self, stdscr: curses.window) -> None:
-        try:
-            stdscr.erase()
-            h, w = stdscr.getmaxyx()
-            if h < 15 or w < 50:
-                stdscr.addstr(0, 0, "Terminal too small (min 50x15)")
-                stdscr.refresh()
-                return
-            state = self.agent.state
-            self._draw_title(stdscr, w, state)
-            if not state:
-                self._safe_str(stdscr, 3, 2, "Connecting...", self._theme.guide)
-                self._draw_log(stdscr, 6, h, w)
-                self._draw_footer(stdscr, h, w, state)
-                stdscr.refresh()
-                return
-            mid = w // 2
-            row_agent = self._draw_agent_panel(stdscr, state, mid - 2)
-            row_right = self._draw_right_panel(stdscr, state, mid, w)
-            log_start = max(row_agent, row_right) + 1
-            self._draw_log(stdscr, log_start, h - 3, w)
-            self._draw_footer(stdscr, h, w, state)
-            stdscr.refresh()
-        except curses.error:
-            logger.debug("Draw interrupted (terminal resize)")
+    async def action_refresh_now(self) -> None:
+        self._add_log(_c(self._theme.data, "Refreshing..."))
 
-    def _draw_title(self, stdscr: curses.window, w: int, state: GameState | None) -> None:
-        title = " COSMERGON "
-        tick = f" Tick {state.tick} " if state else " connecting… "
-        quit_hint = " [Q]uit "
-        self._safe_str(stdscr, 0, 0, "─" * w, self._theme.struct)
-        self._safe_str(stdscr, 0, 2, title, self._theme.struct, curses.A_BOLD)
-        self._safe_str(stdscr, 0, 2 + len(title), quit_hint, self._theme.cmd)
-        if w > len(title) + len(quit_hint) + len(tick) + 6:
-            self._safe_str(stdscr, 0, w - len(tick) - 2, tick, self._theme.struct)
-
-    def _draw_agent_panel(self, stdscr: curses.window, state: GameState, width: int) -> int:
-        t = self._theme
-        y = 2
-        self._safe_str(stdscr, y, 1, "═ AGENT ", t.struct, curses.A_BOLD)
-        y += 1
-
-        # Heartbeat + status
-        hb = self._anim.heartbeat
-        status = "PAUSED" if self._paused else "AKTIV"
-        status_color = t.warn if self._paused else t.pos
-        self._safe_str(stdscr, y, 3, f"{hb} ", t.pos)
-        self._safe_str(stdscr, y, 5, status, status_color, curses.A_BOLD)
-        y += 1
-
-        # Energy bar with flash
-        bar = _energy_bar(state.energy)
-        if self._anim.energy_flash > 0:
-            e_color = t.pos if self._anim.energy_flash_positive else t.warn
-            e_attr = curses.A_BOLD
-        else:
-            e_color, e_attr = t.data, 0
-        self._safe_str(stdscr, y, 3, f"Energie: {bar}  {state.energy:,.0f} E", e_color, e_attr)
-        y += 1
-
-        tier_str = f"T{state.ranking.player_tier} {state.ranking.tier_name}"
-        self._kv(stdscr, y, 3, "Tier ", tier_str, t.data)
-        y += 1
-        self._kv(stdscr, y, 3, "Score", f"{state.ranking.player_score:,.0f}", t.data)
-        y += 1
-        self._kv(stdscr, y, 3, "Agent", state.agent_id[:16], t.data)
-        y += 2
-
-        # Compass — highlighted until first use
-        compass_label = _COMPASS_DISPLAY.get(self._compass_preset, self._compass_preset)
-        self._safe_str(stdscr, y, 3, f"Compass: {compass_label}", t.data)
-        y += 1
-        if not self._compass_ever_set:
-            hint = f"{_ARROW} [C] Richtung setzen"
-            self._safe_str(stdscr, y, 3, hint, t.guide, curses.A_BOLD)
-        else:
-            self._safe_str(stdscr, y, 3, "[C] ändern", t.cmd)
-        y += 1
-
-        # Pending spinner entries
-        for label in list(self._anim.pending.values()):
-            self._safe_str(stdscr, y, 3, f"{self._anim.spinner} {label}", t.guide)
-            y += 1
-
-        # Fields
-        if state.fields:
-            y += 1
-            self._safe_str(stdscr, y, 1, "═ FELDER ", t.struct, curses.A_BOLD)
-            y += 1
-            for f in state.fields[:_MAX_FIELDS]:
-                tier = f"T{f.entity_tier or 0}"
-                etype = (f.entity_type or "novice")[:8]
-                bar_f = _energy_bar(f.active_cell_count, 200, 6)
-                line = f"  {f.id[:8]} {tier} {etype:8s} {bar_f} {f.active_cell_count}c"
-                self._safe_str(stdscr, y, 1, line[:width], t.data)
-                y += 1
-
-        return y
-
-    def _draw_right_panel(self, stdscr: curses.window, state: GameState, x: int, w: int) -> int:
-        t = self._theme
-        panel_w = w - x - 2
-        y = 2
-
-        # Economy / world briefing
-        self._safe_str(stdscr, y, x, "═ WIRTSCHAFT ", t.struct, curses.A_BOLD)
-        y += 1
-        if state.world_briefing:
-            wb = state.world_briefing
-            self._kv(stdscr, y, x + 1, "Rang  ", f"#{wb.your_rank} / {wb.total_agents}", t.data)
-            y += 1
-            if wb.top_agent:
-                self._kv(stdscr, y, x + 1, "Top   ", wb.top_agent[: panel_w - 10], t.data)
-                y += 1
-            self._kv(stdscr, y, x + 1, "Markt ", wb.market_summary[: panel_w - 10], t.data)
-            y += 1
-            if wb.last_event:
-                self._kv(stdscr, y, x + 1, "Event ", wb.last_event[: panel_w - 10], t.warn)
-                y += 1
-            if wb.tip:
-                tip = wb.tip[: panel_w - 3]
-                self._safe_str(stdscr, y, x + 1, f"→ {tip}", t.data)
-                y += 1
-        y += 1
-
-        # Last decision
-        self._safe_str(stdscr, y, x, "═ LETZTE ENTSCHEIDUNG ", t.struct, curses.A_BOLD)
-        y += 1
-        if self._last_decision:
-            d = self._last_decision
-            action = d.get("action", "?")
-            tick_d = d.get("tick", "?")
-            outcome = d.get("outcome") or ""
-            reasoning = d.get("reasoning") or ""
-
-            self._safe_str(stdscr, y, x + 1, f"tick {tick_d}: {action}", t.data, curses.A_BOLD)
-            y += 1
-
-            # Reasoning — show first 80 chars; tease paid feature for free tier
-            if reasoning:
-                snippet = reasoning[: panel_w - 3]
-                self._safe_str(stdscr, y, x + 1, f'"{snippet}"', t.data)
-                y += 1
-                if len(reasoning) > panel_w - 3 and state.subscription_tier == "free":
-                    self._safe_str(stdscr, y, x + 1, "[U] voller Prompt → Developer", t.guide)
-                    y += 1
-            if outcome:
-                self._safe_str(stdscr, y, x + 1, outcome[: panel_w - 2], t.pos)
-                y += 1
-        else:
-            self._safe_str(stdscr, y, x + 1, "Warte auf erste Entscheidung…", t.data)
-            y += 1
-
-        return y
-
-    def _draw_log(self, stdscr: curses.window, start_y: int, end_y: int, w: int) -> None:
-        if start_y >= end_y:
-            return
-        self._safe_str(stdscr, start_y, 1, "═ LOG ", self._theme.struct, curses.A_BOLD)
-        available = end_y - start_y - 1
-        entries = self._log[-available:] if available > 0 else []
-        for i, (msg, color) in enumerate(entries):
-            self._safe_str(stdscr, start_y + 1 + i, 3, msg[: w - 5], color)
-
-    def _draw_footer(self, stdscr: curses.window, h: int, w: int, state: GameState | None) -> None:
-        t = self._theme
-        sep_y = h - 3
-        self._safe_str(stdscr, sep_y, 0, "─" * w, t.struct)
-
-        # Single hotkey line — all cyan
-        tier = state.subscription_tier if state else "free"
-        upgrade = "  [U] Upgrade" if tier in ("free", "anonymous") else ""
-        hotkeys = f"[C]  [P]lace  [F]ield  [E]volve  [Space]Pause  [R]efresh  [?]{upgrade}"
-        self._safe_str(stdscr, sep_y + 1, 2, hotkeys[: w - 4], t.cmd)
-
-        # Status bar
-        agent_id = (self.agent.agent_id or "?")[:8]
-        status = f" {agent_id} │ sdk {__version__} │ theme {self._theme.name} "
-        self._safe_str(stdscr, h - 1, 0, "─" * w, t.struct)
-        if len(status) < w - 4:
-            self._safe_str(stdscr, h - 1, 2, status, t.struct)
-
-    # --- UI helpers ---
-
-    @staticmethod
-    def _safe_str(
-        stdscr: curses.window,
-        y: int,
-        x: int,
-        text: str,
-        color: int,
-        attr: int = 0,
-    ) -> None:
-        try:
-            stdscr.addstr(y, x, text, curses.color_pair(color) | attr)
-        except curses.error:
-            pass
-
-    @staticmethod
-    def _kv(stdscr: curses.window, y: int, x: int, key: str, value: str, color: int) -> None:
-        try:
-            stdscr.addstr(y, x, f"{key}: ", curses.color_pair(_CP_MAGENTA))
-            stdscr.addstr(y, x + len(key) + 2, value, curses.color_pair(color))
-        except curses.error:
-            pass
-
-    def _select(self, stdscr: curses.window, title: str, options: list[str]) -> int | None:
-        """Numbered overlay — returns index or None on Esc."""
-        h, w = stdscr.getmaxyx()
-        display = options[:_MAX_SELECT]
-        box_h = min(len(display) + 4, h - 4)
-        box_w = min(max((len(o) for o in display), default=10) + 12, w - 4)
-        win = curses.newwin(box_h, box_w, (h - box_h) // 2, (w - box_w) // 2)
-        win.box()
-        win.addstr(0, 2, f" {title} ", curses.color_pair(self._theme.cmd) | curses.A_BOLD)
-        for i, opt in enumerate(display):
-            win.addstr(
-                i + 2,
-                3,
-                f"[{i + 1}] {opt[: box_w - 10]}",
-                curses.color_pair(self._theme.data),
-            )
-        win.addstr(
-            box_h - 1,
-            2,
-            " [1-9] waehlen  [Esc] zurueck ",
-            curses.color_pair(self._theme.cmd),
-        )
-        win.refresh()
-        while True:
-            key = stdscr.getch()
-            if key == 27:
-                return None
-            if 49 <= key <= 57:
-                idx = key - 49
-                if idx < len(options):
-                    return idx
-
-    def _show_help(self, stdscr: curses.window) -> None:
-        lines = [
-            "COSMERGON DASHBOARD",
-            "",
-            "[C]  Compass-Richtung setzen",
-            "[P]  Zellen auf Feld platzieren",
-            "[F]  Neues Feld erstellen",
-            "[E]  Entity weiterentwickeln",
-            "[Space]  Pause / Fortsetzen",
-            "[U]  Upgrade → Developer (öffnet Browser)",
-            "[R]  Daten aktualisieren",
-            "[Q]  Beenden",
-            "",
-            f"Theme: {self._theme.name}   SDK: {__version__}",
-            "Themes: cosmergon  matrix  mono  high-contrast",
-            "Config: ~/.cosmergon/dashboard.toml",
-            "",
-            "Taste drücken zum Schließen.",
-        ]
-        h, w = stdscr.getmaxyx()
-        box_h = len(lines) + 4
-        box_w = max((len(ln) for ln in lines), default=20) + 6
-        win = curses.newwin(
-            min(box_h, h - 2),
-            min(box_w, w - 2),
-            max(0, (h - box_h) // 2),
-            max(0, (w - box_w) // 2),
-        )
-        win.box()
-        for i, ln in enumerate(lines):
-            attr = curses.A_BOLD if i == 0 else 0
-            color = self._theme.cmd if i == 0 else self._theme.data
-            try:
-                win.addstr(i + 2, 3, ln, curses.color_pair(color) | attr)
-            except curses.error:
-                pass
-        win.refresh()
-        stdscr.nodelay(False)
-        stdscr.getch()
-        stdscr.nodelay(True)
+    async def action_help(self) -> None:
+        await self.push_screen_wait(HelpModal(self._theme.name))
 
 
 # ---------------------------------------------------------------------------
@@ -760,20 +527,16 @@ def main() -> None:
         description="Cosmergon Agent Dashboard",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Themes: cosmergon (default), matrix, mono, high-contrast\n"
-        "Config: ~/.cosmergon/dashboard.toml  |  COSMERGON_THEME env var",
+               "Config: ~/.cosmergon/dashboard.toml  |  COSMERGON_THEME env var",
     )
     parser.add_argument("--api-key", help="API key (auto-registers if omitted)")
     parser.add_argument("--base-url", default="https://cosmergon.com")
-    parser.add_argument(
-        "--theme",
-        choices=list(THEMES),
-        default=None,
-        help="Color theme (default: cosmergon)",
-    )
+    parser.add_argument("--theme", choices=list(THEMES), default=None)
     args = parser.parse_args()
     logging.basicConfig(level=logging.WARNING)
     theme = _load_theme(args.theme)
-    Dashboard(api_key=args.api_key, base_url=args.base_url, theme=theme).run()
+    agent = CosmergonAgent(api_key=args.api_key, base_url=args.base_url, poll_interval=10.0)
+    CosmergonDashboard(agent=agent, theme=theme).run()
 
 
 if __name__ == "__main__":
