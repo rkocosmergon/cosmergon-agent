@@ -28,7 +28,7 @@ from typing import Any, ClassVar
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Label, Static
 
@@ -139,7 +139,7 @@ class SelectModal(ModalScreen):
         self._options = options[:9]
 
     def compose(self) -> ComposeResult:
-        with Static(id="dialog"):
+        with Vertical(id="dialog"):
             yield Label(f"[bold]{self._title}[/bold]")
             yield Label("")
             for i, opt in enumerate(self._options):
@@ -194,7 +194,7 @@ class HelpModal(ModalScreen):
             "",
             "[dim]Taste drücken zum Schließen[/dim]",
         ]
-        with Static(id="dialog"):
+        with Vertical(id="dialog"):
             for line in lines:
                 yield Label(line)
 
