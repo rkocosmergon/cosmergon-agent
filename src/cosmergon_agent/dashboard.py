@@ -98,7 +98,7 @@ THEMES: dict[str, Theme] = {
         guide=_CP_ORANGE,  # orange if 256-color, else yellow
         pos=_CP_GREEN,
         warn=_CP_RED,
-        struct=_CP_MAGENTA,
+        struct=_CP_WHITE,
         data=_CP_WHITE,
     ),
     "matrix": Theme(
@@ -637,23 +637,11 @@ class Dashboard:
         sep_y = h - 3
         self._safe_str(stdscr, sep_y, 0, "─" * w, t.struct)
 
-        # Primary action line — Compass guide until first set, then compact
-        if not self._compass_ever_set:
-            self._safe_str(stdscr, sep_y + 1, 2, "[C] Richtung setzen", t.guide, curses.A_BOLD)
-        else:
-            self._safe_str(stdscr, sep_y + 1, 2, "[C]", t.cmd)
-            self._safe_str(stdscr, sep_y + 1, 5, " Compass", t.data)
-
-        # Upgrade button — only for free tier (or unknown)
+        # Single hotkey line — all cyan, no orange (orange hint is in the panel above)
         tier = state.subscription_tier if state else "free"
-        if tier in ("free", "anonymous"):
-            upgrade_x = w - 24
-            self._safe_str(stdscr, sep_y + 1, upgrade_x, "[U] ", t.guide, curses.A_BOLD)
-            self._safe_str(stdscr, sep_y + 1, upgrade_x + 4, "Upgrade → Developer", t.guide)
-
-        # Secondary hotkeys
-        secondary = "[P]lace  [F]ield  [E]volve  [Space]Pause  [Q]uit  [?]"
-        self._safe_str(stdscr, sep_y + 2, 2, secondary[: w - 4], t.cmd)
+        upgrade = "  [U] Upgrade" if tier in ("free", "anonymous") else ""
+        hotkeys = f"[C]  [P]lace  [F]ield  [E]volve  [Space]Pause  [R]efresh  [Q]uit  [?]{upgrade}"
+        self._safe_str(stdscr, sep_y + 1, 2, hotkeys[: w - 4], t.cmd)
 
         # Status bar
         agent_id = (self.agent.agent_id or "?")[:8]
