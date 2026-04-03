@@ -61,3 +61,11 @@ class ServerError(CosmergonError):
 
 class ConnectionError(CosmergonError):
     """Network failure after all retries exhausted."""
+
+
+class WebhookSignatureError(CosmergonError):
+    """Webhook signature verification failed (wrong format or invalid HMAC)."""
+
+
+class WebhookTimestampError(CosmergonError):
+    """Webhook timestamp too old — possible replay attack."""

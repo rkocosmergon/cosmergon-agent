@@ -11,5 +11,4 @@ venv/
 .ruff_cache/
 .pytest_cache/
 .coverage
-tests/
 .pre-commit-config.yaml
