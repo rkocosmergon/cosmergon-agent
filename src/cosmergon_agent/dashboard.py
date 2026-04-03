@@ -499,9 +499,11 @@ class Dashboard:
     def _draw_title(self, stdscr: curses.window, w: int, state: GameState | None) -> None:
         title = " COSMERGON "
         tick = f" Tick {state.tick} " if state else " connecting… "
+        quit_hint = " [Q]uit "
         self._safe_str(stdscr, 0, 0, "─" * w, self._theme.struct)
         self._safe_str(stdscr, 0, 2, title, self._theme.struct, curses.A_BOLD)
-        if w > len(title) + len(tick) + 6:
+        self._safe_str(stdscr, 0, 2 + len(title), quit_hint, self._theme.cmd)
+        if w > len(title) + len(quit_hint) + len(tick) + 6:
             self._safe_str(stdscr, 0, w - len(tick) - 2, tick, self._theme.struct)
 
     def _draw_agent_panel(self, stdscr: curses.window, state: GameState, width: int) -> int:
@@ -637,10 +639,10 @@ class Dashboard:
         sep_y = h - 3
         self._safe_str(stdscr, sep_y, 0, "─" * w, t.struct)
 
-        # Single hotkey line — all cyan, no orange (orange hint is in the panel above)
+        # Single hotkey line — all cyan
         tier = state.subscription_tier if state else "free"
         upgrade = "  [U] Upgrade" if tier in ("free", "anonymous") else ""
-        hotkeys = f"[C]  [P]lace  [F]ield  [E]volve  [Space]Pause  [R]efresh  [Q]uit  [?]{upgrade}"
+        hotkeys = f"[C]  [P]lace  [F]ield  [E]volve  [Space]Pause  [R]efresh  [?]{upgrade}"
         self._safe_str(stdscr, sep_y + 1, 2, hotkeys[: w - 4], t.cmd)
 
         # Status bar
