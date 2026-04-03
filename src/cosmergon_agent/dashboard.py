@@ -591,7 +591,7 @@ class Dashboard:
                 y += 1
             if wb.tip:
                 tip = wb.tip[: panel_w - 3]
-                self._safe_str(stdscr, y, x + 1, f"→ {tip}", t.guide)
+                self._safe_str(stdscr, y, x + 1, f"→ {tip}", t.data)
                 y += 1
         y += 1
 
