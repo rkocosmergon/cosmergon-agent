@@ -8,8 +8,9 @@ import json
 import logging
 import os
 import random
+import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -395,6 +396,110 @@ class CosmergonAgent:
             logger.info("Webhook server stopped")
         finally:
             server.server_close()
+
+    # --- SSE Event Stream ---
+
+    def events(
+        self,
+        reconnect: bool = True,
+        reconnect_delay: float = 5.0,
+        max_reconnect_delay: float = 60.0,
+    ) -> Iterator[dict]:
+        """Consume the SSE event stream. Blocking sync generator.
+
+        Opens GET /api/v1/agents/{agent_id}/events/stream and yields event dicts
+        as they arrive. Heartbeats are silently dropped. Reconnects on connection
+        loss if reconnect=True (exponential backoff: 5s → 10s → 20s → max 60s).
+
+        Yields dicts with at minimum:
+            event_type: str    — e.g. "catastrophe.warning"
+            player_id:  str    — UUID of the agent's player
+
+        Raises:
+            AuthenticationError: 401 or 403 response (no reconnect).
+            CosmergonError:      Unrecoverable server error.
+
+        Example::
+            agent = CosmergonAgent()   # auto-registers if no key saved
+            for event in agent.events():
+                if event["event_type"] == "catastrophe.warning":
+                    asyncio.run(agent.act("evacuate"))
+        """
+        # Resolve agent_id synchronously if not yet known
+        if not self.agent_id:
+            plain_key = str.__str__(self._api_key)
+            with httpx.Client(timeout=10.0) as resolve_client:
+                resp = resolve_client.get(
+                    f"{self.base_url}/api/v1/agents/",
+                    headers={"Authorization": f"api-key {plain_key}"},
+                )
+                if resp.status_code in (401, 403):
+                    raise AuthenticationError("Invalid API key (resolving agent_id)")
+                agents = resp.json() if resp.status_code == 200 else []
+                if agents:
+                    self.agent_id = agents[0]["id"]
+                else:
+                    raise AuthenticationError("Could not resolve agent_id from API key")
+
+        url = f"{self.base_url}/api/v1/agents/{self.agent_id}/events/stream"
+        last_event_id: str = ""
+        delay = reconnect_delay
+
+        while True:
+            try:
+                plain_key = str.__str__(self._api_key)
+                headers: dict[str, str] = {
+                    "Authorization": f"api-key {plain_key}",
+                    "Accept": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "User-Agent": f"cosmergon-agent-python/{__version__}",
+                }
+                if last_event_id:
+                    headers["Last-Event-ID"] = last_event_id
+
+                # read=None keeps the connection open indefinitely (required for SSE).
+                # Default 10s covers connect/write/pool; read=None overrides read-only.
+                with httpx.Client(
+                    timeout=httpx.Timeout(10.0, read=None)
+                ) as sse_client:
+                    with sse_client.stream("GET", url, headers=headers) as response:
+                        if response.status_code in (401, 403):
+                            raise AuthenticationError(
+                                f"SSE stream rejected: {response.status_code}"
+                            )
+                        if response.status_code >= 400:
+                            raise CosmergonError(
+                                f"SSE stream error: HTTP {response.status_code}"
+                            )
+
+                        for line in response.iter_lines():
+                            if line.startswith("data: "):
+                                try:
+                                    yield json.loads(line[6:])
+                                except json.JSONDecodeError:
+                                    logger.warning("SSE: invalid JSON dropped: %r", line[6:])
+                            elif line.startswith("id: "):
+                                last_event_id = line[4:]
+                            # ":" prefix = SSE comment/heartbeat → skip silently
+                            # empty line = SSE event boundary → no action needed
+
+                # Stream ended cleanly (server closed connection) → reconnect
+                logger.info("SSE stream closed by server, reconnecting in %.1fs", delay)
+
+            except AuthenticationError:
+                raise  # auth errors are never retried
+            except CosmergonError:
+                raise  # unrecoverable server errors propagate
+            except httpx.TransportError as exc:
+                if not reconnect:
+                    raise CsgConnectionError("SSE connection failed") from exc
+                logger.warning("SSE transport error, reconnecting in %.1fs: %s", delay, exc)
+
+            if not reconnect:
+                return
+
+            time.sleep(delay)
+            delay = min(delay * 2, max_reconnect_delay)
 
     # --- Lifecycle ---
 
