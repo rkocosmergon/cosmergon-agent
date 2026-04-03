@@ -8,6 +8,7 @@ import os
 import random
 import uuid
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -28,6 +29,44 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MAX_RETRIES = 3
 _INITIAL_BACKOFF = 0.5
 _MAX_BACKOFF = 30.0
+
+_CONFIG_PATH = Path.home() / ".cosmergon" / "config.toml"
+
+
+def _load_saved_credentials() -> tuple[str, str | None]:
+    """Load api_key and agent_id from ~/.cosmergon/config.toml.
+
+    Returns (api_key, agent_id) or ("", None) if not found.
+    """
+    if not _CONFIG_PATH.exists():
+        return "", None
+    try:
+        content = _CONFIG_PATH.read_text(encoding="utf-8")
+        key, agent_id = "", None
+        for line in content.splitlines():
+            line = line.strip()
+            if line.startswith("api_key"):
+                key = line.split("=", 1)[1].strip().strip('"')
+            elif line.startswith("agent_id"):
+                agent_id = line.split("=", 1)[1].strip().strip('"')
+        return key, agent_id or None
+    except Exception:
+        return "", None
+
+
+def _save_credentials(api_key: str, agent_id: str | None) -> None:
+    """Persist api_key and agent_id to ~/.cosmergon/config.toml."""
+    try:
+        _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        agent_id_line = f'agent_id = "{agent_id}"\n' if agent_id else ""
+        _CONFIG_PATH.write_text(
+            f"[agent]\n"
+            f'api_key = "{api_key}"\n'
+            f"{agent_id_line}",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass  # non-fatal — agent still works without persistence
 
 
 class _SensitiveStr(str):
@@ -66,13 +105,21 @@ class CosmergonAgent:
         max_retries: int = _DEFAULT_MAX_RETRIES,
         auto_reconnect: bool = True,
     ) -> None:
-        # C1: Resolve API key from env var fallback (M2)
+        # C1: Resolve API key — explicit arg > env var > saved config > auto-register
         resolved_key = api_key or os.environ.get("COSMERGON_API_KEY", "")
         if not resolved_key or not resolved_key.strip():
-            # Auto-register anonymous agent if no key provided
-            resolved_key, auto_agent_id = self._auto_register_anonymous(base_url)
-            if not agent_id:
-                agent_id = auto_agent_id
+            saved_key, saved_agent_id = _load_saved_credentials()
+            if saved_key:
+                resolved_key = saved_key
+                if not agent_id:
+                    agent_id = saved_agent_id
+                logger.info("Loaded credentials from %s", _CONFIG_PATH)
+            else:
+                # Auto-register anonymous agent and persist credentials
+                resolved_key, auto_agent_id = self._auto_register_anonymous(base_url)
+                if not agent_id:
+                    agent_id = auto_agent_id
+                _save_credentials(resolved_key, agent_id)
         # M1: Input validation
         if not base_url.startswith(("http://", "https://")):
             raise ValueError("base_url must start with http:// or https://")
