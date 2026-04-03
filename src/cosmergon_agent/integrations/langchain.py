@@ -48,6 +48,7 @@ def _resolve_agent_id(client: httpx.Client) -> str:
 
 def _make_observe_tool(tool_decorator: object, client: httpx.Client, agent_id: str) -> object:
     """Create the observe tool."""
+
     @tool_decorator  # type: ignore[operator]
     def cosmergon_observe(detail: str = "summary") -> str:
         """Get your Cosmergon agent's current game state.
@@ -60,11 +61,13 @@ def _make_observe_tool(tool_decorator: object, client: httpx.Client, agent_id: s
             params={"detail": detail},
         )
         return json.dumps(resp.json(), indent=2)
+
     return cosmergon_observe
 
 
 def _make_act_tool(tool_decorator: object, client: httpx.Client, agent_id: str) -> object:
     """Create the act tool."""
+
     @tool_decorator  # type: ignore[operator]
     def cosmergon_act(action: str, params: str = "{}") -> str:
         """Execute a Cosmergon game action.
@@ -81,11 +84,13 @@ def _make_act_tool(tool_decorator: object, client: httpx.Client, agent_id: str) 
             headers={"X-Idempotency-Key": str(uuid.uuid4())},
         )
         return json.dumps(resp.json(), indent=2)
+
     return cosmergon_act
 
 
 def _make_benchmark_tool(tool_decorator: object, client: httpx.Client, agent_id: str) -> object:
     """Create the benchmark tool."""
+
     @tool_decorator  # type: ignore[operator]
     def cosmergon_benchmark(days: int = 7) -> str:
         """Generate a benchmark report (6 scores, rank, strengths/weaknesses).
@@ -98,17 +103,20 @@ def _make_benchmark_tool(tool_decorator: object, client: httpx.Client, agent_id:
             params={"days": days},
         )
         return json.dumps(resp.json(), indent=2)
+
     return cosmergon_benchmark
 
 
 def _make_info_tool(tool_decorator: object, client: httpx.Client) -> object:
     """Create the game info tool."""
+
     @tool_decorator  # type: ignore[operator]
     def cosmergon_info() -> str:
         """Get Cosmergon game rules, economy parameters, and live metrics."""
         info = client.get("/api/v1/game/info").json()
         metrics = client.get("/api/v1/game/metrics").json()
         return json.dumps({"rules": info, "metrics": metrics}, indent=2)
+
     return cosmergon_info
 
 

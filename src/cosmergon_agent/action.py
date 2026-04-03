@@ -36,7 +36,9 @@ class ActionResult:
         """Parse HTTP response into ActionResult."""
         if 200 <= status_code < 300:
             return cls(
-                success=True, action=action, data=body,
+                success=True,
+                action=action,
+                data=body,
                 idempotency_key=idempotency_key,
             )
 

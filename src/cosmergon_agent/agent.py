@@ -76,7 +76,9 @@ class CosmergonAgent:
         # M1: Input validation
         if not base_url.startswith(("http://", "https://")):
             raise ValueError("base_url must start with http:// or https://")
-        if base_url.startswith("http://") and "localhost" not in base_url and "127.0.0.1" not in base_url:
+        insecure = base_url.startswith("http://")
+        local = "localhost" in base_url or "127.0.0.1" in base_url
+        if insecure and not local:
             logger.warning("Using unencrypted HTTP — API key will be sent in plaintext")
 
         # C1: Store key as _SensitiveStr to prevent accidental logging
@@ -123,9 +125,11 @@ class CosmergonAgent:
 
     def on_event(self, event_type: str) -> Callable:
         """Register a handler for a specific event type."""
+
         def decorator(func: Callable) -> Callable:
             self._event_handlers[event_type] = func
             return func
+
         return decorator
 
     # --- Properties ---
@@ -158,13 +162,53 @@ class CosmergonAgent:
         )
 
         result = ActionResult.from_response(
-            action, resp.status_code, resp.json(), idempotency_key=idem_key,
+            action,
+            resp.status_code,
+            resp.json(),
+            idempotency_key=idem_key,
         )
 
         if not result.success and self._error_handler:
             await self._error_handler(result)
 
         return result
+
+    async def set_compass(self, preset: str) -> dict:
+        """Set the agent's strategic compass direction.
+
+        Args:
+            preset: One of attack, defend, grow, trade, cooperate, explore, autonomous.
+
+        Returns:
+            Server response with explanation and agent opinion.
+        """
+        resp = await self._request(
+            "POST",
+            f"/api/v1/agents/{self.agent_id}/compass",
+            json={"preset": preset},
+        )
+        if resp.status_code >= 400:
+            return {"error": resp.text}
+        return resp.json()
+
+    async def get_last_decision(self) -> dict | None:
+        """Fetch the most recent LLM decision for this agent.
+
+        Returns a dict with keys: tick, action, reasoning, outcome, params.
+        Returns None if no decisions exist or on error.
+        """
+        try:
+            resp = await self._request(
+                "GET",
+                f"/api/v1/agents/{self.agent_id}/decisions",
+                params={"limit": 1},
+            )
+            if resp.status_code == 200:
+                decisions = resp.json()
+                return decisions[0] if decisions else None
+        except Exception:
+            pass
+        return None
 
     # --- Lifecycle ---
 
@@ -222,12 +266,11 @@ class CosmergonAgent:
             resp = client.post(url, json={})
         if resp.status_code != 200:
             is_json = resp.headers.get(
-                "content-type", "",
+                "content-type",
+                "",
             ).startswith("application/json")
             detail = resp.json().get("detail", resp.text) if is_json else resp.text
-            raise CosmergonError(
-                f"Auto-registration failed ({resp.status_code}): {detail}"
-            )
+            raise CosmergonError(f"Auto-registration failed ({resp.status_code}): {detail}")
         data = resp.json()
         key = data.get("api_key", "")
         if not key:
@@ -256,7 +299,10 @@ class CosmergonAgent:
         )
 
     async def _request(
-        self, method: str, path: str, **kwargs: Any,
+        self,
+        method: str,
+        path: str,
+        **kwargs: Any,
     ) -> httpx.Response:
         """HTTP request with retry, backoff, and rate-limit handling (C2)."""
         if self._client is None:
@@ -266,7 +312,9 @@ class CosmergonAgent:
         for attempt in range(self.max_retries + 1):
             try:
                 resp = await self._client.request(
-                    method, f"{self.base_url}{path}", **kwargs,
+                    method,
+                    f"{self.base_url}{path}",
+                    **kwargs,
                 )
 
                 if resp.status_code == 429:
@@ -279,7 +327,7 @@ class CosmergonAgent:
                     continue
 
                 if resp.status_code >= 500 and attempt < self.max_retries:
-                    delay = min(_INITIAL_BACKOFF * (2 ** attempt) + random.random(), _MAX_BACKOFF)
+                    delay = min(_INITIAL_BACKOFF * (2**attempt) + random.random(), _MAX_BACKOFF)
                     logger.warning("Server error %d, retry in %.1fs", resp.status_code, delay)
                     await asyncio.sleep(delay)
                     continue
@@ -289,13 +337,11 @@ class CosmergonAgent:
             except httpx.TransportError as exc:
                 last_exc = exc
                 if attempt < self.max_retries:
-                    delay = min(_INITIAL_BACKOFF * (2 ** attempt) + random.random(), _MAX_BACKOFF)
+                    delay = min(_INITIAL_BACKOFF * (2**attempt) + random.random(), _MAX_BACKOFF)
                     logger.warning("Transport error, retry in %.1fs: %s", delay, exc)
                     await asyncio.sleep(delay)
 
-        raise CsgConnectionError(
-            f"Failed after {self.max_retries + 1} attempts"
-        ) from last_exc
+        raise CsgConnectionError(f"Failed after {self.max_retries + 1} attempts") from last_exc
 
     async def _resolve_agent_id(self) -> None:
         """Get agent_id from the API key's associated agent."""
@@ -318,7 +364,8 @@ class CosmergonAgent:
         while self._running:
             try:
                 resp = await self._request(
-                    "GET", f"/api/v1/agents/{self.agent_id}/state",
+                    "GET",
+                    f"/api/v1/agents/{self.agent_id}/state",
                 )
                 if resp.status_code != 200:
                     logger.warning("State fetch failed: %d", resp.status_code)

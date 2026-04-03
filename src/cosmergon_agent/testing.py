@@ -69,15 +69,24 @@ class FakeTransport(httpx.AsyncBaseTransport):
         self._responses: dict[tuple[str, str], tuple[int, dict]] = {}
         # Default: state endpoint returns minimal valid state
         self.add_response("GET", "/api/v1/agents/", json=[{"id": "test-agent-001"}])
-        self.add_response("GET", "/api/v1/agents/test-agent-001/state", json={
-            "agent_id": "test-agent-001",
-            "agent_type": "independent_agent",
-            "energy_balance": 1000.0,
-            "tick": 1,
-        })
-        self.add_response("POST", "/api/v1/agents/test-agent-001/action", json={
-            "field_id": "f-test", "active_cells": 0,
-        })
+        self.add_response(
+            "GET",
+            "/api/v1/agents/test-agent-001/state",
+            json={
+                "agent_id": "test-agent-001",
+                "agent_type": "independent_agent",
+                "energy_balance": 1000.0,
+                "tick": 1,
+            },
+        )
+        self.add_response(
+            "POST",
+            "/api/v1/agents/test-agent-001/action",
+            json={
+                "field_id": "f-test",
+                "active_cells": 0,
+            },
+        )
 
     def add_response(
         self,

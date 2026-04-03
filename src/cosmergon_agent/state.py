@@ -66,6 +66,34 @@ class Focus:
 
 
 @dataclass(frozen=True)
+class WorldBriefing:
+    """Economy-wide context included in every state response."""
+
+    total_agents: int = 0
+    your_rank: int = 0
+    market_summary: str = ""
+    top_agent: str | None = None
+    last_event: str | None = None
+    tip: str = ""
+    infra_fund_pct: float = 0.0
+    infra_fund_msg: str = ""
+
+    @classmethod
+    def from_api(cls, data: dict) -> WorldBriefing:
+        fund = data.get("infrastructure_fund") or {}
+        return cls(
+            total_agents=data.get("total_agents", 0),
+            your_rank=data.get("your_rank", 0),
+            market_summary=data.get("market_summary", ""),
+            top_agent=data.get("top_agent"),
+            last_event=data.get("last_event"),
+            tip=data.get("tip", ""),
+            infra_fund_pct=float(fund.get("progress_pct", 0.0)),
+            infra_fund_msg=fund.get("message", ""),
+        )
+
+
+@dataclass(frozen=True)
 class GameState:
     """Complete game state snapshot for one agent at one tick.
 
@@ -81,6 +109,8 @@ class GameState:
     ranking: Ranking
     focus: Focus
     tick: int = 0
+    subscription_tier: str = "free"
+    world_briefing: WorldBriefing | None = None
 
     @classmethod
     def from_api(cls, data: dict) -> GameState:
@@ -95,6 +125,9 @@ class GameState:
         ranking = _safe_construct(Ranking, data.get("ranking", {}))
         focus = _safe_construct(Focus, data.get("focus", {}))
 
+        wb_data = data.get("world_briefing")
+        world_briefing = WorldBriefing.from_api(wb_data) if wb_data else None
+
         return cls(
             agent_id=data.get("agent_id", "unknown"),
             agent_type=data.get("agent_type", "independent_agent"),
@@ -105,4 +138,6 @@ class GameState:
             ranking=ranking,
             focus=focus,
             tick=data.get("tick", 0),
+            subscription_tier=data.get("subscription_tier", "free"),
+            world_briefing=world_briefing,
         )

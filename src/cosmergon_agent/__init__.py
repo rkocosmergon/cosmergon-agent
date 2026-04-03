@@ -18,8 +18,10 @@ from cosmergon_agent.state import GameState
 def __getattr__(name: str) -> type:
     if name == "CosmergonAgent":
         from cosmergon_agent.agent import CosmergonAgent
+
         return CosmergonAgent
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "ActionResult",
