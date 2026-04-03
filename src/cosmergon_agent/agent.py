@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
+import json
 import logging
 import os
 import random
@@ -18,10 +20,13 @@ from cosmergon_agent.action import ActionResult
 from cosmergon_agent.exceptions import (
     AuthenticationError,
     CosmergonError,
+    WebhookSignatureError,
+    WebhookTimestampError,
 )
 from cosmergon_agent.exceptions import (
     ConnectionError as CsgConnectionError,
 )
+from cosmergon_agent.webhook import CosmergonWebhook
 from cosmergon_agent.state import GameState
 
 logger = logging.getLogger(__name__)
@@ -179,6 +184,28 @@ class CosmergonAgent:
 
         return decorator
 
+    def on(self, event_type: str) -> Callable:
+        """Register a webhook/SSE event handler. Short alias for on_event().
+
+        Supported event types: catastrophe.warning, energy.critical, agent.tick,
+            catastrophe.active, catastrophe.resolved, agent.key_expired,
+            agent.attacked, contract.proposed, contract.accepted, contract.breached,
+            alliance.breach, market.opportunity, agent.mode_changed
+        Special: "*" as catch-all for unregistered event types.
+
+        Args:
+            event_type: Event type string or "*" for catch-all.
+
+        Returns:
+            Decorator that registers the function as handler.
+
+        Example::
+            @agent.on("catastrophe.warning")
+            def handle(event: dict) -> None:
+                print(f"Warning: {event['catastrophe_type']}")
+        """
+        return self.on_event(event_type)
+
     # --- Properties ---
 
     @property
@@ -273,6 +300,101 @@ class CosmergonAgent:
         except Exception:
             pass
         return None
+
+    # --- Webhook server ---
+
+    def listen(
+        self,
+        port: int = 8080,
+        host: str = "0.0.0.0",
+        webhook_secret: str | None = None,
+        path: str = "/webhook",
+    ) -> None:
+        """Start a blocking HTTP server that receives and dispatches Cosmergon webhooks.
+
+        Verifies HMAC-SHA256 signatures and dispatches to handlers registered via on().
+        Blocks the calling thread until KeyboardInterrupt.
+
+        For background usage::
+
+            import threading
+            threading.Thread(target=agent.listen, kwargs={"port": 8080}, daemon=True).start()
+
+        Note: Cosmergon requires a publicly reachable HTTPS URL to deliver webhooks.
+        For local testing use a tunnel (ngrok, cloudflared).
+
+        Args:
+            port:           Port to listen on (default 8080).
+            host:           Bind address (default 0.0.0.0 = all interfaces).
+            webhook_secret: HMAC signing secret. Falls back to COSMERGON_WEBHOOK_SECRET
+                            env var. If neither set: WARNING + signature check skipped.
+            path:           URL path for webhook endpoint (default /webhook).
+        """
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        secret = webhook_secret or os.environ.get("COSMERGON_WEBHOOK_SECRET")
+        if not secret:
+            logger.warning(
+                "No webhook_secret set and COSMERGON_WEBHOOK_SECRET env var missing. "
+                "Signature verification disabled — not safe for production."
+            )
+
+        agent = self  # closure for the handler class below
+
+        class _WebhookHandler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:  # noqa: N802
+                if self.path != path:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+
+                # Read body — cap at 1 MB to prevent memory exhaustion
+                content_length = min(int(self.headers.get("Content-Length", 0)), 1024 * 1024)
+                body = self.rfile.read(content_length)
+
+                if secret:
+                    sig = self.headers.get("X-Cosmergon-Signature", "")
+                    ts = self.headers.get("X-Cosmergon-Timestamp", "")
+                    try:
+                        valid = CosmergonWebhook.verify_signature(body, sig, secret, ts)
+                    except (WebhookSignatureError, WebhookTimestampError):
+                        valid = False
+                    if not valid:
+                        # No detail in error body — avoids leaking timing/format info
+                        self.send_response(400)
+                        self.end_headers()
+                        return
+
+                try:
+                    event = json.loads(body)
+                except json.JSONDecodeError:
+                    self.send_response(400)
+                    self.end_headers()
+                    return
+
+                event_type = event.get("event_type", "")
+                handler = agent._event_handlers.get(event_type) or agent._event_handlers.get("*")
+
+                if handler:
+                    if inspect.iscoroutinefunction(handler):
+                        asyncio.run(handler(event))
+                    else:
+                        handler(event)
+
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+                logger.debug(format, *args)
+
+        server = HTTPServer((host, port), _WebhookHandler)
+        logger.info("Webhook server listening on %s:%d%s", host, port, path)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            logger.info("Webhook server stopped")
+        finally:
+            server.server_close()
 
     # --- Lifecycle ---
 
