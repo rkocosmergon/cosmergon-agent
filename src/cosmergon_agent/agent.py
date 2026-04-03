@@ -191,6 +191,23 @@ class CosmergonAgent:
             return {"error": resp.text}
         return resp.json()
 
+    async def get_events(self, limit: int = 20) -> list[dict]:
+        """Fetch recent game events for this agent (actions, compass changes, etc.).
+
+        Returns a list of event dicts with keys: tick, event_type, data, created_at.
+        """
+        try:
+            resp = await self._request(
+                "GET",
+                "/api/v1/events/",
+                params={"agent_id": str(self.agent_id), "limit": min(limit, 100)},
+            )
+            if resp.status_code == 200:
+                return resp.json().get("events", [])
+        except Exception:
+            pass
+        return []
+
     async def get_last_decision(self) -> dict | None:
         """Fetch the most recent LLM decision for this agent.
 

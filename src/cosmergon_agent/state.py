@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from dataclasses import fields as dc_fields
 from typing import Any
 
@@ -111,6 +111,7 @@ class GameState:
     tick: int = 0
     subscription_tier: str = "free"
     world_briefing: WorldBriefing | None = None
+    learned_rules: list[str] = field(default_factory=list)
 
     @classmethod
     def from_api(cls, data: dict) -> GameState:
@@ -140,4 +141,5 @@ class GameState:
             tick=data.get("tick", 0),
             subscription_tier=data.get("subscription_tier", "free"),
             world_briefing=world_briefing,
+            learned_rules=data.get("learned_rules", []),
         )
