@@ -32,7 +32,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Label, Static
 
-from cosmergon_agent import CosmergonAgent, __version__
+from cosmergon_agent import CosmergonAgent, CosmergonError, __version__
 from cosmergon_agent.state import GameState
 
 logger = logging.getLogger(__name__)
@@ -535,8 +535,23 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=logging.WARNING)
     theme = _load_theme(args.theme)
-    agent = CosmergonAgent(api_key=args.api_key, base_url=args.base_url, poll_interval=10.0)
-    CosmergonDashboard(agent=agent, theme=theme).run()
+    try:
+        agent = CosmergonAgent(api_key=args.api_key, base_url=args.base_url, poll_interval=10.0)
+        CosmergonDashboard(agent=agent, theme=theme).run()
+    except CosmergonError as exc:
+        msg = str(exc)
+        if "429" in msg or "Max" in msg:
+            print("\n✗  Zu viele anonyme Registrierungen von dieser IP-Adresse.")
+            print()
+            print("   Registriere dich kostenlos auf cosmergon.com — dann bekommst du")
+            print("   einen eigenen API-Key ohne Limits:")
+            print()
+            print("   cosmergon-dashboard --api-key <dein-key>")
+            print()
+            print("   https://cosmergon.com/getting-started.html")
+        else:
+            print(f"\n✗  Verbindung fehlgeschlagen: {exc}")
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":
