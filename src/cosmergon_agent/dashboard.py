@@ -647,7 +647,7 @@ class Dashboard:
         # Upgrade button — only for free tier (or unknown)
         tier = state.subscription_tier if state else "free"
         if tier in ("free", "anonymous"):
-            upgrade_x = w - 22
+            upgrade_x = w - 24
             self._safe_str(stdscr, sep_y + 1, upgrade_x, "[U] ", t.guide, curses.A_BOLD)
             self._safe_str(stdscr, sep_y + 1, upgrade_x + 4, "Upgrade → Developer", t.guide)
 
