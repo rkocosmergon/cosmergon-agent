@@ -31,7 +31,7 @@ class CosmergonWebhook:
                 event = CosmergonWebhook.construct_event(
                     payload=body,
                     signature_header=request.headers["X-Cosmergon-Signature"],
-                    secret=WEBHOOK_SECRET,
+                    secret=webhook_secret,  # your signing secret from webhook registration
                     timestamp_header=request.headers["X-Cosmergon-Timestamp"],
                 )
             except (WebhookSignatureError, WebhookTimestampError):
