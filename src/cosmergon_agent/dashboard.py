@@ -422,6 +422,7 @@ class CosmergonDashboard(App):
 
     # --- Actions ---
 
+    @work
     async def action_compass(self) -> None:
         labels = [_COMPASS_DISPLAY.get(p, p) for p in _COMPASS_PRESETS]
         idx = await self.push_screen_wait(SelectModal("Compass — Richtung wählen", labels))
@@ -438,6 +439,7 @@ class CosmergonDashboard(App):
         except Exception as exc:
             self._add_log(_c(self._theme.warn, f"✗ compass failed: {exc}"))
 
+    @work
     async def action_place_cells(self) -> None:
         state = self.agent.state
         if not state or not state.fields:
@@ -456,6 +458,7 @@ class CosmergonDashboard(App):
         icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
         self._add_log(_c(color, f"{icon} place_cells({_PRESETS[pi]})"))
 
+    @work
     async def action_create_field(self) -> None:
         state = self.agent.state
         if not state:
@@ -472,6 +475,7 @@ class CosmergonDashboard(App):
         icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
         self._add_log(_c(color, f"{icon} create_field"))
 
+    @work
     async def action_evolve(self) -> None:
         state = self.agent.state
         if not state or not state.fields:
@@ -513,6 +517,7 @@ class CosmergonDashboard(App):
     async def action_refresh_now(self) -> None:
         self._add_log(_c(self._theme.data, "Refreshing..."))
 
+    @work
     async def action_help(self) -> None:
         await self.push_screen_wait(HelpModal(self._theme.name))
 
