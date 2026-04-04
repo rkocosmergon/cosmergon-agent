@@ -218,9 +218,15 @@ class CosmergonDashboard(App):
         layout: vertical;
     }
 
+    #hint-bar {
+        height: 1;
+        background: #0a0a14;
+        padding: 0 1;
+    }
+
     #top-row {
-        height: 14;
-        min-height: 10;
+        height: 13;
+        min-height: 9;
     }
 
     #agent-panel {
@@ -249,18 +255,25 @@ class CosmergonDashboard(App):
         background: #111111;
         padding: 0 1;
     }
+
+    #key-bar {
+        height: 2;
+        background: #0d0d0d;
+        padding: 0 1;
+        border-top: solid #1a1a1a;
+    }
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("c", "compass", "Compass", show=True),
-        Binding("p", "place_cells", "Place", show=True),
-        Binding("f", "create_field", "Field", show=True),
-        Binding("e", "evolve", "Evolve", show=True),
-        Binding("u", "upgrade", "Upgrade", show=True),
-        Binding("space", "pause", "Pause", show=True),
+        Binding("c", "compass", "Compass", show=False),
+        Binding("p", "place_cells", "Place", show=False),
+        Binding("f", "create_field", "Field", show=False),
+        Binding("e", "evolve", "Evolve", show=False),
+        Binding("u", "upgrade", "Upgrade", show=False),
+        Binding("space", "pause", "Pause", show=False),
         Binding("r", "refresh_now", "Refresh", show=False),
-        Binding("question_mark", "help", "Help", show=True),
-        Binding("q", "quit", "Quit", show=True),
+        Binding("question_mark", "help", "Help", show=False),
+        Binding("q", "quit", "Quit", show=False),
     ]
 
     def __init__(self, agent: CosmergonAgent, theme: Theme) -> None:
