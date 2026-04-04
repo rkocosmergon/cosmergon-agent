@@ -145,7 +145,7 @@ class SelectModal(ModalScreen):
             for i, opt in enumerate(self._options):
                 yield Label(f"[cyan][{i + 1}][/cyan] {opt}")
             yield Label("")
-            yield Label("[dim][1-9] wählen  [Esc] zurück[/dim]")
+            yield Label("[dim][1-9] wählen  \\[Esc] zurück[/dim]")
 
     def on_key(self, event: Any) -> None:
         if event.key == "escape":
@@ -180,14 +180,14 @@ class HelpModal(ModalScreen):
         lines = [
             "[bold]COSMERGON DASHBOARD[/bold]",
             "",
-            "[cyan][C][/cyan]  Compass-Richtung setzen",
-            "[cyan][P][/cyan]  Zellen auf Feld platzieren",
-            "[cyan][F][/cyan]  Neues Feld erstellen",
-            "[cyan][E][/cyan]  Entity weiterentwickeln",
-            "[cyan][Space][/cyan]  Pause / Fortsetzen",
-            "[cyan][U][/cyan]  Upgrade → Developer (öffnet Browser)",
-            "[cyan][R][/cyan]  Daten aktualisieren",
-            "[cyan][Q][/cyan]  Beenden",
+            "[cyan]\\[C][/cyan]  Compass-Richtung setzen",
+            "[cyan]\\[P][/cyan]  Zellen auf Feld platzieren",
+            "[cyan]\\[F][/cyan]  Neues Feld erstellen",
+            "[cyan]\\[E][/cyan]  Entity weiterentwickeln",
+            "[cyan]\\[Space][/cyan]  Pause / Fortsetzen",
+            "[cyan]\\[U][/cyan]  Upgrade → Developer (öffnet Browser)",
+            "[cyan]\\[R][/cyan]  Daten aktualisieren",
+            "[cyan]\\[Q][/cyan]  Beenden",
             "",
             f"[dim]Theme: {self._theme_name}   SDK: {__version__}[/dim]",
             "[dim]Themes: cosmergon  matrix  mono  high-contrast[/dim]",
@@ -351,7 +351,7 @@ class CosmergonDashboard(App):
 
         # Compass
         if not self._compass_ever_set:
-            lines.append(_c(t.guide, "[bold]→ [C] Richtung setzen[/bold]"))
+            lines.append(_c(t.guide, "[bold]→ \\[C] Richtung setzen[/bold]"))
         else:
             compass_label = _COMPASS_DISPLAY.get(self._compass_preset, self._compass_preset)
             lines.append(_c(t.data, f"Compass: {compass_label}"))
@@ -389,7 +389,7 @@ class CosmergonDashboard(App):
 
         if state and state.subscription_tier == "free":
             lines.append("")
-            lines.append(_c(t.cmd, "[U] Upgrade → Developer"))
+            lines.append(_c(t.cmd, "\\[U] Upgrade → Developer"))
 
         self.query_one("#economy-panel", Static).update("\n".join(lines))
 
