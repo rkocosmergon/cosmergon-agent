@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import time
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,7 +31,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Label, Static
+from textual.widgets import Label, Static
 
 from cosmergon_agent import CosmergonAgent, CosmergonError, __version__
 from cosmergon_agent.state import GameState
@@ -102,6 +103,11 @@ def _load_theme(cli_theme: str | None = None) -> Theme:
 
 def _c(color: str, text: str) -> str:
     return f"[{color}]{text}[/{color}]"
+
+
+def _hk(key: str) -> str:
+    """Return Rich-escaped hotkey notation: _hk('C') → '\\[C]' (renders as literal [C])."""
+    return "\\[" + key + "]"
 
 
 def _energy_bar(energy: float, max_e: float = 5000.0, width: int = 8) -> str:
@@ -257,7 +263,7 @@ class CosmergonDashboard(App):
     }
 
     #key-bar {
-        height: 2;
+        height: 4;
         background: #0d0d0d;
         padding: 0 1;
         border-top: solid #1a1a1a;
@@ -285,14 +291,19 @@ class CosmergonDashboard(App):
         self._compass_preset = "autonomous"
         self._compass_ever_set = False
         self._last_energy: float | None = None
+        self._feedback: str = ""
+        self._feedback_until: float = 0.0
+        self._tick_received_at: float = 0.0
+        self._last_tick: int = -1
 
     def compose(self) -> ComposeResult:
+        yield Static("", id="hint-bar")
         with Horizontal(id="top-row"):
             yield Static("", id="agent-panel")
             yield Static("", id="economy-panel")
         yield Static("", id="journal-panel")
         yield Static("", id="status-bar")
-        yield Footer()
+        yield Static("", id="key-bar")
 
     def on_mount(self) -> None:
         self._register_agent_handlers()
@@ -302,6 +313,8 @@ class CosmergonDashboard(App):
     def _register_agent_handlers(self) -> None:
         @self.agent.on_tick
         async def _tick(state: GameState) -> None:
+            self._tick_received_at = time.monotonic()
+            self._last_tick = state.tick
             if self._last_energy is None:
                 self._last_energy = state.energy
                 self._add_log(_c(self._theme.pos, f"● Connected  {state.energy:,.0f} E"))
@@ -334,10 +347,12 @@ class CosmergonDashboard(App):
 
     def _redraw(self) -> None:
         state = self.agent.state
+        self._draw_hint_bar(state)
         self._draw_agent_panel(state)
         self._draw_economy_panel(state)
         self._draw_journal_panel(state)
         self._draw_status_bar(state)
+        self._draw_key_bar()
 
     def _draw_agent_panel(self, state: GameState | None) -> None:
         t = self._theme
@@ -441,6 +456,79 @@ class CosmergonDashboard(App):
                     f"theme {tname}"]
         self.query_one("#status-bar", Static).update(f"[dim]{sep.join(segments)}[/dim]")
 
+    def _set_feedback(self, msg: str, duration: float = 4.0) -> None:
+        """Show a timed message in the hint bar (overrides normal hint for `duration` seconds)."""
+        self._feedback = msg
+        self._feedback_until = time.monotonic() + duration
+
+    def _compute_hint(self, state: GameState | None) -> str:
+        """Return the one-line guidance string for the hint bar."""
+        t = self._theme
+
+        # 1. Active feedback (post-action confirmation)
+        if self._feedback and time.monotonic() < self._feedback_until:
+            return self._feedback
+        self._feedback = ""
+
+        # 2. No state yet
+        if not state:
+            return _c("dim", "Connecting to cosmergon.com...")
+
+        # 3. Paused
+        spc = _hk("Space")
+        if self._paused:
+            return f"{_c(t.warn, '⏸ Paused')} · {_c(t.cmd, spc)} resume"
+
+        # 4. Compass never set → one thing to do
+        if not self._compass_ever_set:
+            return (
+                f"{_c(t.guide, '→')} {_c(t.cmd, _hk('C'))} "
+                f"{_c(t.guide, 'Set Compass direction')} — choose how the agent plays"
+            )
+
+        # 5. No fields yet
+        if not state.fields:
+            return (
+                f"{_c(t.guide, '→')} {_c(t.cmd, _hk('F'))} "
+                f"{_c(t.guide, 'Create a field')} — choose a cube for your agent"
+            )
+
+        # 6. Fields exist but no cells placed
+        if not any(f.active_cell_count > 0 for f in state.fields):
+            return (
+                f"{_c(t.guide, '→')} {_c(t.cmd, _hk('P'))} "
+                f"{_c(t.guide, 'Place cells')} — start a Conway pattern"
+            )
+
+        # 7. Normal running state — show tick + countdown + quick-actions
+        tick_part = f"tick {state.tick}"
+        if self._tick_received_at > 0:
+            elapsed = time.monotonic() - self._tick_received_at
+            remaining = max(0.0, self.agent.poll_interval - elapsed)
+            tick_part += f" · next ~{remaining:.0f}s"
+
+        actions = (
+            f"{_c(t.cmd, _hk('P'))} place  "
+            f"{_c(t.cmd, _hk('F'))} field  "
+            f"{_c(t.cmd, _hk('E'))} evolve  "
+            f"{_c(t.cmd, _hk('C'))} compass"
+        )
+        return f"{_c('dim', tick_part)}  ·  {actions}"
+
+    def _draw_hint_bar(self, state: GameState | None) -> None:
+        self.query_one("#hint-bar", Static).update(self._compute_hint(state))
+
+    def _draw_key_bar(self) -> None:
+        t = self._theme
+
+        def k(key: str, label: str) -> str:
+            return f"{_c(t.cmd, _hk(key))} {label}"
+
+        row1 = "  ".join([k("C", "Compass"), k("P", "Place"), k("F", "Field"),
+                           k("E", "Evolve"), k("U", "Upgrade")])
+        row2 = "  ".join([k("Space", "Pause"), k("R", "Refresh"), k("?", "Help"), k("Q", "Quit")])
+        self.query_one("#key-bar", Static).update(f"{row1}\n{row2}")
+
     # --- Actions ---
 
     @work
@@ -457,8 +545,10 @@ class CosmergonDashboard(App):
             self._compass_ever_set = True
             explanation = (result.get("explanation") or "")[:60]
             self._add_log(_c(self._theme.pos, f"✓ compass: {preset}  {explanation}"))
+            self._set_feedback(_c(self._theme.pos, f"✓ Compass set: {preset}"))
         except Exception as exc:
             self._add_log(_c(self._theme.warn, f"✗ compass failed: {exc}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ Compass failed: {exc}"))
 
     @work
     async def action_place_cells(self) -> None:
@@ -481,8 +571,11 @@ class CosmergonDashboard(App):
             )
             icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
             self._add_log(_c(color, f"{icon} place_cells({_PRESETS[pi]})"))
+            feedback = f"{icon} Cells placed ({_PRESETS[pi]}) — evolves next tick"
+            self._set_feedback(_c(color, feedback))
         except CosmergonError as exc:
             self._add_log(_c(self._theme.warn, f"✗ place_cells: {exc}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ Place cells failed: {exc}"))
 
     @work
     async def action_create_field(self) -> None:
@@ -501,8 +594,10 @@ class CosmergonDashboard(App):
             r = await self.agent.act("create_field", cube_id=cubes[ci].id)
             icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
             self._add_log(_c(color, f"{icon} create_field"))
+            self._set_feedback(_c(color, f"{icon} Field created — press \\[P] to place cells"))
         except CosmergonError as exc:
             self._add_log(_c(self._theme.warn, f"✗ create_field: {exc}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ Field creation failed: {exc}"))
 
     @work
     async def action_evolve(self) -> None:
@@ -521,8 +616,10 @@ class CosmergonDashboard(App):
             icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
             msg = r.error_message or "ok"
             self._add_log(_c(color, f"{icon} evolve → {msg}"))
+            self._set_feedback(_c(color, f"{icon} Evolve: {msg}"))
         except CosmergonError as exc:
             self._add_log(_c(self._theme.warn, f"✗ evolve: {exc}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ Evolve failed: {exc}"))
 
     async def action_upgrade(self) -> None:
         self._add_log(_c(self._theme.data, "⠋ Opening upgrade page..."))
@@ -536,8 +633,10 @@ class CosmergonDashboard(App):
             url = resp.headers.get("location", "https://cosmergon.com/pricing")
             webbrowser.open(url)
             self._add_log(_c(self._theme.pos, "✓ Browser opened"))
+            self._set_feedback(_c(self._theme.pos, "✓ Browser opened — complete upgrade there"))
         except Exception as exc:
             self._add_log(_c(self._theme.warn, f"✗ Upgrade link error: {exc}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ Upgrade failed: {exc}"))
 
     async def action_pause(self) -> None:
         action = "resume" if self._paused else "pause"
@@ -546,8 +645,11 @@ class CosmergonDashboard(App):
             self._paused = not self._paused
             icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
             self._add_log(_c(color, f"{icon} {action}"))
+            label = "⏸ Agent paused" if self._paused else "▶ Agent resumed"
+            self._set_feedback(_c(color, f"{icon} {label}"))
         except CosmergonError as exc:
             self._add_log(_c(self._theme.warn, f"✗ {action}: {exc}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ {action} failed: {exc}"))
 
     async def action_refresh_now(self) -> None:
         self._add_log(_c(self._theme.data, "Refreshing..."))

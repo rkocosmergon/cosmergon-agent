@@ -650,3 +650,157 @@ async def test_upgrade_error_shows_in_journal() -> None:
 
     assert "✗" in journal.plain
     assert "Upgrade" in journal.plain or "upgrade" in journal.plain.lower()
+
+
+# ---------------------------------------------------------------------------
+# Hint bar — one-line guidance / state machine
+# ---------------------------------------------------------------------------
+
+
+async def _render_hint_key(
+    app: _TestDashboard, size: tuple[int, int] = (80, 40)
+) -> tuple[object, object]:
+    """Run app headless, trigger redraw, return (hint_bar, key_bar) Content."""
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        hint = pilot.app.query_one("#hint-bar", Static).render()
+        key = pilot.app.query_one("#key-bar", Static).render()
+    return hint, key
+
+
+def _make_dashboard_with_empty_fields() -> _TestDashboard:
+    """Dashboard with one field (no cells placed) and compass ever set."""
+    _field = {
+        "id": "bbbbbbbb-0000-0000-0000-000000000002",
+        "cube_id": "aaaaaaaa-0000-0000-0000-000000000001",
+        "z_position": 0,
+        "active_cell_count": 0,
+    }
+    state = fake_state(fields=[_field])
+    agent = CosmergonAgent(api_key="AGENT-test:fakekey000000000000000000000")
+    agent._state = state
+    agent.agent_id = state.agent_id
+    app = _TestDashboard(agent=agent, theme=THEMES["cosmergon"])
+    app._compass_ever_set = True
+    return app
+
+
+async def test_hint_bar_connecting_when_no_state() -> None:
+    """Before first tick, hint bar shows 'Connecting...'."""
+    agent = CosmergonAgent(api_key="AGENT-test:fakekey000000000000000000000")
+    agent._state = None  # type: ignore[assignment]
+    app = _TestDashboard(agent=agent, theme=THEMES["cosmergon"])
+    hint, _ = await _render_hint_key(app)
+    assert "Connecting" in hint.plain
+
+
+async def test_hint_bar_paused_shows_pause_hint() -> None:
+    """When paused, hint bar shows pause indicator and resume instruction."""
+    app = _make_dashboard(paused=True)
+    hint, _ = await _render_hint_key(app)
+    assert "Paused" in hint.plain
+    assert "[Space]" in hint.plain
+
+
+async def test_hint_bar_no_compass_shows_c_cta() -> None:
+    """Without compass, hint bar shows → [C] Set Compass direction.
+
+    [C] is cyan (cmd color); the surrounding guide text is yellow.
+    """
+    app = _make_dashboard(compass_ever_set=False)
+    hint, _ = await _render_hint_key(app)
+    assert "[C]" in hint.plain
+    assert "Compass" in hint.plain
+    # [C] is the cmd key (cyan); the guide text around it is yellow
+    assert _has_style(hint, "Set Compass direction", "yellow")
+
+
+async def test_hint_bar_no_fields_shows_f_cta() -> None:
+    """With compass set but no fields, hint bar shows → [F] Create a field."""
+    app = _make_dashboard(compass_ever_set=True)
+    # default state has fields=[] — step 5 of _compute_hint
+    hint, _ = await _render_hint_key(app)
+    assert "[F]" in hint.plain
+    assert "field" in hint.plain.lower()
+
+
+async def test_hint_bar_no_cells_shows_p_cta() -> None:
+    """With fields but 0 cells, hint bar shows → [P] Place cells."""
+    app = _make_dashboard_with_empty_fields()  # compass set, field exists, 0 cells
+    hint, _ = await _render_hint_key(app)
+    assert "[P]" in hint.plain
+    assert "cell" in hint.plain.lower()
+
+
+async def test_hint_bar_normal_shows_tick_and_actions() -> None:
+    """With fields + cells + compass set, hint bar shows tick info and shortcuts."""
+    app = _make_dashboard_with_cubes()  # field has active_cell_count=5
+    app._compass_ever_set = True
+    hint, _ = await _render_hint_key(app)
+    assert "tick" in hint.plain
+    assert "[P]" in hint.plain
+    assert "[F]" in hint.plain
+
+
+# ---------------------------------------------------------------------------
+# Key bar — all hotkeys visible, [Q] always present at all 9 sizes
+# ---------------------------------------------------------------------------
+
+
+async def test_key_bar_contains_all_hotkeys() -> None:
+    """Key bar must show all hotkeys as literal text (not consumed by Rich)."""
+    app = _make_dashboard()
+    _, key = await _render_hint_key(app)
+    for hotkey in ["[C]", "[P]", "[F]", "[E]", "[U]", "[Space]", "[R]", "[?]", "[Q]"]:
+        assert hotkey in key.plain, f"{hotkey} missing from key bar"
+
+
+@pytest.mark.parametrize("label,cols,rows", SIZE_MATRIX, ids=[s[0] for s in SIZE_MATRIX])
+async def test_key_bar_q_visible_all_sizes(label: str, cols: int, rows: int) -> None:
+    """[Q] Quit must be visible at all 9 terminal sizes (custom key bar, not Textual Footer)."""
+    app = _make_dashboard()
+    async with app.run_test(size=(cols, rows)) as pilot:
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        svg = pilot.app.export_screenshot()
+
+    visible = _svg_visible(svg)
+    visible_text = " ".join(visible)
+    assert "Quit" in visible_text, (
+        f"[{label} {cols}x{rows}] 'Quit' not visible — [Q] key bar row clipped"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Feedback mechanism
+# ---------------------------------------------------------------------------
+
+
+async def test_feedback_shown_in_hint_bar() -> None:
+    """After _set_feedback(), hint bar must show the feedback message."""
+    app = _make_dashboard(compass_ever_set=True)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        pilot.app._set_feedback("[green]✓ Test feedback[/green]")
+        pilot.app._redraw()
+        await pilot.pause()
+        hint = pilot.app.query_one("#hint-bar", Static).render()
+
+    assert "Test feedback" in hint.plain
+
+
+async def test_feedback_overrides_compass_cta() -> None:
+    """Active feedback must override the compass CTA in hint bar."""
+    app = _make_dashboard(compass_ever_set=False)  # normally shows → [C] ...
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        pilot.app._set_feedback("✓ Action done")
+        pilot.app._redraw()
+        await pilot.pause()
+        hint = pilot.app.query_one("#hint-bar", Static).render()
+
+    assert "Action done" in hint.plain
+    assert "Compass" not in hint.plain, "Compass CTA must be suppressed while feedback active"
