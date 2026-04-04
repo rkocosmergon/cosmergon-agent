@@ -733,14 +733,13 @@ async def test_hint_bar_no_cells_shows_p_cta() -> None:
     assert "cell" in hint.plain.lower()
 
 
-async def test_hint_bar_normal_shows_tick_and_actions() -> None:
-    """With fields + cells + compass set, hint bar shows tick info and shortcuts."""
+async def test_hint_bar_normal_shows_tick() -> None:
+    """With fields + cells + compass set, hint bar shows tick info (no hotkeys — those are in key-bar)."""
     app = _make_dashboard_with_cubes()  # field has active_cell_count=5
     app._compass_ever_set = True
     hint, _ = await _render_hint_key(app)
     assert "tick" in hint.plain
-    assert "[P]" in hint.plain
-    assert "[F]" in hint.plain
+    assert "[P]" not in hint.plain, "Hotkeys must not appear in hint-bar — they live in key-bar"
 
 
 # ---------------------------------------------------------------------------

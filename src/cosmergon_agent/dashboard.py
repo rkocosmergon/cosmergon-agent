@@ -680,13 +680,7 @@ class CosmergonDashboard(App):
             else:
                 tick_part += f" · +{max(0, int(-remaining))}s"
 
-        actions = (
-            f"{_c(t.cmd, _hk('P'))} place  "
-            f"{_c(t.cmd, _hk('F'))} field  "
-            f"{_c(t.cmd, _hk('E'))} evolve  "
-            f"{_c(t.cmd, _hk('C'))} compass"
-        )
-        return f"{_c('dim', tick_part)}  ·  {actions}"
+        return _c("dim", tick_part)
 
     def _draw_hint_bar(self, state: GameState | None) -> None:
         """Render hint bar: Line 1 = guidance/feedback, Lines 2-5 = action history."""
