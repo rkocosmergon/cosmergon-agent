@@ -19,7 +19,8 @@ import pytest
 from textual import work
 from textual.widgets import Static
 
-from cosmergon_agent import CosmergonAgent
+from cosmergon_agent import CosmergonAgent, CosmergonError
+from cosmergon_agent.action import ActionResult
 from cosmergon_agent.dashboard import THEMES, CosmergonDashboard
 from cosmergon_agent.testing import fake_state
 
@@ -395,3 +396,180 @@ async def test_layout_economy_content_visible_wide(label: str, cols: int, rows: 
     assert any("Rang" in t for t in visible), (
         f"[{label} {cols}x{rows}] Rang (rank) not visible"
     )
+
+
+# ---------------------------------------------------------------------------
+# Action flow tests — user presses key → correct journal entry, no crash
+#
+# Each action is tested for:
+#   (a) pre-condition guard (no cubes / no fields → warning in journal)
+#   (b) error path (CosmergonError → ✗ message in journal, app alive)
+#   (c) success path (ActionResult(success=True) → ✓ message in journal)
+# ---------------------------------------------------------------------------
+
+# Raw dicts so fake_state / GameState.from_api() can parse them
+_CUBE_RAW = {"id": "aaaaaaaa-0000-0000-0000-000000000001", "name": "Test Cube"}
+_FIELD_RAW = {
+    "id": "bbbbbbbb-0000-0000-0000-000000000001",
+    "cube_id": "aaaaaaaa-0000-0000-0000-000000000001",
+    "z_position": 0,
+    "active_cell_count": 5,
+}
+
+
+def _make_dashboard_with_cubes(log: list[str] | None = None) -> _TestDashboard:
+    """Dashboard with one cube + one field in state, no network."""
+    state = fake_state(
+        energy=1000.0,
+        subscription_tier="free",
+        ranking={"player_tier": 0, "tier_name": "Novice", "player_score": 0.0},
+        universe_cubes=[_CUBE_RAW],
+        fields=[_FIELD_RAW],
+    )
+    agent = CosmergonAgent(api_key="AGENT-test:fakekey000000000000000000000")
+    agent._state = state
+    agent.agent_id = state.agent_id
+    app = _TestDashboard(agent=agent, theme=THEMES["cosmergon"])
+    if log is not None:
+        app._log = list(log)
+    return app
+
+
+def _act_success() -> object:
+    """Patch: agent.act always succeeds."""
+    async def _act(*_args: object, **_kwargs: object) -> ActionResult:
+        return ActionResult(success=True, action=str(_args[0]) if _args else "act", data={})
+    return _act
+
+
+def _act_fail(msg: str = "rate limited") -> object:
+    """Patch: agent.act always raises CosmergonError."""
+    async def _act(*_args: object, **_kwargs: object) -> ActionResult:
+        raise CosmergonError(msg)
+    return _act
+
+
+async def _journal_after(pilot: object, *keys: str) -> object:
+    """Press keys (with pauses for @work), redraw, return journal Content."""
+    for key in keys:
+        await pilot.press(key)
+        await pilot.pause()
+    await pilot.pause()
+    pilot.app._redraw()
+    await pilot.pause()
+    return pilot.app.query_one("#journal-panel", Static).render()
+
+
+# --- create_field ---
+
+async def test_create_field_no_cubes_shows_warning() -> None:
+    """[F] with no cubes in state must log a warning, not crash."""
+    app = _make_dashboard(log=[])  # default state has no universe_cubes
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "f")
+    assert "No cubes" in journal.plain
+
+
+async def test_create_field_error_shows_in_journal() -> None:
+    """[F] → select cube → CosmergonError must appear as ✗ in journal, no crash."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_fail("rate limited")
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "f", "1")
+    assert "✗" in journal.plain
+    assert "create_field" in journal.plain
+
+
+async def test_create_field_success_shows_in_journal() -> None:
+    """[F] → select cube → success must log ✓ create_field."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_success()
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "f", "1")
+    assert "✓" in journal.plain
+    assert "create_field" in journal.plain
+
+
+# --- place_cells ---
+
+async def test_place_cells_error_shows_in_journal() -> None:
+    """[P] → field → preset → CosmergonError must appear as ✗, no crash."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_fail("rate limited")
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "p", "1", "1")
+    assert "✗" in journal.plain
+    assert "place_cells" in journal.plain
+
+
+async def test_place_cells_success_shows_in_journal() -> None:
+    """[P] → field → preset → success must log ✓ place_cells(...)."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_success()
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "p", "1", "1")
+    assert "✓" in journal.plain
+    assert "place_cells" in journal.plain
+
+
+# --- evolve ---
+
+async def test_evolve_no_fields_shows_warning() -> None:
+    """[E] with no fields must log a warning, not crash."""
+    app = _make_dashboard(log=[])
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "e")
+    assert "No fields" in journal.plain
+
+
+async def test_evolve_error_shows_in_journal() -> None:
+    """[E] → select field → CosmergonError must appear as ✗, no crash."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_fail("not ready")
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "e", "1")
+    assert "✗" in journal.plain
+    assert "evolve" in journal.plain
+
+
+async def test_evolve_success_shows_in_journal() -> None:
+    """[E] → select field → success must log ✓ evolve → ok."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_success()
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "e", "1")
+    assert "✓" in journal.plain
+    assert "evolve" in journal.plain
+
+
+# --- pause ---
+
+async def test_pause_success_shows_paused() -> None:
+    """[Space] with successful act must toggle to PAUSED in agent panel."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_success()
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("space")
+        await pilot.pause()
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        agent = pilot.app.query_one("#agent-panel", Static).render()
+    assert "PAUSED" in agent.plain
+
+
+async def test_pause_error_shows_in_journal() -> None:
+    """[Space] with CosmergonError must log ✗ pause:, state must NOT toggle."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_fail("server error")
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("space")
+        await pilot.pause()
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        agent = pilot.app.query_one("#agent-panel", Static).render()
+        journal = pilot.app.query_one("#journal-panel", Static).render()
+    assert "AKTIV" in agent.plain, "State must not toggle on error"
+    assert "✗" in journal.plain
+    assert "pause" in journal.plain

@@ -528,10 +528,13 @@ class CosmergonDashboard(App):
 
     async def action_pause(self) -> None:
         action = "resume" if self._paused else "pause"
-        r = await self.agent.act(action)
-        self._paused = not self._paused
-        icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
-        self._add_log(_c(color, f"{icon} {action}"))
+        try:
+            r = await self.agent.act(action)
+            self._paused = not self._paused
+            icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
+            self._add_log(_c(color, f"{icon} {action}"))
+        except CosmergonError as exc:
+            self._add_log(_c(self._theme.warn, f"✗ {action}: {exc}"))
 
     async def action_refresh_now(self) -> None:
         self._add_log(_c(self._theme.data, "Refreshing..."))
