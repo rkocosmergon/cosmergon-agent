@@ -16,13 +16,12 @@ import html
 import re
 
 import pytest
+from textual import work
+from textual.widgets import Static
 
 from cosmergon_agent import CosmergonAgent
 from cosmergon_agent.dashboard import THEMES, CosmergonDashboard
 from cosmergon_agent.testing import fake_state
-from textual import work
-from textual.widgets import Static
-
 
 # ---------------------------------------------------------------------------
 # Test harness
@@ -164,6 +163,16 @@ async def test_upgrade_button_cyan_not_yellow():
 # ---------------------------------------------------------------------------
 
 
+async def test_economy_placeholder_when_no_world_briefing():
+    """Economy panel shows 'Joining universe...' when state exists but no world briefing."""
+    app = _make_dashboard()  # no world_briefing by default
+    _, economy, _ = await _render(app)
+    assert "Joining" in economy.plain, (
+        "Economy panel must show a placeholder, not be empty, before world briefing arrives"
+    )
+    assert "Rang" not in economy.plain, "Rang must not appear without world briefing"
+
+
 async def test_score_zero_not_shown():
     """Score: 0 must not appear — bad first impression."""
     app = _make_dashboard(score=0.0)
@@ -195,15 +204,15 @@ async def test_tip_truncated_at_word_boundary():
     })
     _, economy, _ = await _render(app)
 
-    tip_lines = [l for l in economy.plain.splitlines() if "→" in l]
+    tip_lines = [line for line in economy.plain.splitlines() if "→" in line]
     assert tip_lines, "Tip line must be present"
     tip_line = tip_lines[0]
-    assert "…" in tip_line, f"Long tip must end with …, got: {repr(tip_line)}"
+    assert "…" in tip_line, f"Long tip must end with …, got: {tip_line!r}"
     # Must not end on a partial word (last char before … must be a space boundary)
     before_ellipsis = tip_line.split("…")[0].rstrip()
     assert before_ellipsis.endswith((".", "!", "?", "assets", "income", "fields", "market"
                                      )) or before_ellipsis[-1] in " etaoinsrhldcumfpgwybvkxjqz", (
-        f"Tip cut mid-word: {repr(tip_line)}"
+        f"Tip cut mid-word: {tip_line!r}"
     )
 
 
@@ -248,29 +257,100 @@ async def test_activity_shows_log_entries():
 
 
 # ---------------------------------------------------------------------------
-# Layout: key content visible in SVG at 80x24 (not clipped)
+# Layout: key content visible in SVG — 9 terminal size variants
+#
+# 3 shapes x 3 sizes (ideal / -10% / +20%):
+#   Landscape (120x30)  Square (80x40)  Portrait (60x80)
 # ---------------------------------------------------------------------------
 
+# fmt: off
+SIZE_MATRIX = [
+    # (id,                    cols, rows)
+    ("landscape_ideal",       120,  30),
+    ("landscape_minus10pct",  108,  27),
+    ("landscape_plus20pct",   144,  36),
+    ("square_ideal",           80,  40),
+    ("square_minus10pct",      72,  36),
+    ("square_plus20pct",       96,  48),
+    ("portrait_ideal",         60,  80),
+    ("portrait_minus10pct",    54,  72),
+    ("portrait_plus20pct",     72,  96),
+]
+# fmt: on
 
-async def test_layout_headers_visible_80x24():
-    """Panel headers must be visible (not clipped) at standard 80x24 terminal."""
-    app = _make_dashboard(world_briefing={
-        "total_agents": 79, "your_rank": 44,
-        "market_summary": "5 listings", "tip": "Place oscillating cells.",
-    })
-    async with app.run_test(size=(80, 24)) as pilot:
-        await pilot.pause()
-        pilot.app._redraw()
-        await pilot.pause()
-        svg = pilot.app.export_screenshot()
+_SVG_WB = {
+    "total_agents": 79, "your_rank": 44,
+    "market_summary": "5 listings", "tip": "Place oscillating cells.",
+}
 
-    visible = {
+
+def _svg_visible(svg: str) -> set[str]:
+    """Extract all visible text strings from a Textual SVG screenshot."""
+    return {
         html.unescape(t.strip())
         for t in re.findall(r">([^<\n]+)<", svg)
         if t.strip() and not t.strip().startswith(".")
     }
 
-    assert any("AGENT" in t for t in visible), "AGENT header clipped at 80x24"
-    assert any("WIRTSCHAFT" in t for t in visible), "WIRTSCHAFT header clipped at 80x24"
-    assert any("JOURNAL" in t for t in visible), "JOURNAL header clipped at 80x24"
-    assert any("AKTIV" in t for t in visible), "Status AKTIV clipped at 80x24"
+
+@pytest.mark.parametrize("label,cols,rows", SIZE_MATRIX, ids=[s[0] for s in SIZE_MATRIX])
+async def test_layout_minimum_content_visible(label: str, cols: int, rows: int) -> None:
+    """At every terminal size, the critical minimum must be visible (not clipped).
+
+    Critical minimum: AGENT header, WIRTSCHAFT header, JOURNAL header, status.
+    Panels are split 50/50 horizontally — portrait (60 cols) gives ~23 chars
+    effective per panel (border + padding), enough for all headers.
+    """
+    app = _make_dashboard(world_briefing=_SVG_WB)
+    async with app.run_test(size=(cols, rows)) as pilot:
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        svg = pilot.app.export_screenshot()
+
+    visible = _svg_visible(svg)
+
+    assert any("AGENT" in t for t in visible), (
+        f"[{label} {cols}x{rows}] AGENT header clipped"
+    )
+    assert any("WIRTSCHAFT" in t for t in visible), (
+        f"[{label} {cols}x{rows}] WIRTSCHAFT header clipped"
+    )
+    assert any("JOURNAL" in t for t in visible), (
+        f"[{label} {cols}x{rows}] JOURNAL header clipped"
+    )
+    assert any("AKTIV" in t for t in visible), (
+        f"[{label} {cols}x{rows}] Status AKTIV clipped"
+    )
+
+
+@pytest.mark.parametrize(
+    "label,cols,rows",
+    [s for s in SIZE_MATRIX if s[1] >= 80],  # landscape + square only
+    ids=[s[0] for s in SIZE_MATRIX if s[1] >= 80],
+)
+async def test_layout_economy_content_visible_wide(label: str, cols: int, rows: int) -> None:
+    """On wider terminals (landscape + square), economy detail must be visible.
+
+    Portrait panels (~23 chars effective) may clip 'active listings' etc. —
+    that is acceptable. Landscape/square panels have enough room.
+    """
+    app = _make_dashboard(world_briefing={
+        **_SVG_WB,
+        "market_summary": "5 active listings",
+        "last_event": "Grey Plague at tick 21",
+    })
+    async with app.run_test(size=(cols, rows)) as pilot:
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        svg = pilot.app.export_screenshot()
+
+    visible = _svg_visible(svg)
+
+    assert any("listings" in t for t in visible), (
+        f"[{label} {cols}x{rows}] market listings not visible"
+    )
+    assert any("Rang" in t for t in visible), (
+        f"[{label} {cols}x{rows}] Rang (rank) not visible"
+    )

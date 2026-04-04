@@ -346,12 +346,13 @@ class CosmergonDashboard(App):
                 f"  Score: {state.ranking.player_score:,.0f}"
                 if state.ranking.player_score > 0 else ""
             )
-            lines.append(_c(t.data, f"T{state.ranking.player_tier} {state.ranking.tier_name}{score_part}"))
+            tier_line = f"T{state.ranking.player_tier} {state.ranking.tier_name}{score_part}"
+            lines.append(_c(t.data, tier_line))
         lines.append("")
 
         # Compass
         if not self._compass_ever_set:
-            lines.append(_c(t.guide, "[bold]→ \\[C] Richtung setzen[/bold]"))
+            lines.append(_c(t.guide, "[bold]→ \\[C] Set Compass direction[/bold]"))
         else:
             compass_label = _COMPASS_DISPLAY.get(self._compass_preset, self._compass_preset)
             lines.append(_c(t.data, f"Compass: {compass_label}"))
@@ -386,6 +387,8 @@ class CosmergonDashboard(App):
                 lines.append("")
                 tip = wb.tip if len(wb.tip) <= 38 else wb.tip[:38].rsplit(" ", 1)[0] + "…"
                 lines.append(_c(t.data, f"→ {tip}"))
+        elif state:
+            lines.append(_c("dim", "Joining universe..."))
 
         if state and state.subscription_tier == "free":
             lines.append("")
