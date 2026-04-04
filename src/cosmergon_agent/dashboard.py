@@ -381,7 +381,7 @@ class CosmergonDashboard(App):
                 lines.append(_c(t.data, f"Top:   {wb.top_agent[:32]}"))
             lines.append(_c(t.data, f"Markt: {wb.market_summary[:32]}"))
             if wb.last_event:
-                lines.append(_c(t.warn, f"Event: {wb.last_event[:32]}"))
+                lines.append(_c("dim", f"Last: {wb.last_event[:32]}"))
             if wb.tip:
                 lines.append("")
                 tip = wb.tip if len(wb.tip) <= 38 else wb.tip[:38].rsplit(" ", 1)[0] + "…"
