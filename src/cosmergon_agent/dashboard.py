@@ -294,8 +294,11 @@ class HelpModal(ModalScreen):
     def on_mount(self) -> None:
         self.query_one(VerticalScroll).focus()
 
+    _SCROLL_KEYS = {"up", "down", "pageup", "pagedown", "home", "end"}
+
     def on_key(self, event: Any) -> None:
-        self.dismiss(None)
+        if event.key not in self._SCROLL_KEYS:
+            self.dismiss(None)
 
 
 # ---------------------------------------------------------------------------
