@@ -89,7 +89,7 @@ def _has_style(content, text_fragment: str, style_fragment: str) -> bool:
     """Return True if text_fragment appears with style_fragment in any span."""
     for span in content.spans:
         if style_fragment in str(span.style):
-            chunk = content.plain[span.start:span.end]
+            chunk = content.plain[span.start : span.end]
             if text_fragment in chunk:
                 return True
     return False
@@ -105,8 +105,7 @@ async def test_c_hotkey_visible_in_panel():
     app = _make_dashboard()
     agent, _, _ = await _render(app)
     assert "[C]" in agent.plain, (
-        "Hotkey [C] invisible — Rich consumed it as a style tag. "
-        "Use \\[C] in markup."
+        "Hotkey [C] invisible — Rich consumed it as a style tag. Use \\[C] in markup."
     )
 
 
@@ -114,9 +113,7 @@ async def test_u_hotkey_visible_in_key_bar():
     """[U] must render as literal text in the key bar (upgrade hint moved out of economy panel)."""
     app = _make_dashboard()
     _, key = await _render_hint_key(app)
-    assert "[U]" in key.plain, (
-        "Hotkey [U] invisible in key bar — Rich consumed it as a style tag."
-    )
+    assert "[U]" in key.plain, "Hotkey [U] invisible in key bar — Rich consumed it as a style tag."
 
 
 async def test_help_modal_is_english():
@@ -149,9 +146,7 @@ async def test_no_fields_warning_hotkey_visible():
         await pilot.pause()
         journal = pilot.app.query_one("#journal-panel", Static).render()
 
-    assert "[F]" in journal.plain, (
-        "[F] in warning message consumed by Rich — use \\[F] in markup"
-    )
+    assert "[F]" in journal.plain, "[F] in warning message consumed by Rich — use \\[F] in markup"
 
 
 # ---------------------------------------------------------------------------
@@ -166,13 +161,9 @@ async def test_new_user_only_c_is_yellow():
 
     assert _has_style(agent, "[C]", "yellow"), "[C] must be yellow in agent panel"
     yellow_economy = [
-        economy.plain[s.start:s.end]
-        for s in economy.spans
-        if "yellow" in str(s.style)
+        economy.plain[s.start : s.end] for s in economy.spans if "yellow" in str(s.style)
     ]
-    assert not yellow_economy, (
-        f"Nothing in economy panel should be yellow. Found: {yellow_economy}"
-    )
+    assert not yellow_economy, f"Nothing in economy panel should be yellow. Found: {yellow_economy}"
 
 
 async def test_compass_set_removes_yellow():
@@ -180,7 +171,7 @@ async def test_compass_set_removes_yellow():
     app = _make_dashboard(compass_ever_set=True, compass_preset="grow")
     agent, _, _ = await _render(app)
 
-    yellow = [agent.plain[s.start:s.end] for s in agent.spans if "yellow" in str(s.style)]
+    yellow = [agent.plain[s.start : s.end] for s in agent.spans if "yellow" in str(s.style)]
     assert not yellow, f"After compass set, no yellow expected. Found: {yellow}"
     assert "Compass:" in agent.plain and "Grow" in agent.plain
 
@@ -231,34 +222,16 @@ async def test_agent_id_not_in_panel():
     assert "Agent:" not in agent.plain
 
 
-async def test_tip_truncated_at_word_boundary():
-    """Long tip must end with … and not cut mid-word."""
-    long_tip = "Check the market for underpriced assets. Buy more fields to increase income."
-    app = _make_dashboard(world_briefing={
-        "total_agents": 79, "your_rank": 44,
-        "market_summary": "5 listings", "tip": long_tip,
-    })
-    _, economy, _ = await _render(app)
-
-    tip_lines = [line for line in economy.plain.splitlines() if "→" in line]
-    assert tip_lines, "Tip line must be present"
-    tip_line = tip_lines[0]
-    assert "…" in tip_line, f"Long tip must end with …, got: {tip_line!r}"
-    # Must not end on a partial word (last char before … must be a space boundary)
-    before_ellipsis = tip_line.split("…")[0].rstrip()
-    assert before_ellipsis.endswith((".", "!", "?", "assets", "income", "fields", "market"
-                                     )) or before_ellipsis[-1] in " etaoinsrhldcumfpgwybvkxjqz", (
-        f"Tip cut mid-word: {tip_line!r}"
-    )
-
-
 async def test_last_event_not_red():
     """Past catastrophe events must not show in red — not an active alarm."""
-    app = _make_dashboard(world_briefing={
-        "total_agents": 79, "your_rank": 44,
-        "market_summary": "5 listings",
-        "last_event": "Grey Plague at tick 21", "tip": "test",
-    })
+    app = _make_dashboard(
+        world_briefing={
+            "total_agents": 79,
+            "your_rank": 44,
+            "market_summary": "5 listings",
+            "last_event": "Grey Plague at tick 21",
+        }
+    )
     _, economy, _ = await _render(app)
 
     assert "Last:" in economy.plain, "last_event label must be 'Last:'"
@@ -315,8 +288,9 @@ SIZE_MATRIX = [
 # fmt: on
 
 _SVG_WB = {
-    "total_agents": 79, "your_rank": 44,
-    "market_summary": "5 listings", "tip": "Place oscillating cells.",
+    "total_agents": 79,
+    "your_rank": 44,
+    "market_summary": "5 listings",
 }
 
 
@@ -350,18 +324,12 @@ async def test_layout_minimum_content_visible(label: str, cols: int, rows: int) 
 
     visible = _svg_visible(svg)
 
-    assert any("AGENT" in t for t in visible), (
-        f"[{label} {cols}x{rows}] AGENT header clipped"
-    )
+    assert any("AGENT" in t for t in visible), f"[{label} {cols}x{rows}] AGENT header clipped"
     assert any("WIRTSCHAFT" in t for t in visible), (
         f"[{label} {cols}x{rows}] WIRTSCHAFT header clipped"
     )
-    assert any("JOURNAL" in t for t in visible), (
-        f"[{label} {cols}x{rows}] JOURNAL header clipped"
-    )
-    assert any("AKTIV" in t for t in visible), (
-        f"[{label} {cols}x{rows}] Status AKTIV clipped"
-    )
+    assert any("JOURNAL" in t for t in visible), f"[{label} {cols}x{rows}] JOURNAL header clipped"
+    assert any("AKTIV" in t for t in visible), f"[{label} {cols}x{rows}] Status AKTIV clipped"
 
 
 @pytest.mark.parametrize(
@@ -375,11 +343,13 @@ async def test_layout_economy_content_visible_wide(label: str, cols: int, rows: 
     Portrait panels (~23 chars effective) may clip 'active listings' etc. —
     that is acceptable. Landscape/square panels have enough room.
     """
-    app = _make_dashboard(world_briefing={
-        **_SVG_WB,
-        "market_summary": "5 active listings",
-        "last_event": "Grey Plague at tick 21",
-    })
+    app = _make_dashboard(
+        world_briefing={
+            **_SVG_WB,
+            "market_summary": "5 active listings",
+            "last_event": "Grey Plague at tick 21",
+        }
+    )
     async with app.run_test(size=(cols, rows)) as pilot:
         await pilot.pause()
         pilot.app._redraw()
@@ -391,9 +361,7 @@ async def test_layout_economy_content_visible_wide(label: str, cols: int, rows: 
     assert any("listings" in t for t in visible), (
         f"[{label} {cols}x{rows}] market listings not visible"
     )
-    assert any("Rang" in t for t in visible), (
-        f"[{label} {cols}x{rows}] Rang (rank) not visible"
-    )
+    assert any("Rang" in t for t in visible), f"[{label} {cols}x{rows}] Rang (rank) not visible"
 
 
 # ---------------------------------------------------------------------------
@@ -435,15 +403,19 @@ def _make_dashboard_with_cubes(log: list[str] | None = None) -> _TestDashboard:
 
 def _act_success() -> object:
     """Patch: agent.act always succeeds."""
+
     async def _act(*_args: object, **_kwargs: object) -> ActionResult:
         return ActionResult(success=True, action=str(_args[0]) if _args else "act", data={})
+
     return _act
 
 
 def _act_fail(msg: str = "rate limited") -> object:
     """Patch: agent.act always raises CosmergonError."""
+
     async def _act(*_args: object, **_kwargs: object) -> ActionResult:
         raise CosmergonError(msg)
+
     return _act
 
 
@@ -459,6 +431,7 @@ async def _journal_after(pilot: object, *keys: str) -> object:
 
 
 # --- create_field ---
+
 
 async def test_create_field_no_cubes_shows_warning() -> None:
     """[F] with no cubes in state must log a warning, not crash."""
@@ -490,6 +463,7 @@ async def test_create_field_success_shows_in_journal() -> None:
 
 # --- place_cells ---
 
+
 async def test_place_cells_error_shows_in_journal() -> None:
     """[P] → field → preset → CosmergonError must appear as ✗, no crash."""
     app = _make_dashboard_with_cubes()
@@ -511,6 +485,7 @@ async def test_place_cells_success_shows_in_journal() -> None:
 
 
 # --- evolve ---
+
 
 async def test_evolve_no_fields_shows_warning() -> None:
     """[E] with no fields must log a warning, not crash."""
@@ -541,6 +516,7 @@ async def test_evolve_success_shows_in_journal() -> None:
 
 
 # --- pause ---
+
 
 async def test_pause_success_shows_paused() -> None:
     """[Space] with successful act must toggle to PAUSED in agent panel."""
@@ -575,17 +551,22 @@ async def test_pause_error_shows_in_journal() -> None:
 
 # --- compass (set_compass, not agent.act) ---
 
+
 def _set_compass_success() -> object:
     """Patch: agent.set_compass always returns explanation dict."""
+
     async def _set(*_args: object, **_kwargs: object) -> dict:
         return {"explanation": "Strategy set."}
+
     return _set
 
 
 def _set_compass_fail(msg: str = "server error") -> object:
     """Patch: agent.set_compass always raises CosmergonError."""
+
     async def _set(*_args: object, **_kwargs: object) -> dict:
         raise CosmergonError(msg)
+
     return _set
 
 
@@ -596,14 +577,14 @@ async def test_compass_success_clears_yellow_cta() -> None:
     async with app.run_test(size=(80, 40)) as pilot:
         await pilot.press("c")
         await pilot.pause()
-        await pilot.press("3")   # preset index 2 = "grow" (1=attack 2=defend 3=grow)
+        await pilot.press("3")  # preset index 2 = "grow" (1=attack 2=defend 3=grow)
         await pilot.pause()
         await pilot.pause()
         pilot.app._redraw()
         await pilot.pause()
         agent = pilot.app.query_one("#agent-panel", Static).render()
 
-    yellow = [agent.plain[s.start:s.end] for s in agent.spans if "yellow" in str(s.style)]
+    yellow = [agent.plain[s.start : s.end] for s in agent.spans if "yellow" in str(s.style)]
     assert not yellow, f"Yellow CTA must vanish after compass set. Found: {yellow}"
     assert "Compass" in agent.plain, "Compass label must appear after selection"
 
@@ -630,12 +611,14 @@ async def test_compass_error_shows_in_journal() -> None:
 
 # --- upgrade ---
 
+
 async def test_upgrade_error_shows_in_journal() -> None:
     """[U] with connection error shows ✗ in journal, app does not crash."""
     app = _make_dashboard()
 
     async def _fail_request(*_args: object, **_kwargs: object) -> object:
         raise CosmergonError("connection refused")
+
     app.agent._request = _fail_request
 
     async with app.run_test(size=(80, 40)) as pilot:
@@ -705,13 +688,13 @@ async def test_hint_bar_paused_shows_pause_hint() -> None:
 async def test_hint_bar_no_compass_shows_c_cta() -> None:
     """Without compass, hint bar shows → [C] Set Compass direction.
 
-    [C] is cyan (cmd color); the surrounding guide text is yellow.
+    [C] is muted grey (cmd color); the surrounding guide text is yellow (guide color).
     """
     app = _make_dashboard(compass_ever_set=False)
     hint, _ = await _render_hint_key(app)
     assert "[C]" in hint.plain
     assert "Compass" in hint.plain
-    # [C] is the cmd key (cyan); the guide text around it is yellow
+    # [C] is the cmd key (muted grey); the guide text around it is yellow (guide color)
     assert _has_style(hint, "Set Compass direction", "yellow")
 
 

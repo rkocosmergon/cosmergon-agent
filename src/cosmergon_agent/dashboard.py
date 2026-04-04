@@ -15,6 +15,7 @@ Hotkeys:
 Themes: cosmergon (default), matrix, mono, high-contrast
 Config: COSMERGON_THEME env var  |  ~/.cosmergon/dashboard.toml
 """
+
 from __future__ import annotations
 
 import argparse
@@ -61,18 +62,18 @@ _COMPASS_DISPLAY = {
 @dataclass(frozen=True)
 class Theme:
     name: str
-    cmd: str    # hotkeys / clickable
+    cmd: str  # hotkeys / clickable
     guide: str  # onboarding highlight
-    pos: str    # positive / gain
-    warn: str   # warning / loss
-    struct: str # headers / separators
-    data: str   # neutral data text
+    pos: str  # positive / gain
+    warn: str  # warning / loss
+    struct: str  # headers / separators
+    data: str  # neutral data text
 
 
 THEMES: dict[str, Theme] = {
-    "cosmergon": Theme("cosmergon", "cyan", "yellow", "#6EE21C", "red", "white", "white"),
-    "matrix":    Theme("matrix", "green", "bright_green", "green", "red", "green", "green"),
-    "mono":      Theme("mono", "white", "white", "white", "white", "white", "white"),
+    "cosmergon": Theme("cosmergon", "#aaaaaa", "yellow", "#6EE21C", "red", "#999999", "white"),
+    "matrix": Theme("matrix", "green", "bright_green", "green", "red", "green", "green"),
+    "mono": Theme("mono", "white", "white", "white", "white", "white", "white"),
     "high-contrast": Theme("high-contrast", "yellow", "cyan", "green", "red", "white", "white"),
 }
 
@@ -226,7 +227,7 @@ class CosmergonDashboard(App):
 
     #hint-bar {
         height: 7;
-        background: #161620;
+        background: #1e1e1e;
         padding: 1 2;
         border-bottom: solid #2a2a2a;
     }
@@ -265,7 +266,7 @@ class CosmergonDashboard(App):
 
     #key-bar {
         height: 4;
-        background: #1e1e1e;
+        background: #252525;
         padding: 0 1;
         border-top: solid #2a2a2a;
     }
@@ -295,6 +296,7 @@ class CosmergonDashboard(App):
         self._feedback: str = ""
         self._feedback_until: float = 0.0
         self._tick_received_at: float = 0.0
+        self._tick_interval: float = 60.0  # self-calibrating from observed tick gaps
         self._last_tick: int = -1
         self._hint_history: list[str] = []
 
@@ -315,7 +317,13 @@ class CosmergonDashboard(App):
     def _register_agent_handlers(self) -> None:
         @self.agent.on_tick
         async def _tick(state: GameState) -> None:
-            self._tick_received_at = time.monotonic()
+            now = time.monotonic()
+            # Calibrate tick interval from observed gap (sanity-bound: 10-300s)
+            if self._tick_received_at > 0:
+                observed = now - self._tick_received_at
+                if 10.0 < observed < 300.0:
+                    self._tick_interval = observed
+            self._tick_received_at = now
             self._last_tick = state.tick
             if self._last_energy is None:
                 self._last_energy = state.energy
@@ -374,7 +382,8 @@ class CosmergonDashboard(App):
         if state.ranking:
             score_part = (
                 f"  Score: {state.ranking.player_score:,.0f}"
-                if state.ranking.player_score > 0 else ""
+                if state.ranking.player_score > 0
+                else ""
             )
             tier_line = f"T{state.ranking.player_tier} {state.ranking.tier_name}{score_part}"
             lines.append(_c(t.data, tier_line))
@@ -413,10 +422,6 @@ class CosmergonDashboard(App):
             lines.append(_c(t.data, f"Markt: {wb.market_summary[:32]}"))
             if wb.last_event:
                 lines.append(_c("dim", f"Last: {wb.last_event[:32]}"))
-            if wb.tip:
-                lines.append("")
-                tip = wb.tip if len(wb.tip) <= 38 else wb.tip[:38].rsplit(" ", 1)[0] + "…"
-                lines.append(_c(t.data, f"→ {tip}"))
         elif state:
             lines.append(_c("dim", "Joining universe..."))
 
@@ -446,12 +451,17 @@ class CosmergonDashboard(App):
 
     def _draw_status_bar(self, state: GameState | None) -> None:
         agent_id = (self.agent.agent_id or "?")[:8]
-        tier = (state.subscription_tier if state else "?")
+        tier = state.subscription_tier if state else "?"
         tick = state.tick if state else "-"
         sep = " │ "
         tname = self._theme.name
-        segments = [agent_id, f"tick {tick}", f"tier {tier}", f"sdk {__version__}",
-                    f"theme {tname}"]
+        segments = [
+            agent_id,
+            f"tick {tick}",
+            f"tier {tier}",
+            f"sdk {__version__}",
+            f"theme {tname}",
+        ]
         self.query_one("#status-bar", Static).update(f"[dim]{sep.join(segments)}[/dim]")
 
     def _set_feedback(self, msg: str, duration: float = 4.0) -> None:
@@ -467,8 +477,10 @@ class CosmergonDashboard(App):
         """Return '  ·  next ~Xs' when tick timing is known, else empty string."""
         if self._tick_received_at > 0:
             elapsed = time.monotonic() - self._tick_received_at
-            remaining = max(0.0, self.agent.poll_interval - elapsed)
-            return "  ·  " + _c("dim", "next ~" + str(int(remaining)) + "s")
+            remaining = self._tick_interval - elapsed
+            if remaining < 1.0:
+                return "  ·  " + _c("dim", "next tick soon")
+            return "  ·  " + _c("dim", f"next ~{int(remaining)}s")
         return ""
 
     def _compute_hint(self, state: GameState | None) -> str:
@@ -479,8 +491,11 @@ class CosmergonDashboard(App):
         if self._feedback and time.monotonic() < self._feedback_until:
             if self._tick_received_at > 0:
                 elapsed = time.monotonic() - self._tick_received_at
-                remaining = max(0.0, self.agent.poll_interval - elapsed)
-                suffix = _c("dim", "takes effect at next tick ~" + str(int(remaining)) + "s")
+                remaining = self._tick_interval - elapsed
+                if remaining < 1.0:
+                    suffix = _c("dim", "takes effect at next tick soon")
+                else:
+                    suffix = _c("dim", f"takes effect at next tick ~{int(remaining)}s")
                 return f"{self._feedback}  ·  {suffix}"
             return self._feedback
 
@@ -520,16 +535,18 @@ class CosmergonDashboard(App):
         if not any(f.active_cell_count > 0 for f in state.fields):
             return (
                 f"{_c(t.guide, '→')} {_c(t.cmd, _hk('P'))} "
-                f"{_c(t.guide, 'Place cells')} — start a Conway pattern"
-                + self._countdown_suffix()
+                f"{_c(t.guide, 'Place cells')} — start a Conway pattern" + self._countdown_suffix()
             )
 
         # 7. Normal running state — show tick + countdown + quick-actions
         tick_part = f"tick {state.tick}"
         if self._tick_received_at > 0:
             elapsed = time.monotonic() - self._tick_received_at
-            remaining = max(0.0, self.agent.poll_interval - elapsed)
-            tick_part += " · next ~" + str(int(remaining)) + "s"
+            remaining = self._tick_interval - elapsed
+            if remaining < 1.0:
+                tick_part += " · next tick soon"
+            else:
+                tick_part += f" · next ~{int(remaining)}s"
 
         actions = (
             f"{_c(t.cmd, _hk('P'))} place  "
@@ -552,8 +569,15 @@ class CosmergonDashboard(App):
         def k(key: str, label: str) -> str:
             return f"{_c(t.cmd, _hk(key))} {label}"
 
-        row1 = "  ".join([k("C", "Compass"), k("P", "Place"), k("F", "Field"),
-                           k("E", "Evolve"), k("U", "Upgrade")])
+        row1 = "  ".join(
+            [
+                k("C", "Compass"),
+                k("P", "Place"),
+                k("F", "Field"),
+                k("E", "Evolve"),
+                k("U", "Upgrade"),
+            ]
+        )
         row2 = "  ".join([k("Space", "Pause"), k("R", "Refresh"), k("?", "Help"), k("Q", "Quit")])
         self.query_one("#key-bar", Static).update(f"{row1}\n{row2}")
 
@@ -697,7 +721,7 @@ def main() -> None:
         description="Cosmergon Agent Dashboard",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Themes: cosmergon (default), matrix, mono, high-contrast\n"
-               "Config: ~/.cosmergon/dashboard.toml  |  COSMERGON_THEME env var",
+        "Config: ~/.cosmergon/dashboard.toml  |  COSMERGON_THEME env var",
     )
     parser.add_argument("--api-key", help="API key (auto-registers if omitted)")
     parser.add_argument("--base-url", default="https://cosmergon.com")
