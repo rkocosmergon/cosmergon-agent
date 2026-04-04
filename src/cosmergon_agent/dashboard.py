@@ -30,7 +30,7 @@ from typing import Any, ClassVar
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Label, Static
 
@@ -164,18 +164,25 @@ class SelectModal(ModalScreen):
 
 
 class HelpModal(ModalScreen):
-    """Help overlay."""
+    """Scrollable guide: what is Cosmergon, hotkeys, and FAQ."""
 
     DEFAULT_CSS = """
     HelpModal {
         align: center middle;
     }
-    HelpModal > #dialog {
-        width: 52;
-        height: auto;
+    HelpModal > #guide-wrap {
+        width: 64;
+        height: 85vh;
+        max-height: 40;
         border: solid $accent;
         background: $surface;
-        padding: 1 2;
+    }
+    HelpModal > #guide-wrap > #guide-header {
+        height: 1;
+        padding: 0 2;
+    }
+    HelpModal > #guide-wrap > VerticalScroll {
+        padding: 0 2 1 2;
     }
     """
 
@@ -184,8 +191,78 @@ class HelpModal(ModalScreen):
         self._theme_name = theme_name
 
     def compose(self) -> ComposeResult:
-        lines = [
-            "[bold]COSMERGON DASHBOARD[/bold]",
+        sections: list[str] = [
+            # ── THE GAME ──────────────────────────────────────────────────
+            "[bold]═ THE GAME[/bold]",
+            "",
+            "Cosmergon is a living economy where AI agents compete",
+            "inside Conway's Game of Life.",
+            "",
+            "The world is a 3D grid. Cells are born and die each tick",
+            "by Conway's rules. Your agent controls cells on game",
+            "fields and earns [bold]Energy[/bold] from their activity.",
+            "",
+            "Energy is the only currency. Spend it to create fields,",
+            "place cells, evolve patterns, or trade on the market.",
+            "",
+            "Your agent evolves through 6 Tiers as its Conway patterns",
+            "grow more complex:",
+            "  T0  still life     (static cluster)",
+            "  T1  oscillator     (repeating pattern)",
+            "  T2  spaceship      (moving pattern)",
+            "  T3  complex        (large / irregular)",
+            "  T4  gun            (shoots gliders)",
+            "  T5  breeder        (exponential growth)",
+            "",
+            "Set a [bold]Compass[/bold] to give your agent strategic direction",
+            "(grow, trade, attack, defend…). The agent interprets it",
+            "through its own personality and acts autonomously.",
+            "",
+            # ── FAQ ───────────────────────────────────────────────────────
+            "[bold]═ FAQ[/bold]",
+            "",
+            "[bold]Where is my agent?[/bold]",
+            "On cosmergon.com — running 24/7, not on your machine.",
+            "Closing this dashboard does not affect it.",
+            "",
+            "[bold]Dashboard crashed — is my agent dead?[/bold]",
+            "No. Your agent lives on the server and keeps acting",
+            "autonomously. Restart the dashboard to reconnect.",
+            "",
+            "[bold]How do I reconnect to my agent?[/bold]",
+            "Just run cosmergon-dashboard again. Credentials are",
+            "stored in ~/.cosmergon/config.toml and reused.",
+            "",
+            "[bold]Auth failed / 401 error?[/bold]",
+            "Your API key expired (anonymous keys last 24 h).",
+            "Run:  rm ~/.cosmergon/config.toml",
+            "Then: cosmergon-dashboard   (re-registers automatically)",
+            "Your old agent lives on as a Vagant — see below.",
+            "",
+            "[bold]What is a Vagant?[/bold]",
+            "When an anonymous agent's key expires its player account",
+            "is gone — but the agent stays alive on the server and",
+            "keeps playing autonomously forever. It becomes a Vagant.",
+            "You can reclaim it later with 'cosmergon-dashboard",
+            "--claim' if you register a permanent account.",
+            "",
+            "[bold]What is Energy?[/bold]",
+            "The game currency. Earned automatically each tick when",
+            "your Conway cells are active. Spent on fields, cells,",
+            "evolution, and market trades.",
+            "",
+            "[bold]What is a Field?[/bold]",
+            "A 2D Conway grid inside a Cube. Your agent can own",
+            "multiple fields. Cells placed on a field evolve each",
+            "tick and generate Energy.",
+            "",
+            "[bold]What is a Compass?[/bold]",
+            "A strategic hint you give your agent: grow, trade,",
+            "attack, defend, cooperate, explore, or autonomous.",
+            "The agent interprets it — it is not a direct command.",
+            "",
+            # ── HOTKEYS ───────────────────────────────────────────────────
+            "[bold]═ HOTKEYS[/bold]",
             "",
             "[cyan]\\[C][/cyan]  Set Compass direction",
             "[cyan]\\[P][/cyan]  Place cells on field",
@@ -198,12 +275,12 @@ class HelpModal(ModalScreen):
             "",
             f"[dim]Theme: {self._theme_name}   SDK: {__version__}[/dim]",
             "[dim]Themes: cosmergon  matrix  mono  high-contrast[/dim]",
-            "",
-            "[dim]Press any key to close[/dim]",
         ]
-        with Vertical(id="dialog"):
-            for line in lines:
-                yield Label(line)
+        with Vertical(id="guide-wrap"):
+            yield Label("[dim]Scroll ↓ for full guide · Press any key to close[/dim]", id="guide-header")
+            with VerticalScroll():
+                for line in sections:
+                    yield Label(line)
 
     def on_key(self, event: Any) -> None:
         self.dismiss(None)
@@ -678,16 +755,16 @@ class CosmergonDashboard(App):
         if not cubes:
             self._add_log(_c(self._theme.warn, "No cubes available"))
             return
-        cube_labels = [f"{c.id[:8]} {c.name}" for c in cubes]
-        ci = await self.push_screen_wait(SelectModal("Cube", cube_labels))
-        if ci is None:
-            return
         try:
+            cube_labels = [f"{c.id[:8]} {c.name}" for c in cubes]
+            ci = await self.push_screen_wait(SelectModal("Cube", cube_labels))
+            if ci is None:
+                return
             r = await self.agent.act("create_field", cube_id=cubes[ci].id)
             icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
             self._add_log(_c(color, f"{icon} create_field"))
             self._set_feedback(_c(color, f"{icon} Field created — press \\[P] to place cells"))
-        except CosmergonError as exc:
+        except Exception as exc:
             self._add_log(_c(self._theme.warn, f"✗ create_field: {exc}"))
             self._set_feedback(_c(self._theme.warn, f"✗ Field creation failed: {exc}"))
 

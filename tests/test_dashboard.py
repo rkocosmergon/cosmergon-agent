@@ -126,6 +126,28 @@ async def test_help_modal_is_english():
     assert "Taste" not in all_text, "HelpModal must not contain German 'Taste drücken'"
 
 
+async def test_help_modal_has_guide_and_faq():
+    """HelpModal must contain game explanation and FAQ — checked via widget content, not screenshot."""
+    from textual.widgets import Label
+
+
+    app = _make_dashboard()
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("question_mark")
+        await pilot.pause()
+        await pilot.pause()
+        # HelpModal is a pushed screen — access via screen stack
+        modal = pilot.app.screen
+        all_text = " ".join(str(lbl._Static__content) for lbl in modal.query(Label))
+
+    assert "THE GAME" in all_text, "Guide must contain THE GAME section"
+    assert "Conway" in all_text, "Guide must mention Conway's Game of Life"
+    assert "Energy" in all_text, "Guide must mention Energy"
+    assert "FAQ" in all_text, "Guide must contain FAQ section"
+    assert "Vagant" in all_text, "FAQ must explain Vagants"
+    assert "HOTKEYS" in all_text, "Guide must contain HOTKEYS section"
+
+
 async def test_no_fields_warning_hotkey_visible():
     """'press [F] first' warning in journal must show [F] as literal text."""
     app = _make_dashboard(log=[])  # no fields in default state
