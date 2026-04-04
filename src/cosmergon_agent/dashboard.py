@@ -48,7 +48,7 @@ _COMPASS_DISPLAY = {
     "trade": "💹  Trade",
     "cooperate": "🤝  Cooperate",
     "explore": "🔭  Explore",
-    "autonomous": "~  Autonomous",
+    "autonomous": "Autonomous",
 }
 
 
@@ -271,7 +271,7 @@ class CosmergonDashboard(App):
         self._paused = False
         self._compass_preset = "autonomous"
         self._compass_ever_set = False
-        self._last_energy: float = 0.0
+        self._last_energy: float | None = None
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="top-row"):
@@ -289,6 +289,10 @@ class CosmergonDashboard(App):
     def _register_agent_handlers(self) -> None:
         @self.agent.on_tick
         async def _tick(state: GameState) -> None:
+            if self._last_energy is None:
+                self._last_energy = state.energy
+                self._add_log(_c(self._theme.pos, f"● Connected  {state.energy:,.0f} E"))
+                return
             delta = state.energy - self._last_energy
             self._last_energy = state.energy
             sign = "+" if delta >= 0 else ""
@@ -338,20 +342,19 @@ class CosmergonDashboard(App):
         lines.append(f"{_c(sc, f'● {status}')}  {_c(t.data, f'{state.energy:,.0f} E  {bar}')}")
 
         if state.ranking:
-            lines.append(
-                _c(t.data, f"T{state.ranking.player_tier} {state.ranking.tier_name}"
-                   f"  Score: {state.ranking.player_score:,.0f}")
+            score_part = (
+                f"  Score: {state.ranking.player_score:,.0f}"
+                if state.ranking.player_score > 0 else ""
             )
-        lines.append(_c("dim", f"Agent: {(self.agent.agent_id or '?')[:8]}"))
+            lines.append(_c(t.data, f"T{state.ranking.player_tier} {state.ranking.tier_name}{score_part}"))
         lines.append("")
 
         # Compass
-        compass_label = _COMPASS_DISPLAY.get(self._compass_preset, self._compass_preset)
-        lines.append(_c(t.data, f"Compass: {compass_label}"))
         if not self._compass_ever_set:
             lines.append(_c(t.guide, "[bold]→ [C] Richtung setzen[/bold]"))
         else:
-            lines.append(_c(t.cmd, "[C] ändern"))
+            compass_label = _COMPASS_DISPLAY.get(self._compass_preset, self._compass_preset)
+            lines.append(_c(t.data, f"Compass: {compass_label}"))
 
         # Fields
         if state.fields:
