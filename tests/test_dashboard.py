@@ -184,13 +184,15 @@ async def test_compass_set_removes_yellow():
     assert "Compass:" in agent.plain and "Grow" in agent.plain
 
 
-async def test_upgrade_button_cyan_not_yellow():
-    """[U] Upgrade must be cyan, never yellow."""
+async def test_upgrade_hint_is_dim_not_prominent():
+    """[U] Developer tier must be dim — not cyan/yellow (subtle, not a banner)."""
     app = _make_dashboard()
     _, economy, _ = await _render(app)
 
-    assert _has_style(economy, "Upgrade", "cyan"), "[U] Upgrade must be cyan"
-    assert not _has_style(economy, "Upgrade", "yellow"), "[U] Upgrade must not be yellow"
+    assert "Developer tier" in economy.plain, "[U] Developer tier hint must be present"
+    assert _has_style(economy, "Developer tier", "dim"), "[U] hint must be dim, not prominent"
+    assert not _has_style(economy, "Developer tier", "cyan"), "Upgrade hint must not be cyan"
+    assert not _has_style(economy, "Developer tier", "yellow"), "Upgrade hint must not be yellow"
 
 
 # ---------------------------------------------------------------------------

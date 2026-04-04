@@ -392,7 +392,7 @@ class CosmergonDashboard(App):
 
         if state and state.subscription_tier == "free":
             lines.append("")
-            lines.append(_c(t.cmd, "\\[U] Upgrade → Developer"))
+            lines.append(_c("dim", "\\[U] Developer tier"))
 
         self.query_one("#economy-panel", Static).update("\n".join(lines))
 
