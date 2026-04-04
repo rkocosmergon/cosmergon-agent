@@ -465,8 +465,16 @@ class CosmergonDashboard(App):
         """Return the one-line guidance string for the hint bar."""
         t = self._theme
 
-        # 1. Active feedback (post-action confirmation)
+        # 1. Active feedback (post-action confirmation) — also show countdown so the
+        #    user understands *when* the command takes effect (next tick = ~Xs from now).
         if self._feedback and time.monotonic() < self._feedback_until:
+            if self._tick_received_at > 0:
+                elapsed = time.monotonic() - self._tick_received_at
+                remaining = max(0.0, self.agent.poll_interval - elapsed)
+                return (
+                    f"{self._feedback}  ·  "
+                    f"{_c('dim', 'takes effect at next tick ~' + str(int(remaining)) + 's')}"
+                )
             return self._feedback
         self._feedback = ""
 

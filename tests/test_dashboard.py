@@ -804,3 +804,25 @@ async def test_feedback_overrides_compass_cta() -> None:
 
     assert "Action done" in hint.plain
     assert "Compass" not in hint.plain, "Compass CTA must be suppressed while feedback active"
+
+
+async def test_feedback_shows_countdown_when_tick_known() -> None:
+    """When tick timing is known, feedback must also show 'takes effect at next tick ~Xs'.
+
+    This connects the action confirmation to the countdown so the user
+    understands *when* the command will take effect.
+    """
+    import time
+
+    app = _make_dashboard(compass_ever_set=True)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        pilot.app._tick_received_at = time.monotonic() - 2.0  # 2s ago
+        pilot.app._set_feedback("✓ blinker placed")
+        pilot.app._redraw()
+        await pilot.pause()
+        hint = pilot.app.query_one("#hint-bar", Static).render()
+
+    assert "blinker placed" in hint.plain
+    assert "takes effect" in hint.plain, "Countdown context must explain when command fires"
+    assert "next tick" in hint.plain, "Must mention 'next tick' so the countdown makes sense"
