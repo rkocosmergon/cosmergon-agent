@@ -110,12 +110,12 @@ async def test_c_hotkey_visible_in_panel():
     )
 
 
-async def test_u_hotkey_visible_in_panel():
-    """[U] must render as literal text in economy panel."""
+async def test_u_hotkey_visible_in_key_bar():
+    """[U] must render as literal text in the key bar (upgrade hint moved out of economy panel)."""
     app = _make_dashboard()
-    _, economy, _ = await _render(app)
-    assert "[U]" in economy.plain, (
-        "Hotkey [U] invisible — Rich consumed it as a style tag."
+    _, key = await _render_hint_key(app)
+    assert "[U]" in key.plain, (
+        "Hotkey [U] invisible in key bar — Rich consumed it as a style tag."
     )
 
 
@@ -185,15 +185,13 @@ async def test_compass_set_removes_yellow():
     assert "Compass:" in agent.plain and "Grow" in agent.plain
 
 
-async def test_upgrade_hint_is_dim_not_prominent():
-    """[U] Developer tier must be dim — not cyan/yellow (subtle, not a banner)."""
+async def test_upgrade_hint_not_in_economy_panel():
+    """[U] Developer tier must NOT appear in economy panel — it lives in the key bar only."""
     app = _make_dashboard()
     _, economy, _ = await _render(app)
-
-    assert "Developer tier" in economy.plain, "[U] Developer tier hint must be present"
-    assert _has_style(economy, "Developer tier", "dim"), "[U] hint must be dim, not prominent"
-    assert not _has_style(economy, "Developer tier", "cyan"), "Upgrade hint must not be cyan"
-    assert not _has_style(economy, "Developer tier", "yellow"), "Upgrade hint must not be yellow"
+    assert "Developer tier" not in economy.plain, (
+        "[U] Developer tier hint must be removed from economy panel — it's in the key bar"
+    )
 
 
 # ---------------------------------------------------------------------------

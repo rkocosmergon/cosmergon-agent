@@ -225,14 +225,15 @@ class CosmergonDashboard(App):
     }
 
     #hint-bar {
-        height: 1;
+        height: 7;
         background: #0a0a14;
-        padding: 0 1;
+        padding: 1 2;
+        border-bottom: solid #1a1a1a;
     }
 
     #top-row {
-        height: 13;
-        min-height: 9;
+        height: 11;
+        min-height: 8;
     }
 
     #agent-panel {
@@ -295,6 +296,7 @@ class CosmergonDashboard(App):
         self._feedback_until: float = 0.0
         self._tick_received_at: float = 0.0
         self._last_tick: int = -1
+        self._hint_history: list[str] = []
 
     def compose(self) -> ComposeResult:
         yield Static("", id="hint-bar")
@@ -418,10 +420,6 @@ class CosmergonDashboard(App):
         elif state:
             lines.append(_c("dim", "Joining universe..."))
 
-        if state and state.subscription_tier == "free":
-            lines.append("")
-            lines.append(_c("dim", "\\[U] Developer tier"))
-
         self.query_one("#economy-panel", Static).update("\n".join(lines))
 
     def _draw_journal_panel(self, state: GameState | None) -> None:
@@ -457,41 +455,57 @@ class CosmergonDashboard(App):
         self.query_one("#status-bar", Static).update(f"[dim]{sep.join(segments)}[/dim]")
 
     def _set_feedback(self, msg: str, duration: float = 4.0) -> None:
-        """Show a timed message in the hint bar (overrides normal hint for `duration` seconds)."""
+        """Show a timed message in the hint bar; previous feedback is archived to history."""
+        if self._feedback:
+            self._hint_history.append(self._feedback)
+            if len(self._hint_history) > 4:
+                self._hint_history = self._hint_history[-4:]
         self._feedback = msg
         self._feedback_until = time.monotonic() + duration
 
+    def _countdown_suffix(self) -> str:
+        """Return '  ·  next ~Xs' when tick timing is known, else empty string."""
+        if self._tick_received_at > 0:
+            elapsed = time.monotonic() - self._tick_received_at
+            remaining = max(0.0, self.agent.poll_interval - elapsed)
+            return "  ·  " + _c("dim", "next ~" + str(int(remaining)) + "s")
+        return ""
+
     def _compute_hint(self, state: GameState | None) -> str:
-        """Return the one-line guidance string for the hint bar."""
+        """Return Line 1 of the hint bar: active feedback OR current guidance."""
         t = self._theme
 
-        # 1. Active feedback (post-action confirmation) — also show countdown so the
-        #    user understands *when* the command takes effect (next tick = ~Xs from now).
+        # 1. Active feedback — show confirmation + countdown so user knows *when* it fires.
         if self._feedback and time.monotonic() < self._feedback_until:
             if self._tick_received_at > 0:
                 elapsed = time.monotonic() - self._tick_received_at
                 remaining = max(0.0, self.agent.poll_interval - elapsed)
-                return (
-                    f"{self._feedback}  ·  "
-                    f"{_c('dim', 'takes effect at next tick ~' + str(int(remaining)) + 's')}"
-                )
+                suffix = _c("dim", "takes effect at next tick ~" + str(int(remaining)) + "s")
+                return f"{self._feedback}  ·  {suffix}"
             return self._feedback
-        self._feedback = ""
+
+        # Feedback expired — archive it so it shows in history below.
+        if self._feedback:
+            self._hint_history.append(self._feedback)
+            if len(self._hint_history) > 4:
+                self._hint_history = self._hint_history[-4:]
+            self._feedback = ""
 
         # 2. No state yet
         if not state:
             return _c("dim", "Connecting to cosmergon.com...")
 
-        # 3. Paused
+        # 3. Paused — countdown still shown so user sees when next tick would fire
         spc = _hk("Space")
         if self._paused:
-            return f"{_c(t.warn, '⏸ Paused')} · {_c(t.cmd, spc)} resume"
+            return f"{_c(t.warn, '⏸ Paused')} · {_c(t.cmd, spc)} resume" + self._countdown_suffix()
 
         # 4. Compass never set → one thing to do
         if not self._compass_ever_set:
             return (
                 f"{_c(t.guide, '→')} {_c(t.cmd, _hk('C'))} "
                 f"{_c(t.guide, 'Set Compass direction')} — choose how the agent plays"
+                + self._countdown_suffix()
             )
 
         # 5. No fields yet
@@ -499,6 +513,7 @@ class CosmergonDashboard(App):
             return (
                 f"{_c(t.guide, '→')} {_c(t.cmd, _hk('F'))} "
                 f"{_c(t.guide, 'Create a field')} — choose a cube for your agent"
+                + self._countdown_suffix()
             )
 
         # 6. Fields exist but no cells placed
@@ -506,6 +521,7 @@ class CosmergonDashboard(App):
             return (
                 f"{_c(t.guide, '→')} {_c(t.cmd, _hk('P'))} "
                 f"{_c(t.guide, 'Place cells')} — start a Conway pattern"
+                + self._countdown_suffix()
             )
 
         # 7. Normal running state — show tick + countdown + quick-actions
@@ -513,7 +529,7 @@ class CosmergonDashboard(App):
         if self._tick_received_at > 0:
             elapsed = time.monotonic() - self._tick_received_at
             remaining = max(0.0, self.agent.poll_interval - elapsed)
-            tick_part += f" · next ~{remaining:.0f}s"
+            tick_part += " · next ~" + str(int(remaining)) + "s"
 
         actions = (
             f"{_c(t.cmd, _hk('P'))} place  "
@@ -524,7 +540,11 @@ class CosmergonDashboard(App):
         return f"{_c('dim', tick_part)}  ·  {actions}"
 
     def _draw_hint_bar(self, state: GameState | None) -> None:
-        self.query_one("#hint-bar", Static).update(self._compute_hint(state))
+        """Render hint bar: Line 1 = guidance/feedback, Lines 2-5 = action history."""
+        lines = [self._compute_hint(state)]
+        for msg in reversed(self._hint_history[-4:]):
+            lines.append(msg)
+        self.query_one("#hint-bar", Static).update("\n".join(lines))
 
     def _draw_key_bar(self) -> None:
         t = self._theme
