@@ -21,14 +21,15 @@ from cosmergon_agent.action import ActionResult
 from cosmergon_agent.exceptions import (
     AuthenticationError,
     CosmergonError,
+    RateLimitError,
     WebhookSignatureError,
     WebhookTimestampError,
 )
 from cosmergon_agent.exceptions import (
     ConnectionError as CsgConnectionError,
 )
-from cosmergon_agent.webhook import CosmergonWebhook
 from cosmergon_agent.state import GameState
+from cosmergon_agent.webhook import CosmergonWebhook
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +67,7 @@ def _save_credentials(api_key: str, agent_id: str | None) -> None:
         _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         agent_id_line = f'agent_id = "{agent_id}"\n' if agent_id else ""
         _CONFIG_PATH.write_text(
-            f"[agent]\n"
-            f'api_key = "{api_key}"\n'
-            f"{agent_id_line}",
+            f'[agent]\napi_key = "{api_key}"\n{agent_id_line}',
             encoding="utf-8",
         )
     except Exception:
@@ -343,7 +342,7 @@ class CosmergonAgent:
         agent = self  # closure for the handler class below
 
         class _WebhookHandler(BaseHTTPRequestHandler):
-            def do_POST(self) -> None:  # noqa: N802
+            def do_POST(self) -> None:
                 if self.path != path:
                     self.send_response(404)
                     self.end_headers()
@@ -385,7 +384,7 @@ class CosmergonAgent:
                 self.send_response(200)
                 self.end_headers()
 
-            def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+            def log_message(self, format: str, *args: object) -> None:
                 logger.debug(format, *args)
 
         server = HTTPServer((host, port), _WebhookHandler)
@@ -459,18 +458,14 @@ class CosmergonAgent:
 
                 # read=None keeps the connection open indefinitely (required for SSE).
                 # Default 10s covers connect/write/pool; read=None overrides read-only.
-                with httpx.Client(
-                    timeout=httpx.Timeout(10.0, read=None)
-                ) as sse_client:
+                with httpx.Client(timeout=httpx.Timeout(10.0, read=None)) as sse_client:
                     with sse_client.stream("GET", url, headers=headers) as response:
                         if response.status_code in (401, 403):
                             raise AuthenticationError(
                                 f"SSE stream rejected: {response.status_code}"
                             )
                         if response.status_code >= 400:
-                            raise CosmergonError(
-                                f"SSE stream error: HTTP {response.status_code}"
-                            )
+                            raise CosmergonError(f"SSE stream error: HTTP {response.status_code}")
 
                         for line in response.iter_lines():
                             if line.startswith("data: "):
@@ -595,7 +590,13 @@ class CosmergonAgent:
         path: str,
         **kwargs: Any,
     ) -> httpx.Response:
-        """HTTP request with retry, backoff, and rate-limit handling (C2)."""
+        """HTTP request with retry and backoff (C2).
+
+        429 responses raise RateLimitError immediately — retrying within the
+        same game tick is pointless. Callers decide whether to queue or abort.
+        5xx responses retry with exponential backoff up to max_retries.
+        Transport errors (network) retry with exponential backoff.
+        """
         if self._client is None:
             raise RuntimeError("Agent not connected. Call run() or use async with.")
 
@@ -610,12 +611,10 @@ class CosmergonAgent:
 
                 if resp.status_code == 429:
                     retry_after = min(
-                        float(resp.headers.get("Retry-After", "1")),
+                        float(resp.headers.get("Retry-After", "1.0")),
                         _MAX_BACKOFF,
                     )
-                    logger.warning("Rate limited, waiting %.1fs", retry_after)
-                    await asyncio.sleep(retry_after)
-                    continue
+                    raise RateLimitError(retry_after=retry_after)
 
                 if resp.status_code >= 500 and attempt < self.max_retries:
                     delay = min(_INITIAL_BACKOFF * (2**attempt) + random.random(), _MAX_BACKOFF)
@@ -669,6 +668,10 @@ class CosmergonAgent:
                     last_tick = self._state.tick
                     await self._tick_handler(self._state)
 
+            except RateLimitError as exc:
+                logger.warning("State fetch rate limited, waiting %.1fs", exc.retry_after)
+                await asyncio.sleep(exc.retry_after)
+                continue
             except CsgConnectionError:
                 logger.warning("Connection lost, retrying in %.0fs", self.poll_interval)
             except CosmergonError as exc:

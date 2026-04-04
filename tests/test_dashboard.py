@@ -1164,3 +1164,185 @@ async def test_create_field_cost_in_hint_bar() -> None:
         hint = pilot.app.query_one("#hint-bar", Static).render()
 
     assert "(-500 E)" in hint.plain, "Cost must appear in hint bar feedback after create_field"
+
+
+# ---------------------------------------------------------------------------
+# Issues #5 + #7 — Action Queue: 429 → pending_action → fire on next tick
+# ---------------------------------------------------------------------------
+
+
+def _act_rate_limited(retry_after: float = 30.0) -> object:
+    """Patch: agent.act raises RateLimitError (tick limit hit)."""
+
+    async def _act(*_args: object, **_kwargs: object) -> object:
+        from cosmergon_agent.exceptions import RateLimitError
+
+        raise RateLimitError(retry_after=retry_after)
+
+    return _act
+
+
+def _set_compass_rate_limited(retry_after: float = 30.0) -> object:
+    """Patch: agent.set_compass raises RateLimitError."""
+
+    async def _set_compass(*_args: object, **_kwargs: object) -> object:
+        from cosmergon_agent.exceptions import RateLimitError
+
+        raise RateLimitError(retry_after=retry_after)
+
+    return _set_compass
+
+
+async def test_place_cells_429_stores_pending_action() -> None:
+    """place_cells hit by 429 must store a _pending_action (kind=act, action=place_cells)."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_rate_limited(30.0)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("p")
+        await pilot.pause()
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.pause()
+
+    assert app._pending_action is not None, "429 must queue a pending action"
+    assert app._pending_action.kind == "act"
+    assert app._pending_action.action == "place_cells"
+    assert "preset" in app._pending_action.params
+    assert "field_id" in app._pending_action.params
+
+
+async def test_place_cells_429_shows_queued_in_journal() -> None:
+    """place_cells 429 must log '⏳' in the journal — not an error symbol."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_rate_limited(30.0)
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "p", "1", "1")
+
+    assert "⏳" in journal.plain, "Queue indicator must appear in journal on 429"
+    assert "✗" not in journal.plain, "Error symbol must NOT appear when action is queued"
+
+
+async def test_place_cells_429_shows_queued_in_hint_bar() -> None:
+    """place_cells 429 must show '⏳ Queued' in the hint bar."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_rate_limited(30.0)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("p")
+        await pilot.pause()
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        hint = pilot.app.query_one("#hint-bar", Static).render()
+
+    assert "⏳" in hint.plain, "Queue indicator must appear in hint bar on 429"
+    assert "Queued" in hint.plain, "Hint bar must say 'Queued' when action is waiting"
+
+
+async def test_fire_pending_success_logs_result() -> None:
+    """_fire_pending() with a successful retry must log auto-retry and success."""
+    from cosmergon_agent.dashboard import _PendingAction
+
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_with_cost(150.0)
+    async with app.run_test(size=(80, 40)) as pilot:
+        app._pending_action = _PendingAction(
+            kind="act",
+            action="place_cells",
+            params={"field_id": "field-uuid-1", "preset": "blinker"},
+            display="place_cells(blinker)",
+        )
+        await app._fire_pending()
+        app._redraw()
+        await pilot.pause()
+        journal = pilot.app.query_one("#journal-panel", Static).render()
+
+    assert "auto-retry" in journal.plain, "Must log 'auto-retry' when firing pending action"
+    assert "✓" in journal.plain, "Success must be indicated in journal after auto-retry"
+    assert app._pending_action is None, "Pending slot must be cleared after firing"
+
+
+async def test_fire_pending_still_429_clears_queue_and_shows_error() -> None:
+    """_fire_pending() getting another 429 must clear the queue and log an error."""
+    from cosmergon_agent.dashboard import _PendingAction
+
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_rate_limited(5.0)
+    async with app.run_test(size=(80, 40)) as pilot:
+        app._pending_action = _PendingAction(
+            kind="act",
+            action="place_cells",
+            params={"field_id": "field-uuid-1", "preset": "blinker"},
+            display="place_cells(blinker)",
+        )
+        await app._fire_pending()
+        app._redraw()
+        await pilot.pause()
+        journal = pilot.app.query_one("#journal-panel", Static).render()
+
+    assert app._pending_action is None, "Queue must be cleared even on second 429"
+    assert "still rate limited" in journal.plain, "Error must mention 'still rate limited'"
+
+
+async def test_fire_pending_no_action_is_noop() -> None:
+    """_fire_pending() with empty queue must not raise or log anything."""
+    app = _make_dashboard_with_cubes()
+    initial_log_len = len(app._log)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await app._fire_pending()
+        await pilot.pause()
+
+    assert len(app._log) == initial_log_len, "Empty queue must not append to log"
+
+
+async def test_compass_429_stores_pending_action() -> None:
+    """compass hit by 429 must store a _pending_action with kind=compass."""
+    app = _make_dashboard_with_cubes()
+    app.agent.set_compass = _set_compass_rate_limited(30.0)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("c")
+        await pilot.pause()
+        await pilot.press("3")  # preset index 2 = "grow"
+        await pilot.pause()
+        await pilot.pause()
+
+    assert app._pending_action is not None, "429 on compass must queue a pending action"
+    assert app._pending_action.kind == "compass"
+    assert app._pending_action.action == "grow"
+
+
+async def test_compass_429_shows_queued_in_journal() -> None:
+    """compass 429 must log '⏳' in the journal — not a ✗ error."""
+    app = _make_dashboard_with_cubes()
+    app.agent.set_compass = _set_compass_rate_limited(30.0)
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "c", "3")
+
+    assert "⏳" in journal.plain, "Queue indicator must appear in journal on compass 429"
+    assert "✗" not in journal.plain, "Error symbol must NOT appear when compass is queued"
+
+
+async def test_fire_pending_compass_success_sets_compass_preset() -> None:
+    """_fire_pending() for a compass action must update _compass_preset on success."""
+    from cosmergon_agent.dashboard import _PendingAction
+
+    app = _make_dashboard_with_cubes()
+
+    async def _ok_compass(preset: str) -> dict:
+        return {"explanation": "Growing aggressively.", "opinion": "ok"}
+
+    app.agent.set_compass = _ok_compass
+    async with app.run_test(size=(80, 40)) as pilot:
+        app._pending_action = _PendingAction(
+            kind="compass", action="grow", params={}, display="🌱  Grow"
+        )
+        await app._fire_pending()
+        await pilot.pause()
+
+    assert app._compass_preset == "grow", "Compass preset must be updated after successful retry"
+    assert app._compass_ever_set is True, "compass_ever_set must be True after successful retry"

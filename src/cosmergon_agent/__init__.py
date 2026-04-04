@@ -1,6 +1,6 @@
 """Cosmergon Agent SDK — Python client for the Cosmergon Agent Economy."""
 
-__version__ = "0.3.19"
+__version__ = "0.3.20"
 
 from cosmergon_agent.action import ActionResult
 from cosmergon_agent.exceptions import (
