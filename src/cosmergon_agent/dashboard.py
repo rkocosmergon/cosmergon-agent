@@ -25,7 +25,10 @@ import time
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
+
+if TYPE_CHECKING:
+    from cosmergon_agent.action import ActionResult
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -116,6 +119,28 @@ def _energy_bar(energy: float, max_e: float = 5000.0, width: int = 8) -> str:
     full = int(ratio * width)
     half = int((ratio * width - full) * 2)
     return "▓" * full + ("▒" if half else "") + "░" * max(0, width - full - half)
+
+
+def _truncate_words(text: str, max_len: int) -> str:
+    """Truncate at a word boundary, appending '…' if shortened.
+
+    Never cuts mid-word. Safe for narrow terminal panels.
+    """
+    if len(text) <= max_len:
+        return text
+    truncated = text[:max_len].rsplit(" ", 1)[0]
+    return truncated + "…"
+
+
+def _action_cost(r: ActionResult) -> float:
+    """Extract energy cost from action result. Returns 0.0 if free or unknown."""
+    result_data = (r.data or {}).get("result") or {}
+    return float(result_data.get("energy_cost", result_data.get("cost", 0)) or 0)
+
+
+def _cost_str(cost: float) -> str:
+    """Format energy cost for display. Returns empty string when free (cost == 0)."""
+    return f" (-{cost:,.0f} E)" if cost > 0 else ""
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +319,7 @@ class HelpModal(ModalScreen):
     def on_mount(self) -> None:
         self.query_one(VerticalScroll).focus()
 
-    _SCROLL_KEYS = {"up", "down", "pageup", "pagedown", "home", "end"}
+    _SCROLL_KEYS: ClassVar[set[str]] = {"up", "down", "pageup", "pagedown", "home", "end"}
 
     def on_key(self, event: Any) -> None:
         if event.key not in self._SCROLL_KEYS:
@@ -716,14 +741,19 @@ class CosmergonDashboard(App):
         if idx is None:
             return
         preset = _COMPASS_PRESETS[idx]
-        self._add_log(_c(self._theme.data, f"⠋ compass → {preset}..."))
+        compass_label = _COMPASS_DISPLAY.get(preset, preset)
+        self._add_log(_c(self._theme.data, f"⠋ compass → {compass_label}..."))
         try:
             result = await self.agent.set_compass(preset)
             self._compass_preset = preset
             self._compass_ever_set = True
-            explanation = (result.get("explanation") or "")[:60]
-            self._add_log(_c(self._theme.pos, f"✓ compass: {preset}  {explanation}"))
-            self._set_feedback(_c(self._theme.pos, f"✓ Compass set: {preset}"))
+            # First line: clean action confirmation with display label
+            self._add_log(_c(self._theme.pos, f"✓ compass: {compass_label}"))
+            # Second line: explanation word-truncated so it never overflows narrow panels
+            explanation = (result.get("explanation") or "").strip()
+            if explanation:
+                self._add_log(_c("dim", f"  {_truncate_words(explanation, 48)}"))
+            self._set_feedback(_c(self._theme.pos, f"✓ Compass → {compass_label}"))
         except Exception as exc:
             self._add_log(_c(self._theme.warn, f"✗ compass failed: {exc}"))
             self._set_feedback(_c(self._theme.warn, f"✗ Compass failed: {exc}"))
@@ -748,9 +778,10 @@ class CosmergonDashboard(App):
                 "place_cells", field_id=state.fields[fi].id, preset=_PRESETS[pi]
             )
             icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
-            self._add_log(_c(color, f"{icon} place_cells({_PRESETS[pi]})"))
-            feedback = f"{icon} Cells placed ({_PRESETS[pi]}) — evolves next tick"
-            self._set_feedback(_c(color, feedback))
+            cs = _cost_str(_action_cost(r))
+            self._add_log(_c(color, f"{icon} place_cells({_PRESETS[pi]}){cs}"))
+            label = f"{icon} Cells placed ({_PRESETS[pi]}){cs} — evolves next tick"
+            self._set_feedback(_c(color, label))
         except CosmergonError as exc:
             self._add_log(_c(self._theme.warn, f"✗ place_cells: {exc}"))
             self._set_feedback(_c(self._theme.warn, f"✗ Place cells failed: {exc}"))
@@ -771,8 +802,9 @@ class CosmergonDashboard(App):
                 return
             r = await self.agent.act("create_field", cube_id=cubes[ci].id)
             icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
-            self._add_log(_c(color, f"{icon} create_field"))
-            self._set_feedback(_c(color, f"{icon} Field created — press \\[P] to place cells"))
+            cs = _cost_str(_action_cost(r))
+            self._add_log(_c(color, f"{icon} create_field{cs}"))
+            self._set_feedback(_c(color, f"{icon} Field created{cs} — press \\[P] to place cells"))
         except Exception as exc:
             self._add_log(_c(self._theme.warn, f"✗ create_field: {exc}"))
             self._set_feedback(_c(self._theme.warn, f"✗ Field creation failed: {exc}"))
@@ -792,9 +824,17 @@ class CosmergonDashboard(App):
         try:
             r = await self.agent.act("evolve", field_id=state.fields[fi].id)
             icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
-            msg = r.error_message or "ok"
-            self._add_log(_c(color, f"{icon} evolve → {msg}"))
-            self._set_feedback(_c(color, f"{icon} Evolve: {msg}"))
+            if r.success:
+                new_tier = (r.data.get("result") or {}).get("new_tier")
+                cs = _cost_str(_action_cost(r))
+                tier_str = f" → T{new_tier}" if new_tier else ""
+                self._add_log(_c(color, f"{icon} evolve{tier_str}{cs}"))
+                label = f"T{new_tier}" if new_tier else "ok"
+                self._set_feedback(_c(color, f"{icon} Evolved: {label}{cs}"))
+            else:
+                msg = r.error_message or "failed"
+                self._add_log(_c(color, f"{icon} evolve → {msg}"))
+                self._set_feedback(_c(color, f"{icon} Evolve: {msg}"))
         except CosmergonError as exc:
             self._add_log(_c(self._theme.warn, f"✗ evolve: {exc}"))
             self._set_feedback(_c(self._theme.warn, f"✗ Evolve failed: {exc}"))

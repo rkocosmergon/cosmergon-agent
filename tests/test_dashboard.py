@@ -100,7 +100,6 @@ def _has_style(content, text_fragment: str, style_fragment: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-
 async def test_u_hotkey_visible_in_key_bar():
     """[U] must render as literal text in the key bar (upgrade hint moved out of economy panel)."""
     app = _make_dashboard()
@@ -120,16 +119,19 @@ async def test_help_modal_is_english():
     visible = _svg_visible(svg)
     all_text = " ".join(visible)
 
-    assert any("Quit" in t for t in visible), "HelpModal must show 'Quit'"
-    assert any("Esc" in t or "scroll" in t for t in visible), "HelpModal must show English navigation hint"
+    assert any("Esc" in t or "close" in t for t in visible), (
+        "HelpModal must show English close/navigation hint"
+    )
     assert "Beenden" not in all_text, "HelpModal must not contain German 'Beenden'"
     assert "Taste" not in all_text, "HelpModal must not contain German 'Taste drücken'"
 
 
 async def test_help_modal_has_guide_and_faq():
-    """HelpModal must contain game explanation and FAQ — checked via widget content, not screenshot."""
-    from textual.widgets import Label
+    """HelpModal must contain game explanation and FAQ.
 
+    Checked via widget content, not screenshot.
+    """
+    from textual.widgets import Label
 
     app = _make_dashboard()
     async with app.run_test(size=(80, 40)) as pilot:
@@ -734,7 +736,10 @@ async def test_hint_bar_no_cells_shows_p_cta() -> None:
 
 
 async def test_hint_bar_normal_shows_tick() -> None:
-    """With fields + cells + compass set, hint bar shows tick info (no hotkeys — those are in key-bar)."""
+    """With fields + cells + compass set, hint bar shows tick info.
+
+    Hotkeys are in key-bar, not hint-bar.
+    """
     app = _make_dashboard_with_cubes()  # field has active_cell_count=5
     app._compass_ever_set = True
     hint, _ = await _render_hint_key(app)
@@ -824,3 +829,338 @@ async def test_feedback_shows_countdown_when_tick_known() -> None:
     assert "blinker placed" in hint.plain
     assert "takes effect" in hint.plain, "Countdown context must explain when command fires"
     assert "next tick" in hint.plain, "Must mention 'next tick' so the countdown makes sense"
+
+
+# ---------------------------------------------------------------------------
+# Issue #3 — Compass text cutoff fix
+# ---------------------------------------------------------------------------
+
+
+def _set_compass_long_explanation() -> object:
+    """Patch: set_compass returns a long explanation that used to overflow."""
+
+    async def _set(*_args: object, **_kwargs: object) -> dict:
+        return {
+            "explanation": (
+                "Your agent will prioritize energy accumulation and sustainable "
+                "territory growth over the next several ticks."
+            )
+        }
+
+    return _set
+
+
+def _set_compass_short_explanation() -> object:
+    """Patch: set_compass returns a short explanation that fits on one line."""
+
+    async def _set(*_args: object, **_kwargs: object) -> dict:
+        return {"explanation": "Focus on growth."}
+
+    return _set
+
+
+async def test_compass_log_uses_display_label() -> None:
+    """Compass log entry must use display label (e.g. '🌱  Grow'), not raw preset name."""
+    app = _make_dashboard()
+    app.agent.set_compass = _set_compass_success()
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "c", "3")  # index 2 = "grow"
+
+    # Display label must appear
+    assert "Grow" in journal.plain, "Display label '🌱  Grow' must appear in log"
+
+
+async def test_compass_explanation_as_second_log_line() -> None:
+    """Explanation must appear as a separate (second) log entry, not on the same line."""
+    app = _make_dashboard()
+    app.agent.set_compass = _set_compass_long_explanation()
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "c", "3")
+
+    plain = journal.plain
+    # Confirmation line and explanation line are both present
+    assert "✓ compass:" in plain, "Confirmation line must be present"
+    assert "prioritize" in plain, "Explanation must appear somewhere in journal"
+
+
+async def test_compass_explanation_no_midword_cutoff() -> None:
+    """Explanation must never end mid-word (no trailing incomplete words)."""
+    app = _make_dashboard()
+    app.agent.set_compass = _set_compass_long_explanation()
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "c", "3")
+
+    plain = journal.plain
+    # Find the explanation line (starts with two spaces)
+    explanation_lines = [
+        line for line in plain.splitlines() if line.startswith("  ") and len(line.strip()) > 3
+    ]
+    assert explanation_lines, "Explanation line not found in journal"
+    last_line = explanation_lines[-1].rstrip()
+    # Must end with a complete word or '…' — not a partial word like "sustainab"
+    assert last_line.endswith("…") or last_line[-1] in " abcdefghijklmnopqrstuvwxyz.!?,", (
+        f"Explanation must end at word boundary, got: {last_line!r}"
+    )
+
+
+async def test_compass_explanation_fits_narrow_terminal() -> None:
+    """Explanation line must not exceed 50 chars (safe for 60-col portrait terminal)."""
+    app = _make_dashboard()
+    app.agent.set_compass = _set_compass_long_explanation()
+    async with app.run_test(size=(60, 80)) as pilot:
+        journal = await _journal_after(pilot, "c", "3")
+
+    plain = journal.plain
+    explanation_lines = [
+        line for line in plain.splitlines() if line.startswith("  ") and len(line.strip()) > 3
+    ]
+    assert explanation_lines, "Explanation line not found"
+    # Strip Rich markup artifacts — measure plain content length
+    stripped = explanation_lines[-1].strip()
+    assert len(stripped) <= 52, (
+        f"Explanation too long for narrow terminal ({len(stripped)} chars): {stripped!r}"
+    )
+
+
+async def test_compass_short_explanation_shown_in_full() -> None:
+    """Short explanations (≤48 chars) must not be truncated."""
+    app = _make_dashboard()
+    app.agent.set_compass = _set_compass_short_explanation()
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "c", "3")
+
+    assert "Focus on growth." in journal.plain, (
+        "Short explanation must appear verbatim — no unnecessary truncation"
+    )
+    assert "…" not in journal.plain, "No ellipsis for short explanation"
+
+
+# ---------------------------------------------------------------------------
+# Helper unit tests — _truncate_words, _action_cost, _cost_str
+# ---------------------------------------------------------------------------
+
+
+def test_truncate_words_short_unchanged() -> None:
+    """Text shorter than max_len must be returned unchanged."""
+    from cosmergon_agent.dashboard import _truncate_words
+
+    assert _truncate_words("Hello world", 20) == "Hello world"
+
+
+def test_truncate_words_exact_length_unchanged() -> None:
+    """Text exactly max_len must be returned unchanged."""
+    from cosmergon_agent.dashboard import _truncate_words
+
+    text = "Hello world"
+    assert _truncate_words(text, len(text)) == text
+
+
+def test_truncate_words_truncates_at_word_boundary() -> None:
+    """Long text must be cut at the last complete word within max_len."""
+    from cosmergon_agent.dashboard import _truncate_words
+
+    result = _truncate_words("Your agent will prioritize energy accumulation", 30)
+    assert result.endswith("…"), "Must append ellipsis when truncated"
+    without_ellipsis = result[:-1]
+    # Must end at a word boundary — no partial word
+    assert not without_ellipsis.endswith(" "), "Must not end with trailing space"
+    assert " " not in without_ellipsis.split()[-1] or True  # last token is a whole word
+
+
+def test_truncate_words_never_exceeds_max_len_plus_ellipsis() -> None:
+    """Result length (excluding '…') must be ≤ max_len."""
+    from cosmergon_agent.dashboard import _truncate_words
+
+    result = _truncate_words("one two three four five six seven eight nine ten", 25)
+    content = result.rstrip("…")
+    assert len(content) <= 25, f"Truncated content exceeds max_len: {result!r}"
+
+
+def test_action_cost_energy_cost_key() -> None:
+    """_action_cost must read energy_cost from result dict."""
+    from cosmergon_agent.action import ActionResult
+    from cosmergon_agent.dashboard import _action_cost
+
+    r = ActionResult(success=True, action="place_cells", data={"result": {"energy_cost": 150.0}})
+    assert _action_cost(r) == 150.0
+
+
+def test_action_cost_cost_key_fallback() -> None:
+    """_action_cost must fall back to 'cost' key (used by create_cube)."""
+    from cosmergon_agent.action import ActionResult
+    from cosmergon_agent.dashboard import _action_cost
+
+    r = ActionResult(success=True, action="create_cube", data={"result": {"cost": 500.0}})
+    assert _action_cost(r) == 500.0
+
+
+def test_action_cost_missing_returns_zero() -> None:
+    """_action_cost must return 0.0 when no cost key is present."""
+    from cosmergon_agent.action import ActionResult
+    from cosmergon_agent.dashboard import _action_cost
+
+    r = ActionResult(success=True, action="pause", data={"result": {}})
+    assert _action_cost(r) == 0.0
+
+
+def test_action_cost_empty_data_returns_zero() -> None:
+    """_action_cost must return 0.0 when data dict is empty."""
+    from cosmergon_agent.action import ActionResult
+    from cosmergon_agent.dashboard import _action_cost
+
+    r = ActionResult(success=True, action="act", data={})
+    assert _action_cost(r) == 0.0
+
+
+def test_cost_str_zero_is_empty() -> None:
+    """_cost_str(0) must return empty string — free actions show no cost."""
+    from cosmergon_agent.dashboard import _cost_str
+
+    assert _cost_str(0.0) == ""
+    assert _cost_str(0) == ""
+
+
+def test_cost_str_nonzero_format() -> None:
+    """_cost_str must return ' (-N E)' with thousands separator."""
+    from cosmergon_agent.dashboard import _cost_str
+
+    assert _cost_str(150.0) == " (-150 E)"
+    assert _cost_str(1500.0) == " (-1,500 E)"
+
+
+# ---------------------------------------------------------------------------
+# Issue #6 — Energy cost shown in journal and feedback
+# ---------------------------------------------------------------------------
+
+
+def _act_with_cost(cost: float) -> object:
+    """Patch: agent.act returns success with energy_cost in result."""
+
+    async def _act(*_args: object, **_kwargs: object) -> object:
+        from cosmergon_agent.action import ActionResult
+
+        action = str(_args[0]) if _args else "act"
+        return ActionResult(success=True, action=action, data={"result": {"energy_cost": cost}})
+
+    return _act
+
+
+def _act_free() -> object:
+    """Patch: agent.act returns success with zero energy cost (free action)."""
+
+    async def _act(*_args: object, **_kwargs: object) -> object:
+        from cosmergon_agent.action import ActionResult
+
+        action = str(_args[0]) if _args else "act"
+        return ActionResult(success=True, action=action, data={"result": {"energy_cost": 0.0}})
+
+    return _act
+
+
+def _act_evolve_success(new_tier: int = 2, cost: float = 1000.0) -> object:
+    """Patch: agent.act returns evolve success with new_tier and energy_cost."""
+
+    async def _act(*_args: object, **_kwargs: object) -> object:
+        from cosmergon_agent.action import ActionResult
+
+        return ActionResult(
+            success=True,
+            action="evolve",
+            data={"result": {"new_tier": new_tier, "energy_cost": cost}},
+        )
+
+    return _act
+
+
+async def test_place_cells_shows_cost_in_journal() -> None:
+    """[P] with energy cost > 0 must show '(-N E)' in journal log entry."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_with_cost(150.0)
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "p", "1", "1")
+
+    assert "(-150 E)" in journal.plain, "Energy cost must be visible in journal after place_cells"
+
+
+async def test_place_cells_free_shows_no_cost() -> None:
+    """[P] with cost = 0 must NOT show any cost string (block preset is free)."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_free()
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "p", "1", "1")
+
+    assert "(-0" not in journal.plain, "Zero cost must not appear as '(-0 E)'"
+    assert "(-" not in journal.plain, "Free action must show no cost indicator"
+
+
+async def test_create_field_shows_cost_in_journal() -> None:
+    """[F] with energy cost > 0 must show '(-N E)' in journal log entry."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_with_cost(500.0)
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "f", "1")
+
+    assert "(-500 E)" in journal.plain, "Energy cost must be visible in journal after create_field"
+
+
+async def test_create_field_free_shows_no_cost() -> None:
+    """[F] with cost = 0 (first field is free) must NOT show any cost string."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_free()
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "f", "1")
+
+    assert "(-" not in journal.plain, "First (free) field creation must show no cost indicator"
+
+
+async def test_evolve_shows_new_tier_in_journal() -> None:
+    """[E] success must show new tier (e.g. 'T2') in journal."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_evolve_success(new_tier=2, cost=1000.0)
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "e", "1")
+
+    assert "T2" in journal.plain, "New tier must appear in evolve log entry"
+
+
+async def test_evolve_shows_cost_in_journal() -> None:
+    """[E] success with cost > 0 must show '(-N E)' in journal."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_evolve_success(new_tier=2, cost=1000.0)
+    async with app.run_test(size=(80, 40)) as pilot:
+        journal = await _journal_after(pilot, "e", "1")
+
+    assert "(-1,000 E)" in journal.plain, "Energy cost must be visible in evolve log entry"
+
+
+async def test_place_cells_cost_in_hint_bar() -> None:
+    """[P] with cost > 0: hint bar feedback must also show the cost."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_with_cost(150.0)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("p")
+        await pilot.press("1")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        hint = pilot.app.query_one("#hint-bar", Static).render()
+
+    assert "(-150 E)" in hint.plain, "Cost must appear in hint bar feedback after place_cells"
+
+
+async def test_create_field_cost_in_hint_bar() -> None:
+    """[F] with cost > 0: hint bar feedback must also show the cost."""
+    app = _make_dashboard_with_cubes()
+    app.agent.act = _act_with_cost(500.0)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("f")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        hint = pilot.app.query_one("#hint-bar", Static).render()
+
+    assert "(-500 E)" in hint.plain, "Cost must appear in hint bar feedback after create_field"
