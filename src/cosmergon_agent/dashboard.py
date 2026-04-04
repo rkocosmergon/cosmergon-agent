@@ -291,6 +291,9 @@ class HelpModal(ModalScreen):
                 for line in sections:
                     yield Label(line)
 
+    def on_mount(self) -> None:
+        self.query_one(VerticalScroll).focus()
+
     def on_key(self, event: Any) -> None:
         self.dismiss(None)
 
