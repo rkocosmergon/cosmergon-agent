@@ -118,6 +118,41 @@ async def test_u_hotkey_visible_in_panel():
     )
 
 
+async def test_help_modal_is_english():
+    """HelpModal must show English text — pressing ? on a German machine must still work."""
+    app = _make_dashboard()
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("question_mark")
+        await pilot.pause()
+        await pilot.pause()  # @work action_help needs two pauses to fully render
+        svg = pilot.app.export_screenshot()
+
+    visible = _svg_visible(svg)
+    all_text = " ".join(visible)
+
+    assert any("Quit" in t for t in visible), "HelpModal must show 'Quit'"
+    assert any("Press any key" in t for t in visible), "HelpModal must show English close hint"
+    assert "Beenden" not in all_text, "HelpModal must not contain German 'Beenden'"
+    assert "Taste" not in all_text, "HelpModal must not contain German 'Taste drücken'"
+
+
+async def test_no_fields_warning_hotkey_visible():
+    """'press [F] first' warning in journal must show [F] as literal text."""
+    app = _make_dashboard(log=[])  # no fields in default state
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("p")  # action_place_cells with no fields — @work, needs two pauses
+        await pilot.pause()
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        journal = pilot.app.query_one("#journal-panel", Static).render()
+
+    assert "[F]" in journal.plain, (
+        "[F] in warning message consumed by Rich — use \\[F] in markup"
+    )
+
+
 # ---------------------------------------------------------------------------
 # One-Thing principle: only [C] may be yellow/orange
 # ---------------------------------------------------------------------------
@@ -285,9 +320,13 @@ _SVG_WB = {
 
 
 def _svg_visible(svg: str) -> set[str]:
-    """Extract all visible text strings from a Textual SVG screenshot."""
+    """Extract all visible text strings from a Textual SVG screenshot.
+
+    Normalises HTML entities and non-breaking spaces (\xa0) to plain ASCII
+    so that assertions like ``"Press any key" in t`` work correctly.
+    """
     return {
-        html.unescape(t.strip())
+        html.unescape(t.strip()).replace("\xa0", " ")
         for t in re.findall(r">([^<\n]+)<", svg)
         if t.strip() and not t.strip().startswith(".")
     }

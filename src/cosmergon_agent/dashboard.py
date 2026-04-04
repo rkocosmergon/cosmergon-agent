@@ -145,7 +145,7 @@ class SelectModal(ModalScreen):
             for i, opt in enumerate(self._options):
                 yield Label(f"[cyan][{i + 1}][/cyan] {opt}")
             yield Label("")
-            yield Label("[dim][1-9] wählen  \\[Esc] zurück[/dim]")
+            yield Label("[dim][1-9] select  \\[Esc] cancel[/dim]")
 
     def on_key(self, event: Any) -> None:
         if event.key == "escape":
@@ -180,19 +180,19 @@ class HelpModal(ModalScreen):
         lines = [
             "[bold]COSMERGON DASHBOARD[/bold]",
             "",
-            "[cyan]\\[C][/cyan]  Compass-Richtung setzen",
-            "[cyan]\\[P][/cyan]  Zellen auf Feld platzieren",
-            "[cyan]\\[F][/cyan]  Neues Feld erstellen",
-            "[cyan]\\[E][/cyan]  Entity weiterentwickeln",
-            "[cyan]\\[Space][/cyan]  Pause / Fortsetzen",
-            "[cyan]\\[U][/cyan]  Upgrade → Developer (öffnet Browser)",
-            "[cyan]\\[R][/cyan]  Daten aktualisieren",
-            "[cyan]\\[Q][/cyan]  Beenden",
+            "[cyan]\\[C][/cyan]  Set Compass direction",
+            "[cyan]\\[P][/cyan]  Place cells on field",
+            "[cyan]\\[F][/cyan]  Create new field",
+            "[cyan]\\[E][/cyan]  Evolve entity",
+            "[cyan]\\[Space][/cyan]  Pause / Resume",
+            "[cyan]\\[U][/cyan]  Upgrade → Developer (opens browser)",
+            "[cyan]\\[R][/cyan]  Refresh data",
+            "[cyan]\\[Q][/cyan]  Quit",
             "",
             f"[dim]Theme: {self._theme_name}   SDK: {__version__}[/dim]",
             "[dim]Themes: cosmergon  matrix  mono  high-contrast[/dim]",
             "",
-            "[dim]Taste drücken zum Schließen[/dim]",
+            "[dim]Press any key to close[/dim]",
         ]
         with Vertical(id="dialog"):
             for line in lines:
@@ -360,7 +360,7 @@ class CosmergonDashboard(App):
         # Fields
         if state.fields:
             lines.append("")
-            lines.append(_c(t.struct, "[bold]═ FELDER[/bold]"))
+            lines.append(_c(t.struct, "[bold]═ FIELDS[/bold]"))
             for f in state.fields[:_MAX_FIELDS]:
                 tier = f"T{f.entity_tier or 0}"
                 etype = (f.entity_type or "novice")[:8]
@@ -433,7 +433,7 @@ class CosmergonDashboard(App):
     @work
     async def action_compass(self) -> None:
         labels = [_COMPASS_DISPLAY.get(p, p) for p in _COMPASS_PRESETS]
-        idx = await self.push_screen_wait(SelectModal("Compass — Richtung wählen", labels))
+        idx = await self.push_screen_wait(SelectModal("Set Compass direction", labels))
         if idx is None:
             return
         preset = _COMPASS_PRESETS[idx]
@@ -451,7 +451,7 @@ class CosmergonDashboard(App):
     async def action_place_cells(self) -> None:
         state = self.agent.state
         if not state or not state.fields:
-            self._add_log(_c(self._theme.warn, "No fields — press [F] first"))
+            self._add_log(_c(self._theme.warn, "No fields — press \\[F] first"))
             return
         field_labels = [
             f"{f.id[:8]} T{f.entity_tier or 0} ({f.active_cell_count}c)" for f in state.fields
@@ -490,7 +490,7 @@ class CosmergonDashboard(App):
             self._add_log(_c(self._theme.warn, "No fields to evolve"))
             return
         evolve_labels = [
-            f"{f.id[:8]} T{f.entity_tier or 0} reife={f.reife_score}" for f in state.fields
+            f"{f.id[:8]} T{f.entity_tier or 0} maturity={f.reife_score}" for f in state.fields
         ]
         fi = await self.push_screen_wait(SelectModal("Evolve", evolve_labels))
         if fi is None:
@@ -501,7 +501,7 @@ class CosmergonDashboard(App):
         self._add_log(_c(color, f"{icon} evolve → {msg}"))
 
     async def action_upgrade(self) -> None:
-        self._add_log(_c(self._theme.data, "⠋ Upgrade-Seite wird geöffnet..."))
+        self._add_log(_c(self._theme.data, "⠋ Opening upgrade page..."))
         try:
             resp = await self.agent._request(
                 "GET",
@@ -511,9 +511,9 @@ class CosmergonDashboard(App):
             )
             url = resp.headers.get("location", "https://cosmergon.com/pricing")
             webbrowser.open(url)
-            self._add_log(_c(self._theme.pos, "✓ Browser geöffnet"))
+            self._add_log(_c(self._theme.pos, "✓ Browser opened"))
         except Exception as exc:
-            self._add_log(_c(self._theme.warn, f"✗ Upgrade-Link Fehler: {exc}"))
+            self._add_log(_c(self._theme.warn, f"✗ Upgrade link error: {exc}"))
 
     async def action_pause(self) -> None:
         action = "resume" if self._paused else "pause"
@@ -554,16 +554,15 @@ def main() -> None:
     except CosmergonError as exc:
         msg = str(exc)
         if "429" in msg or "Max" in msg:
-            print("\n✗  Zu viele anonyme Registrierungen von dieser IP-Adresse.")
+            print("\n✗  Too many anonymous registrations from this IP address.")
             print()
-            print("   Registriere dich kostenlos auf cosmergon.com — dann bekommst du")
-            print("   einen eigenen API-Key ohne Limits:")
+            print("   Register for free at cosmergon.com to get your own API key:")
             print()
-            print("   cosmergon-dashboard --api-key <dein-key>")
+            print("   cosmergon-dashboard --api-key <your-key>")
             print()
             print("   https://cosmergon.com/getting-started.html")
         else:
-            print(f"\n✗  Verbindung fehlgeschlagen: {exc}")
+            print(f"\n✗  Connection failed: {exc}")
         raise SystemExit(1) from None
 
 
