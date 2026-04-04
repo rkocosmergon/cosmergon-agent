@@ -462,9 +462,14 @@ class CosmergonDashboard(App):
         pi = await self.push_screen_wait(SelectModal("Preset", _PRESETS))
         if pi is None:
             return
-        r = await self.agent.act("place_cells", field_id=state.fields[fi].id, preset=_PRESETS[pi])
-        icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
-        self._add_log(_c(color, f"{icon} place_cells({_PRESETS[pi]})"))
+        try:
+            r = await self.agent.act(
+                "place_cells", field_id=state.fields[fi].id, preset=_PRESETS[pi]
+            )
+            icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
+            self._add_log(_c(color, f"{icon} place_cells({_PRESETS[pi]})"))
+        except CosmergonError as exc:
+            self._add_log(_c(self._theme.warn, f"✗ place_cells: {exc}"))
 
     @work
     async def action_create_field(self) -> None:
@@ -479,9 +484,12 @@ class CosmergonDashboard(App):
         ci = await self.push_screen_wait(SelectModal("Cube", cube_labels))
         if ci is None:
             return
-        r = await self.agent.act("create_field", cube_id=cubes[ci].id)
-        icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
-        self._add_log(_c(color, f"{icon} create_field"))
+        try:
+            r = await self.agent.act("create_field", cube_id=cubes[ci].id)
+            icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
+            self._add_log(_c(color, f"{icon} create_field"))
+        except CosmergonError as exc:
+            self._add_log(_c(self._theme.warn, f"✗ create_field: {exc}"))
 
     @work
     async def action_evolve(self) -> None:
@@ -495,10 +503,13 @@ class CosmergonDashboard(App):
         fi = await self.push_screen_wait(SelectModal("Evolve", evolve_labels))
         if fi is None:
             return
-        r = await self.agent.act("evolve", field_id=state.fields[fi].id)
-        icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
-        msg = r.error_message or "ok"
-        self._add_log(_c(color, f"{icon} evolve → {msg}"))
+        try:
+            r = await self.agent.act("evolve", field_id=state.fields[fi].id)
+            icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
+            msg = r.error_message or "ok"
+            self._add_log(_c(color, f"{icon} evolve → {msg}"))
+        except CosmergonError as exc:
+            self._add_log(_c(self._theme.warn, f"✗ evolve: {exc}"))
 
     async def action_upgrade(self) -> None:
         self._add_log(_c(self._theme.data, "⠋ Opening upgrade page..."))
