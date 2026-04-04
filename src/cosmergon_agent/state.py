@@ -112,6 +112,7 @@ class GameState:
     subscription_tier: str = "free"
     world_briefing: WorldBriefing | None = None
     learned_rules: list[str] = field(default_factory=list)
+    next_tick_at: float | None = None  # Unix timestamp when next game tick fires (server truth)
 
     @classmethod
     def from_api(cls, data: dict) -> GameState:
@@ -142,4 +143,5 @@ class GameState:
             subscription_tier=data.get("subscription_tier", "free"),
             world_briefing=world_briefing,
             learned_rules=data.get("learned_rules", []),
+            next_tick_at=data.get("next_tick_at"),
         )

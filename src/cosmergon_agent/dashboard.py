@@ -474,13 +474,23 @@ class CosmergonDashboard(App):
         self._feedback_until = time.monotonic() + duration
 
     def _countdown_suffix(self) -> str:
-        """Return '  ·  next ~Xs' when tick timing is known, else empty string."""
+        """Return countdown suffix using server's next_tick_at (or self-calibrated fallback)."""
+        t = self._theme
+        state = self.agent.state
+        if state and state.next_tick_at:
+            remaining = state.next_tick_at - time.time()
+            if remaining > 1.0:
+                return "  ·  " + _c("dim", f"next ~{int(remaining)}s")
+            overdue = max(0, int(-remaining))
+            color = t.warn if overdue > 90 else "dim"
+            return "  ·  " + _c(color, f"+{overdue}s")
+        # Fallback: self-calibrated estimate (old server / first poll)
         if self._tick_received_at > 0:
             elapsed = time.monotonic() - self._tick_received_at
             remaining = self._tick_interval - elapsed
-            if remaining < 1.0:
-                return "  ·  " + _c("dim", "next tick soon")
-            return "  ·  " + _c("dim", f"next ~{int(remaining)}s")
+            if remaining > 1.0:
+                return "  ·  " + _c("dim", f"next ~{int(remaining)}s")
+            return "  ·  " + _c("dim", f"+{max(0, int(-remaining))}s")
         return ""
 
     def _compute_hint(self, state: GameState | None) -> str:
@@ -489,13 +499,21 @@ class CosmergonDashboard(App):
 
         # 1. Active feedback — show confirmation + countdown so user knows *when* it fires.
         if self._feedback and time.monotonic() < self._feedback_until:
-            if self._tick_received_at > 0:
+            state = self.agent.state
+            if state and state.next_tick_at:
+                remaining = state.next_tick_at - time.time()
+                if remaining > 1.0:
+                    suffix = _c("dim", f"takes effect at next tick ~{int(remaining)}s")
+                else:
+                    suffix = _c("dim", "takes effect at next tick soon")
+                return f"{self._feedback}  ·  {suffix}"
+            elif self._tick_received_at > 0:
                 elapsed = time.monotonic() - self._tick_received_at
                 remaining = self._tick_interval - elapsed
-                if remaining < 1.0:
-                    suffix = _c("dim", "takes effect at next tick soon")
-                else:
+                if remaining > 1.0:
                     suffix = _c("dim", f"takes effect at next tick ~{int(remaining)}s")
+                else:
+                    suffix = _c("dim", "takes effect at next tick soon")
                 return f"{self._feedback}  ·  {suffix}"
             return self._feedback
 
@@ -540,13 +558,19 @@ class CosmergonDashboard(App):
 
         # 7. Normal running state — show tick + countdown + quick-actions
         tick_part = f"tick {state.tick}"
-        if self._tick_received_at > 0:
+        if state.next_tick_at:
+            remaining = state.next_tick_at - time.time()
+            if remaining > 1.0:
+                tick_part += f" · next ~{int(remaining)}s"
+            else:
+                tick_part += f" · +{max(0, int(-remaining))}s"
+        elif self._tick_received_at > 0:
             elapsed = time.monotonic() - self._tick_received_at
             remaining = self._tick_interval - elapsed
-            if remaining < 1.0:
-                tick_part += " · next tick soon"
-            else:
+            if remaining > 1.0:
                 tick_part += f" · next ~{int(remaining)}s"
+            else:
+                tick_part += f" · +{max(0, int(-remaining))}s"
 
         actions = (
             f"{_c(t.cmd, _hk('P'))} place  "
