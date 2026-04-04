@@ -70,7 +70,7 @@ class Theme:
 
 
 THEMES: dict[str, Theme] = {
-    "cosmergon": Theme("cosmergon", "cyan", "yellow", "green", "red", "white", "white"),
+    "cosmergon": Theme("cosmergon", "cyan", "yellow", "#6EE21C", "red", "white", "white"),
     "matrix":    Theme("matrix", "green", "bright_green", "green", "red", "green", "green"),
     "mono":      Theme("mono", "white", "white", "white", "white", "white", "white"),
     "high-contrast": Theme("high-contrast", "yellow", "cyan", "green", "red", "white", "white"),
@@ -220,15 +220,15 @@ class CosmergonDashboard(App):
 
     DEFAULT_CSS = """
     Screen {
-        background: #0d0d0d;
+        background: #1e1e1e;
         layout: vertical;
     }
 
     #hint-bar {
         height: 7;
-        background: #0a0a14;
+        background: #161620;
         padding: 1 2;
-        border-bottom: solid #1a1a1a;
+        border-bottom: solid #2a2a2a;
     }
 
     #top-row {
@@ -238,20 +238,20 @@ class CosmergonDashboard(App):
 
     #agent-panel {
         width: 1fr;
-        border: solid #2a2a2a;
+        border: solid #333333;
         padding: 0 1;
         overflow: hidden hidden;
     }
 
     #economy-panel {
         width: 1fr;
-        border: solid #2a2a2a;
+        border: solid #333333;
         padding: 0 1;
         overflow: hidden hidden;
     }
 
     #journal-panel {
-        border: solid #2a2a2a;
+        border: solid #333333;
         padding: 0 1;
         height: 1fr;
         overflow: hidden hidden;
@@ -259,15 +259,15 @@ class CosmergonDashboard(App):
 
     #status-bar {
         height: 1;
-        background: #111111;
+        background: #252525;
         padding: 0 1;
     }
 
     #key-bar {
         height: 4;
-        background: #0d0d0d;
+        background: #1e1e1e;
         padding: 0 1;
-        border-top: solid #1a1a1a;
+        border-top: solid #2a2a2a;
     }
     """
 
