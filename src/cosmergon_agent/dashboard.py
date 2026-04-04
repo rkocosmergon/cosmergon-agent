@@ -227,7 +227,7 @@ class CosmergonDashboard(App):
 
     #hint-bar {
         height: 7;
-        background: #1e1e1e;
+        background: #252525;
         padding: 1 2;
         border-bottom: solid #2a2a2a;
     }
@@ -239,20 +239,23 @@ class CosmergonDashboard(App):
 
     #agent-panel {
         width: 1fr;
-        border: solid #333333;
+        background: #161616;
+        border: solid #2a2a2a;
         padding: 0 1;
         overflow: hidden hidden;
     }
 
     #economy-panel {
         width: 1fr;
-        border: solid #333333;
+        background: #161616;
+        border: solid #2a2a2a;
         padding: 0 1;
         overflow: hidden hidden;
     }
 
     #journal-panel {
-        border: solid #333333;
+        background: #161616;
+        border: solid #2a2a2a;
         padding: 0 1;
         height: 1fr;
         overflow: hidden hidden;
@@ -260,13 +263,13 @@ class CosmergonDashboard(App):
 
     #status-bar {
         height: 1;
-        background: #252525;
+        background: #1e1e1e;
         padding: 0 1;
     }
 
     #key-bar {
         height: 4;
-        background: #252525;
+        background: #1e1e1e;
         padding: 0 1;
         border-top: solid #2a2a2a;
     }
@@ -396,12 +399,10 @@ class CosmergonDashboard(App):
             lines.append(_c(t.data, tier_line))
         lines.append("")
 
-        # Compass
-        if not self._compass_ever_set:
-            lines.append(_c(t.guide, "[bold]→ \\[C] Set Compass direction[/bold]"))
-        else:
-            compass_label = _COMPASS_DISPLAY.get(self._compass_preset, self._compass_preset)
-            lines.append(_c(t.data, f"Compass: {compass_label}"))
+        # Compass — CTA lives in hint-bar, agent panel shows current state only
+        compass_label = _COMPASS_DISPLAY.get(self._compass_preset, self._compass_preset)
+        compass_val = compass_label if self._compass_ever_set else "—"
+        lines.append(_c(t.data, f"Compass: {compass_val}"))
 
         # Fields
         if state.fields:

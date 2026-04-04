@@ -100,14 +100,6 @@ def _has_style(content, text_fragment: str, style_fragment: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-async def test_c_hotkey_visible_in_panel():
-    """[C] must render as literal text — not consumed as Rich style tag."""
-    app = _make_dashboard()
-    agent, _, _ = await _render(app)
-    assert "[C]" in agent.plain, (
-        "Hotkey [C] invisible — Rich consumed it as a style tag. Use \\[C] in markup."
-    )
-
 
 async def test_u_hotkey_visible_in_key_bar():
     """[U] must render as literal text in the key bar (upgrade hint moved out of economy panel)."""
@@ -155,11 +147,14 @@ async def test_no_fields_warning_hotkey_visible():
 
 
 async def test_new_user_only_c_is_yellow():
-    """At first start, only [C] should be yellow — not [U] or anything else."""
+    """At first start, CTA lives in hint-bar only — agent panel shows 'Compass: —', no yellow."""
     app = _make_dashboard()
     agent, economy, _ = await _render(app)
 
-    assert _has_style(agent, "[C]", "yellow"), "[C] must be yellow in agent panel"
+    # CTA removed from agent panel — shows neutral placeholder instead
+    assert "Compass: —" in agent.plain, "Agent panel must show 'Compass: —' when compass not set"
+    yellow_agent = [agent.plain[s.start : s.end] for s in agent.spans if "yellow" in str(s.style)]
+    assert not yellow_agent, f"No yellow in agent panel (CTA in hint-bar). Found: {yellow_agent}"
     yellow_economy = [
         economy.plain[s.start : s.end] for s in economy.spans if "yellow" in str(s.style)
     ]
@@ -606,7 +601,8 @@ async def test_compass_error_shows_in_journal() -> None:
 
     assert "✗" in journal.plain
     assert "compass" in journal.plain
-    assert _has_style(agent, "[C]", "yellow"), "Yellow CTA must persist after failed compass"
+    # CTA lives in hint-bar after the move — agent panel shows neutral "Compass: —"
+    assert "Compass: —" in agent.plain, "Agent panel must still show 'Compass: —' after failed set"
 
 
 # --- upgrade ---
