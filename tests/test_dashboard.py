@@ -573,3 +573,80 @@ async def test_pause_error_shows_in_journal() -> None:
     assert "AKTIV" in agent.plain, "State must not toggle on error"
     assert "✗" in journal.plain
     assert "pause" in journal.plain
+
+
+# --- compass (set_compass, not agent.act) ---
+
+def _set_compass_success() -> object:
+    """Patch: agent.set_compass always returns explanation dict."""
+    async def _set(*_args: object, **_kwargs: object) -> dict:
+        return {"explanation": "Strategy set."}
+    return _set
+
+
+def _set_compass_fail(msg: str = "server error") -> object:
+    """Patch: agent.set_compass always raises CosmergonError."""
+    async def _set(*_args: object, **_kwargs: object) -> dict:
+        raise CosmergonError(msg)
+    return _set
+
+
+async def test_compass_success_clears_yellow_cta() -> None:
+    """[C] → select preset → success: yellow CTA gone, compass label shown."""
+    app = _make_dashboard()
+    app.agent.set_compass = _set_compass_success()
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("c")
+        await pilot.pause()
+        await pilot.press("3")   # preset index 2 = "grow" (1=attack 2=defend 3=grow)
+        await pilot.pause()
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        agent = pilot.app.query_one("#agent-panel", Static).render()
+
+    yellow = [agent.plain[s.start:s.end] for s in agent.spans if "yellow" in str(s.style)]
+    assert not yellow, f"Yellow CTA must vanish after compass set. Found: {yellow}"
+    assert "Compass" in agent.plain, "Compass label must appear after selection"
+
+
+async def test_compass_error_shows_in_journal() -> None:
+    """[C] → select preset → CosmergonError: ✗ in journal, CTA still yellow."""
+    app = _make_dashboard()
+    app.agent.set_compass = _set_compass_fail("unreachable")
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("c")
+        await pilot.pause()
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        agent = pilot.app.query_one("#agent-panel", Static).render()
+        journal = pilot.app.query_one("#journal-panel", Static).render()
+
+    assert "✗" in journal.plain
+    assert "compass" in journal.plain
+    assert _has_style(agent, "[C]", "yellow"), "Yellow CTA must persist after failed compass"
+
+
+# --- upgrade ---
+
+async def test_upgrade_error_shows_in_journal() -> None:
+    """[U] with connection error shows ✗ in journal, app does not crash."""
+    app = _make_dashboard()
+
+    async def _fail_request(*_args: object, **_kwargs: object) -> object:
+        raise CosmergonError("connection refused")
+    app.agent._request = _fail_request
+
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("u")
+        await pilot.pause()
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        journal = pilot.app.query_one("#journal-panel", Static).render()
+
+    assert "✗" in journal.plain
+    assert "Upgrade" in journal.plain or "upgrade" in journal.plain.lower()
