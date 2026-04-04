@@ -286,7 +286,7 @@ class HelpModal(ModalScreen):
             "[dim]Themes: cosmergon  matrix  mono  high-contrast[/dim]",
         ]
         with Vertical(id="guide-wrap"):
-            yield Label("[dim]Scroll ↓ for full guide · Press any key to close[/dim]", id="guide-header")
+            yield Label("[dim]↑ ↓ PgUp PgDn to scroll · Esc or Q to close[/dim]", id="guide-header")
             with VerticalScroll():
                 for line in sections:
                     yield Label(line)

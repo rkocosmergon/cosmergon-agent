@@ -121,7 +121,7 @@ async def test_help_modal_is_english():
     all_text = " ".join(visible)
 
     assert any("Quit" in t for t in visible), "HelpModal must show 'Quit'"
-    assert any("Press any key" in t for t in visible), "HelpModal must show English close hint"
+    assert any("Esc" in t or "scroll" in t for t in visible), "HelpModal must show English navigation hint"
     assert "Beenden" not in all_text, "HelpModal must not contain German 'Beenden'"
     assert "Taste" not in all_text, "HelpModal must not contain German 'Taste drücken'"
 
