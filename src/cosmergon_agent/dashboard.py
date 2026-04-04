@@ -210,6 +210,8 @@ class HelpModal(ModalScreen):
 class CosmergonDashboard(App):
     """btop-inspired Textual dashboard for Cosmergon agents."""
 
+    ENABLE_COMMAND_PALETTE = False
+
     DEFAULT_CSS = """
     Screen {
         background: #0d0d0d;
@@ -340,7 +342,7 @@ class CosmergonDashboard(App):
                 _c(t.data, f"T{state.ranking.player_tier} {state.ranking.tier_name}"
                    f"  Score: {state.ranking.player_score:,.0f}")
             )
-        lines.append(_c("dim", f"Agent: {(self.agent.agent_id or '?')[:24]}"))
+        lines.append(_c("dim", f"Agent: {(self.agent.agent_id or '?')[:8]}"))
         lines.append("")
 
         # Compass
@@ -379,7 +381,8 @@ class CosmergonDashboard(App):
                 lines.append(_c(t.warn, f"Event: {wb.last_event[:32]}"))
             if wb.tip:
                 lines.append("")
-                lines.append(_c(t.data, f"→ {wb.tip[:42]}"))
+                tip = wb.tip if len(wb.tip) <= 38 else wb.tip[:38].rsplit(" ", 1)[0] + "…"
+                lines.append(_c(t.data, f"→ {tip}"))
 
         if state and state.subscription_tier == "free":
             lines.append("")
