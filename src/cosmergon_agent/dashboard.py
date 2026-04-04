@@ -34,7 +34,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Label, Static
 
-from cosmergon_agent import CosmergonAgent, CosmergonError, __version__
+from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError, __version__
 from cosmergon_agent.state import GameState
 
 logger = logging.getLogger(__name__)
@@ -303,6 +303,7 @@ class CosmergonDashboard(App):
         self._last_tick: int = -1
         self._hint_history: list[str] = []
         self._panel_cache: dict[str, str] = {}  # widget-id → last rendered content
+        self._fatal_error: str = ""  # set on AuthenticationError — shown in hint-bar
 
     def compose(self) -> ComposeResult:
         yield Static("", id="hint-bar")
@@ -349,6 +350,9 @@ class CosmergonDashboard(App):
     async def _run_agent(self) -> None:
         try:
             await self.agent.start()
+        except AuthenticationError as exc:
+            self._fatal_error = f"✗ Auth failed: {exc}"
+            self._add_log(_c(self._theme.warn, self._fatal_error))
         except Exception as exc:
             self._add_log(_c(self._theme.warn, f"Agent error: {exc}"))
 
@@ -504,6 +508,10 @@ class CosmergonDashboard(App):
     def _compute_hint(self, state: GameState | None) -> str:
         """Return Line 1 of the hint bar: active feedback OR current guidance."""
         t = self._theme
+
+        # 0. Fatal error (e.g. auth failure) — shown permanently until restart
+        if self._fatal_error and not state:
+            return _c(t.warn, self._fatal_error)
 
         # 1. Active feedback — show confirmation + countdown so user knows *when* it fires.
         if self._feedback and time.monotonic() < self._feedback_until:
