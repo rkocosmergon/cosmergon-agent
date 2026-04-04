@@ -325,7 +325,7 @@ class CosmergonDashboard(App):
         lines = [_c(t.struct, "[bold]═ AGENT[/bold]")]
 
         if not state:
-            lines.append(_c(t.guide, "Connecting..."))
+            lines.append(_c("dim", "Connecting..."))
             self.query_one("#agent-panel", Static).update("\n".join(lines))
             return
 
@@ -383,7 +383,7 @@ class CosmergonDashboard(App):
 
         if state and state.subscription_tier == "free":
             lines.append("")
-            lines.append(_c(t.guide, "[bold][U] Upgrade → Developer[/bold]"))
+            lines.append(_c(t.cmd, "[U] Upgrade → Developer"))
 
         self.query_one("#economy-panel", Static).update("\n".join(lines))
 
@@ -428,7 +428,7 @@ class CosmergonDashboard(App):
         if idx is None:
             return
         preset = _COMPASS_PRESETS[idx]
-        self._add_log(_c(self._theme.guide, f"⠋ compass → {preset}..."))
+        self._add_log(_c(self._theme.data, f"⠋ compass → {preset}..."))
         try:
             result = await self.agent.set_compass(preset)
             self._compass_preset = preset
@@ -492,7 +492,7 @@ class CosmergonDashboard(App):
         self._add_log(_c(color, f"{icon} evolve → {msg}"))
 
     async def action_upgrade(self) -> None:
-        self._add_log(_c(self._theme.guide, "⠋ Upgrade-Seite wird geöffnet..."))
+        self._add_log(_c(self._theme.data, "⠋ Upgrade-Seite wird geöffnet..."))
         try:
             resp = await self.agent._request(
                 "GET",
