@@ -299,6 +299,7 @@ class CosmergonDashboard(App):
         self._tick_interval: float = 60.0  # self-calibrating from observed tick gaps
         self._last_tick: int = -1
         self._hint_history: list[str] = []
+        self._panel_cache: dict[str, str] = {}  # widget-id → last rendered content
 
     def compose(self) -> ComposeResult:
         yield Static("", id="hint-bar")
@@ -355,6 +356,12 @@ class CosmergonDashboard(App):
 
     # --- Redraw ---
 
+    def _update_panel(self, widget_id: str, content: str) -> None:
+        """Call Static.update() only when content changed — prevents unnecessary repaints."""
+        if self._panel_cache.get(widget_id) != content:
+            self._panel_cache[widget_id] = content
+            self.query_one(f"#{widget_id}", Static).update(content)
+
     def _redraw(self) -> None:
         state = self.agent.state
         self._draw_hint_bar(state)
@@ -370,7 +377,7 @@ class CosmergonDashboard(App):
 
         if not state:
             lines.append(_c("dim", "Connecting..."))
-            self.query_one("#agent-panel", Static).update("\n".join(lines))
+            self._update_panel("agent-panel", "\n".join(lines))
             return
 
         # Status + energy
@@ -408,7 +415,7 @@ class CosmergonDashboard(App):
                     _c(t.data, f"  {f.id[:8]} {tier} {etype:8s} {bar_f} {f.active_cell_count}c")
                 )
 
-        self.query_one("#agent-panel", Static).update("\n".join(lines))
+        self._update_panel("agent-panel", "\n".join(lines))
 
     def _draw_economy_panel(self, state: GameState | None) -> None:
         t = self._theme
@@ -425,7 +432,7 @@ class CosmergonDashboard(App):
         elif state:
             lines.append(_c("dim", "Joining universe..."))
 
-        self.query_one("#economy-panel", Static).update("\n".join(lines))
+        self._update_panel("economy-panel", "\n".join(lines))
 
     def _draw_journal_panel(self, state: GameState | None) -> None:
         t = self._theme
@@ -447,7 +454,7 @@ class CosmergonDashboard(App):
         else:
             lines.append("[dim]Connecting to cosmergon.com...[/dim]")
 
-        self.query_one("#journal-panel", Static).update("\n".join(lines))
+        self._update_panel("journal-panel", "\n".join(lines))
 
     def _draw_status_bar(self, state: GameState | None) -> None:
         agent_id = (self.agent.agent_id or "?")[:8]
@@ -462,7 +469,7 @@ class CosmergonDashboard(App):
             f"sdk {__version__}",
             f"theme {tname}",
         ]
-        self.query_one("#status-bar", Static).update(f"[dim]{sep.join(segments)}[/dim]")
+        self._update_panel("status-bar", f"[dim]{sep.join(segments)}[/dim]")
 
     def _set_feedback(self, msg: str, duration: float = 4.0) -> None:
         """Show a timed message in the hint bar; previous feedback is archived to history."""
@@ -585,7 +592,7 @@ class CosmergonDashboard(App):
         lines = [self._compute_hint(state)]
         for msg in reversed(self._hint_history[-4:]):
             lines.append(msg)
-        self.query_one("#hint-bar", Static).update("\n".join(lines))
+        self._update_panel("hint-bar", "\n".join(lines))
 
     def _draw_key_bar(self) -> None:
         t = self._theme
@@ -603,7 +610,7 @@ class CosmergonDashboard(App):
             ]
         )
         row2 = "  ".join([k("Space", "Pause"), k("R", "Refresh"), k("?", "Help"), k("Q", "Quit")])
-        self.query_one("#key-bar", Static).update(f"{row1}\n{row2}")
+        self._update_panel("key-bar", f"{row1}\n{row2}")
 
     # --- Actions ---
 
