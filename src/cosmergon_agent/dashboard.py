@@ -261,6 +261,13 @@ class HelpModal(ModalScreen):
             "attack, defend, cooperate, explore, or autonomous.",
             "The agent interprets it — it is not a direct command.",
             "",
+            "[bold]Found a bug or have a question?[/bold]",
+            "Open an issue on GitHub:",
+            "  github.com/rkocosmergon/cosmergon-agent/issues",
+            "If the dashboard crashed, run:",
+            "  TEXTUAL_LOG=~/cosmergon-crash.log cosmergon-dashboard",
+            "Reproduce the crash, then paste the log in the issue.",
+            "",
             # ── HOTKEYS ───────────────────────────────────────────────────
             "[bold]═ HOTKEYS[/bold]",
             "",
