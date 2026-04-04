@@ -1346,3 +1346,49 @@ async def test_fire_pending_compass_success_sets_compass_preset() -> None:
 
     assert app._compass_preset == "grow", "Compass preset must be updated after successful retry"
     assert app._compass_ever_set is True, "compass_ever_set must be True after successful retry"
+
+
+# ---------------------------------------------------------------------------
+# First-tick compass restore (Issue #8)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_compass_restored_from_state_on_first_tick() -> None:
+    """Dashboard reads compass_preset from server state on first tick.
+
+    When the server returns compass_preset="grow", the first tick must set
+    _compass_ever_set=True and _compass_preset="grow" without user interaction.
+    """
+    state = fake_state(compass_preset="grow")
+    agent = CosmergonAgent(api_key="AGENT-test:fakekey000000000000000000000")
+    agent.agent_id = state.agent_id
+
+    app = _TestDashboard(agent=agent, theme=THEMES["cosmergon"])
+    assert not app._compass_ever_set, "Must start with compass never set"
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await agent._tick_handler(state)
+        await pilot.pause()
+
+    assert app._compass_ever_set, "compass_ever_set must be True after first tick with preset"
+    assert app._compass_preset == "grow"
+
+
+@pytest.mark.asyncio
+async def test_compass_not_restored_when_preset_is_none() -> None:
+    """Dashboard keeps CTA when server has no compass_preset (never set)."""
+    state = fake_state()  # compass_preset=None by default
+    agent = CosmergonAgent(api_key="AGENT-test:fakekey000000000000000000000")
+    agent.agent_id = state.agent_id
+
+    app = _TestDashboard(agent=agent, theme=THEMES["cosmergon"])
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await agent._tick_handler(state)
+        await pilot.pause()
+
+    assert not app._compass_ever_set, "CTA must still show when no compass_preset from server"
+    assert app._compass_preset == "autonomous", "Default preset must be unchanged"

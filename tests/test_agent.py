@@ -156,3 +156,24 @@ async def test_act_propagates_rate_limit_error() -> None:
         await agent.act("place_cells", field_id="f1", preset="blinker")
 
     assert exc_info.value.retry_after == pytest.approx(30.0)
+
+
+# ---------------------------------------------------------------------------
+# GameState.from_api(): compass_preset parsing
+# ---------------------------------------------------------------------------
+
+
+def test_gamestate_parses_compass_preset() -> None:
+    """GameState.from_api() must expose compass_preset from server response."""
+    from cosmergon_agent.state import GameState
+
+    state = GameState.from_api({"agent_id": "a", "energy_balance": 100.0, "compass_preset": "grow"})
+    assert state.compass_preset == "grow"
+
+
+def test_gamestate_compass_preset_defaults_none() -> None:
+    """GameState.from_api() must default compass_preset to None when absent."""
+    from cosmergon_agent.state import GameState
+
+    state = GameState.from_api({"agent_id": "a", "energy_balance": 100.0})
+    assert state.compass_preset is None

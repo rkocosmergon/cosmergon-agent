@@ -471,6 +471,10 @@ class CosmergonDashboard(App):
             self._last_tick = state.tick
             if self._last_energy is None:
                 self._last_energy = state.energy
+                # Restore compass from server state (persisted in persona_config)
+                if state.compass_preset and state.compass_preset in _COMPASS_PRESETS:
+                    self._compass_preset = state.compass_preset
+                    self._compass_ever_set = True
                 self._add_log(_c(self._theme.pos, f"● Connected  {state.energy:,.0f} E"))
                 return
             delta = state.energy - self._last_energy

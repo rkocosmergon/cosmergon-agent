@@ -113,6 +113,7 @@ class GameState:
     world_briefing: WorldBriefing | None = None
     learned_rules: list[str] = field(default_factory=list)
     next_tick_at: float | None = None  # Unix timestamp when next game tick fires (server truth)
+    compass_preset: str | None = None  # Last explicitly set compass preset; None if never set
 
     @classmethod
     def from_api(cls, data: dict) -> GameState:
@@ -144,4 +145,5 @@ class GameState:
             world_briefing=world_briefing,
             learned_rules=data.get("learned_rules", []),
             next_tick_at=data.get("next_tick_at"),
+            compass_preset=data.get("compass_preset"),
         )
