@@ -283,7 +283,6 @@ class CosmergonDashboard(App):
         self._register_agent_handlers()
         self._run_agent()
         self.set_interval(0.5, self._redraw)
-        self._add_log(_c(self._theme.guide, "Connecting to cosmergon.com..."))
 
     def _register_agent_handlers(self) -> None:
         @self.agent.on_tick
@@ -406,7 +405,7 @@ class CosmergonDashboard(App):
         if feed:
             lines.extend(feed)
         else:
-            lines.append("[dim]Warte auf erste Ereignisse...[/dim]")
+            lines.append("[dim]Connecting to cosmergon.com...[/dim]")
 
         self.query_one("#journal-panel", Static).update("\n".join(lines))
 
