@@ -395,16 +395,8 @@ class CosmergonDashboard(App):
         background: #161616;
         border: solid #2a2a2a;
         padding: 0 1;
-        height: 7;
-        overflow: hidden hidden;
-    }
-
-    #chat-panel {
-        background: #161616;
-        border: solid #2a2a2a;
-        padding: 0 1;
         height: 1fr;
-        min-height: 4;
+        min-height: 6;
         overflow: hidden hidden;
     }
 
@@ -464,7 +456,7 @@ class CosmergonDashboard(App):
         self._fatal_error: str = ""  # set on AuthenticationError — shown in hint-bar
         self._pending_action: _PendingAction | None = None  # queued on 429, fires next tick
         self._messages: list[dict] = []  # chat conversation cache (refreshed each tick)
-        self._focus: str | None = None   # None | "agent" | "fields" | "log" | "chat"
+        self._focus: str | None = None   # None | "agent" | "fields" | "log"
         self._focus_panel_id: str | None = None  # last panel id with .panel-focused class
 
     def compose(self) -> ComposeResult:
@@ -473,7 +465,6 @@ class CosmergonDashboard(App):
             yield Static("", id="agent-panel")
             yield Static("", id="economy-panel")
         yield Static("", id="log-panel")
-        yield Static("", id="chat-panel")
         yield Static("", id="context-bar")
         yield Static("", id="fix-bar")
         yield Static("", id="status-bar")
@@ -575,9 +566,11 @@ class CosmergonDashboard(App):
                 )
                 self._add_log(_c(color, label))
                 self._set_feedback(_c(color, label))
-        except RateLimitError:
-            self._add_log(_c(self._theme.warn, f"✗ {pending.display}: still rate limited"))
-            self._set_feedback(_c(self._theme.warn, "✗ Still rate limited — press key to retry"))
+        except RateLimitError as exc:
+            # Re-queue with another timer — tick boundary not yet reached
+            self._schedule_pending(pending, retry_after=exc.retry_after)
+            wait = int(exc.retry_after)
+            self._add_log(_c("dim", f"⏳ {pending.display}: still rate limited, retry ~{wait}s"))
         except CosmergonError as exc:
             self._add_log(_c(self._theme.warn, f"✗ {pending.display}: {exc}"))
             self._set_feedback(_c(self._theme.warn, f"✗ {pending.display} failed"))
@@ -592,7 +585,7 @@ class CosmergonDashboard(App):
 
     _FOCUS_TO_PANEL: ClassVar[dict[str, str]] = {
         "agent": "agent-panel", "fields": "agent-panel",
-        "log": "log-panel", "chat": "chat-panel",
+        "log": "log-panel",
     }
 
     def _sync_focus_border(self) -> None:
@@ -612,7 +605,6 @@ class CosmergonDashboard(App):
         self._draw_agent_panel(state)
         self._draw_economy_panel(state)
         self._draw_log_panel(state)
-        self._draw_chat_panel(state)
         self._draw_context_bar(state)
         self._draw_fix_bar()
         self._draw_status_bar(state)
@@ -682,7 +674,9 @@ class CosmergonDashboard(App):
     def _draw_log_panel(self, state: GameState | None) -> None:
         t = self._theme
         focus_marker = _c(t.guide, " ▶") if self._focus == "log" else ""
-        lines = [_c(t.struct, f"[bold]═ LOG[/bold]{focus_marker}") + _c("dim", "  [L] fullscreen")]
+        agent_name = (state.agent_name if state and state.agent_name else None) or "Agent"
+        hint = _c("dim", "  [L] fullscreen  [M] chat")
+        lines = [_c(t.struct, f"[bold]═ LOG[/bold]{focus_marker}") + hint]
 
         # Learned rules — show last 2 (compact)
         learned = (state.learned_rules if state else None) or []
@@ -697,31 +691,17 @@ class CosmergonDashboard(App):
         else:
             lines.append("[dim]Connecting to cosmergon.com...[/dim]")
 
+        # Chat messages — last 2, shown below activity feed
+        if self._messages:
+            lines.append(_c("dim", f"─ {agent_name}"))
+            for msg in self._messages[-2:]:
+                sender = msg.get("sender", "")
+                text = msg.get("message", "")
+                label = "Du" if sender == "player" else agent_name
+                color = t.data if sender == "player" else t.pos
+                lines.append(_c(color, f"  [{label}] {text[:68]}"))
+
         self._update_panel("log-panel", "\n".join(lines))
-
-    def _draw_chat_panel(self, state: GameState | None) -> None:
-        t = self._theme
-        focus_marker = _c(t.guide, " ▶") if self._focus == "chat" else ""
-        agent_name = (state.agent_name if state and state.agent_name else None) or "Agent"
-        header = _c(t.struct, f"[bold]═ CHAT: {agent_name}[/bold]{focus_marker}")
-        lines = [header + _c("dim", "  [M] write")]
-
-        if state and state.agent_mode == "api":
-            lines.append(_c("dim", "  Kein Auto-Antwort (API-Modus)"))
-
-        if not self._messages:
-            self._update_panel("chat-panel", "\n".join(lines))
-            return
-
-        # Show last messages, newest at bottom. Each message on its own line (truncated).
-        for msg in self._messages[-6:]:
-            sender = msg.get("sender", "")
-            text = msg.get("message", "")
-            label = "Du" if sender == "player" else "Agent"
-            color = t.data if sender == "player" else t.pos
-            lines.append(_c(color, f"\\[{label}] {text[:72]}"))
-
-        self._update_panel("chat-panel", "\n".join(lines))
 
     def _draw_context_bar(self, state: GameState | None) -> None:
         t = self._theme
@@ -741,7 +721,7 @@ class CosmergonDashboard(App):
                 self._update_panel("context-bar", _c("dim", "  ".join(parts)))
             else:
                 self._update_panel("context-bar", _c("dim", "No fields yet"))
-        elif self._focus in ("log", "chat"):
+        elif self._focus == "log":
             self._update_panel("context-bar", _c("dim", "[↑/↓] Scroll  [Esc] back"))
         else:
             self._update_panel("context-bar", _c("dim", _hk("Tab") + " Panel focus"))
@@ -891,7 +871,7 @@ class CosmergonDashboard(App):
 
     def action_cycle_focus(self) -> None:
         """Cycle Tab-focus through panels: None → agent → fields → log → chat → None."""
-        order: list[str | None] = [None, "agent", "fields", "log", "chat"]
+        order: list[str | None] = [None, "agent", "fields", "log"]
         idx = order.index(self._focus)
         self._focus = order[(idx + 1) % len(order)]
 

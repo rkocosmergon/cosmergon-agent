@@ -1289,8 +1289,8 @@ async def test_fire_pending_success_logs_result() -> None:
     assert app._pending_action is None, "Pending slot must be cleared after firing"
 
 
-async def test_fire_pending_still_429_clears_queue_and_shows_error() -> None:
-    """_fire_pending() getting another 429 must clear the queue and log an error."""
+async def test_fire_pending_still_429_requeues_with_timer() -> None:
+    """_fire_pending() getting another 429 must re-queue the action (not drop it)."""
     from cosmergon_agent.dashboard import _PendingAction
 
     app = _make_dashboard_with_cubes()
@@ -1307,8 +1307,10 @@ async def test_fire_pending_still_429_clears_queue_and_shows_error() -> None:
         await pilot.pause()
         journal = pilot.app.query_one("#log-panel", Static).render()
 
-    assert app._pending_action is None, "Queue must be cleared even on second 429"
-    assert "still rate limited" in journal.plain, "Error must mention 'still rate limited'"
+    # Action must be re-queued, not dropped
+    assert app._pending_action is not None, "Action must be re-queued on second 429, not dropped"
+    assert app._pending_action.action == "place_cells", "Re-queued action must match original"
+    assert "still rate limited" in journal.plain, "Log must mention 'still rate limited'"
 
 
 async def test_fire_pending_no_action_is_noop() -> None:
