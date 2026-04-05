@@ -39,6 +39,7 @@ from textual.widgets import Label, Static
 
 from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError, __version__
 from cosmergon_agent.exceptions import RateLimitError
+from cosmergon_agent.exceptions import ConnectionError as CsgConnectionError
 from cosmergon_agent.state import GameState
 
 logger = logging.getLogger(__name__)
@@ -810,15 +811,19 @@ class CosmergonDashboard(App):
         self._add_log(_c(self._theme.data, f"⠋ compass → {compass_label}..."))
         try:
             result = await self.agent.set_compass(preset)
-            self._compass_preset = preset
-            self._compass_ever_set = True
-            # First line: clean action confirmation with display label
-            self._add_log(_c(self._theme.pos, f"✓ compass: {compass_label}"))
-            # Second line: explanation word-truncated so it never overflows narrow panels
-            explanation = (result.get("explanation") or "").strip()
-            if explanation:
-                self._add_log(_c("dim", f"  {_truncate_words(explanation, 48)}"))
-            self._set_feedback(_c(self._theme.pos, f"✓ Compass → {compass_label}"))
+            if result.get("error"):
+                self._add_log(_c(self._theme.warn, f"✗ compass failed: {result['error']}"))
+                self._set_feedback(_c(self._theme.warn, "✗ Compass failed"))
+            else:
+                self._compass_preset = preset
+                self._compass_ever_set = True
+                # First line: clean action confirmation with display label
+                self._add_log(_c(self._theme.pos, f"✓ compass: {compass_label}"))
+                # Second line: explanation word-truncated so it never overflows narrow panels
+                explanation = (result.get("explanation") or "").strip()
+                if explanation:
+                    self._add_log(_c("dim", f"  {_truncate_words(explanation, 48)}"))
+                self._set_feedback(_c(self._theme.pos, f"✓ Compass → {compass_label}"))
         except RateLimitError as exc:
             wait_str = f" ~{int(exc.retry_after)}s" if exc.retry_after > 1 else ""
             self._pending_action = _PendingAction(
@@ -826,6 +831,13 @@ class CosmergonDashboard(App):
             )
             self._add_log(_c("dim", f"⏳ {compass_label} — queued, fires next tick{wait_str}"))
             self._set_feedback(_c("dim", f"⏳ Queued: {compass_label} — next tick{wait_str}"))
+        except CsgConnectionError:
+            # Network error — queue for one retry on the next tick
+            self._pending_action = _PendingAction(
+                kind="compass", action=preset, params={}, display=compass_label
+            )
+            self._add_log(_c("dim", f"⏳ {compass_label} — network error, retry next tick"))
+            self._set_feedback(_c("dim", f"⏳ {compass_label} — retrying next tick"))
         except CosmergonError as exc:
             self._add_log(_c(self._theme.warn, f"✗ compass failed: {exc}"))
             self._set_feedback(_c(self._theme.warn, "✗ Compass failed"))
