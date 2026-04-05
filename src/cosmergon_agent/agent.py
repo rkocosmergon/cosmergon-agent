@@ -338,6 +338,27 @@ class CosmergonAgent:
             return {"error": resp.text}
         return resp.json()
 
+    async def get_field_cells(self, field_id: str) -> dict[str, int]:
+        """Fetch the live cell data for a game field.
+
+        Returns a sparse dict mapping ``"x,y"`` coordinate strings to ``1``
+        for each alive cell.  Returns an empty dict on error or if the field
+        has no alive cells.
+
+        Args:
+            field_id: UUID of the game field to inspect.
+        """
+        try:
+            resp = await self._request(
+                "GET",
+                f"/api/v1/game_fields/{field_id}/cells",
+            )
+            if resp.status_code == 200:
+                return (resp.json() or {}).get("cells", {})
+        except Exception:
+            pass
+        return {}
+
     # --- Webhook server ---
 
     def listen(

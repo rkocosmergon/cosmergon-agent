@@ -260,3 +260,60 @@ async def test_send_message_returns_error_dict_on_400() -> None:
 
     assert "error" in result
     assert "sanitization" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# get_field_cells() — sparse cell dict
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_field_cells_returns_dict_on_200() -> None:
+    """get_field_cells() returns the parsed cells dict from a 200 response."""
+    agent = _make_agent()
+    cells = {"10,20": 1, "11,20": 1, "10,21": 1}
+    resp = _mock_response(200)
+    resp.json.return_value = {"id": "field-uuid", "cells": cells}
+    await _inject_client(agent, resp)
+
+    result = await agent.get_field_cells("field-uuid")
+
+    assert result == cells
+
+
+@pytest.mark.asyncio
+async def test_get_field_cells_returns_empty_on_non_200() -> None:
+    """get_field_cells() returns {} when the server returns a non-200 status."""
+    agent = _make_agent()
+    resp = _mock_response(404)
+    await _inject_client(agent, resp)
+
+    result = await agent.get_field_cells("nonexistent-field")
+
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_get_field_cells_returns_empty_on_exception() -> None:
+    """get_field_cells() returns {} on network error — never crashes."""
+    agent = _make_agent()
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.request = AsyncMock(side_effect=httpx.TransportError("timeout"))
+    agent._client = mock_client
+
+    result = await agent.get_field_cells("field-uuid")
+
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_get_field_cells_returns_empty_when_cells_key_missing() -> None:
+    """get_field_cells() returns {} when response JSON has no 'cells' key."""
+    agent = _make_agent()
+    resp = _mock_response(200)
+    resp.json.return_value = {"id": "field-uuid"}  # no "cells" key
+    await _inject_client(agent, resp)
+
+    result = await agent.get_field_cells("field-uuid")
+
+    assert result == {}

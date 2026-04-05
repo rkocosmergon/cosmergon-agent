@@ -774,7 +774,7 @@ async def test_key_bar_contains_all_hotkeys() -> None:
     """Fix-bar must show all primary hotkeys as literal text (not consumed by Rich)."""
     app = _make_dashboard()
     _, key = await _render_hint_key(app)
-    for hotkey in ["[Tab]", "[C]", "[P]", "[F]", "[E]", "[M]", "[U]", "[?]", "[Q]"]:
+    for hotkey in ["[Tab]", "[C]", "[P]", "[F]", "[E]", "[V]", "[M]", "[U]", "[?]", "[Q]"]:
         assert hotkey in key.plain, f"{hotkey} missing from fix-bar"
 
 

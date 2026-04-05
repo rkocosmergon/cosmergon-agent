@@ -40,7 +40,7 @@ from textual.widgets import Input, Label, Static
 from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError, __version__
 from cosmergon_agent.exceptions import ConnectionError as CsgConnectionError
 from cosmergon_agent.exceptions import RateLimitError
-from cosmergon_agent.state import GameState
+from cosmergon_agent.state import Field, GameState
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +170,141 @@ class _PendingAction:
     action: str
     params: dict[str, Any]
     display: str
+
+
+# ---------------------------------------------------------------------------
+# Field-View rendering — pure functions, no Textual dependency
+# ---------------------------------------------------------------------------
+
+
+def _fv_parse_cells(raw: dict[str, int]) -> set[tuple[int, int]]:
+    """Parse sparse ``{"x,y": 1}`` dict into a set of ``(x, y)`` int tuples.
+
+    Silently drops malformed keys so a bad API response never crashes the UI.
+    """
+    cells: set[tuple[int, int]] = set()
+    for key in raw:
+        try:
+            x_s, y_s = key.split(",", 1)
+            cells.add((int(x_s), int(y_s)))
+        except (ValueError, AttributeError):
+            pass
+    return cells
+
+
+def _fv_centroid(
+    cells: set[tuple[int, int]], field_w: int, field_h: int
+) -> tuple[int, int]:
+    """Return integer center-of-mass of alive cells.
+
+    Falls back to field center ``(field_w//2, field_h//2)`` when the field is
+    empty so the viewport always has a valid starting position.
+    """
+    if not cells:
+        return field_w // 2, field_h // 2
+    xs, ys = zip(*cells, strict=False)
+    return sum(xs) // len(xs), sum(ys) // len(ys)
+
+
+def _fv_render_zoom1(
+    cells: set[tuple[int, int]],
+    vp_x: int,
+    vp_y: int,
+    vp_w: int,
+    vp_h: int,
+    field_w: int,
+    field_h: int,
+    alive_char: str = "█",
+    dead_char: str = "·",
+    outside_char: str = " ",
+) -> list[str]:
+    """Render a viewport slice of a Conway field at 1:1 scale.
+
+    Returns ``vp_h`` strings, each ``vp_w`` characters wide.  Cells outside
+    the field boundary use ``outside_char``.  Accepts pre-formatted Rich markup
+    strings for ``alive_char`` / ``dead_char`` so callers can inject colour.
+    """
+    rows: list[str] = []
+    for row in range(vp_y, vp_y + vp_h):
+        parts: list[str] = []
+        for col in range(vp_x, vp_x + vp_w):
+            if 0 <= col < field_w and 0 <= row < field_h:
+                parts.append(alive_char if (col, row) in cells else dead_char)
+            else:
+                parts.append(outside_char)
+        rows.append("".join(parts))
+    return rows
+
+
+def _fv_render_zoom2(
+    cells: set[tuple[int, int]],
+    field_w: int,
+    field_h: int,
+    out_w: int,
+    out_h: int,
+    alive_char: str = "▓",
+    dead_char: str = "░",
+) -> list[str]:
+    """Render the full field compressed to ``out_w x out_h`` characters.
+
+    Each output character represents a ``(field_w/out_w) x (field_h/out_h)``
+    block of cells.  Uses ``alive_char`` if any cell in the block is alive.
+    Accepts pre-formatted Rich markup strings for colour injection.
+    """
+    bw = field_w / out_w
+    bh = field_h / out_h
+    rows: list[str] = []
+    for oy in range(out_h):
+        y0, y1 = int(oy * bh), int((oy + 1) * bh)
+        parts: list[str] = []
+        for ox in range(out_w):
+            x0, x1 = int(ox * bw), int((ox + 1) * bw)
+            alive = any(
+                (x, y) in cells for x in range(x0, x1) for y in range(y0, y1)
+            )
+            parts.append(alive_char if alive else dead_char)
+        rows.append("".join(parts))
+    return rows
+
+
+def _fv_render_minimap(
+    cells: set[tuple[int, int]],
+    vp_x: int,
+    vp_y: int,
+    vp_w: int,
+    vp_h: int,
+    field_w: int,
+    field_h: int,
+    map_w: int = 16,
+    map_h: int = 8,
+    alive_char: str = "▓",
+    dead_char: str = "·",
+    vp_char: str = "▒",
+) -> list[str]:
+    """Render a ``map_w x map_h`` minimap of the full field.
+
+    Returns ``map_h + 1`` strings: one ``─ MAP ─`` header line followed by
+    ``map_h`` data rows.  Cells within the current viewport rect are rendered
+    with ``vp_char`` regardless of alive status so the user can see where the
+    viewport is positioned.
+    """
+    bw = field_w / map_w
+    bh = field_h / map_h
+    lines: list[str] = [f"═ MAP {'═' * max(0, map_w - 6)}"]
+    for my in range(map_h):
+        y0, y1 = int(my * bh), int((my + 1) * bh)
+        parts: list[str] = []
+        for mx in range(map_w):
+            x0, x1 = int(mx * bw), int((mx + 1) * bw)
+            in_vp = vp_x < x1 and vp_x + vp_w > x0 and vp_y < y1 and vp_y + vp_h > y0
+            if in_vp:
+                parts.append(vp_char)
+            elif any((x, y) in cells for x in range(x0, x1) for y in range(y0, y1)):
+                parts.append(alive_char)
+            else:
+                parts.append(dead_char)
+        lines.append("".join(parts))
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +466,7 @@ class HelpModal(ModalScreen):
             "[cyan]\\[P][/cyan]  Place cells on field",
             "[cyan]\\[F][/cyan]  Create new field",
             "[cyan]\\[E][/cyan]  Evolve entity",
+            "[cyan]\\[V][/cyan]  View Conway field (zoom, scroll, minimap)",
             "[cyan]\\[Space][/cyan]  Pause / Resume",
             "[cyan]\\[U][/cyan]  Upgrade → Developer (opens browser)",
             "[cyan]\\[R][/cyan]  Refresh data",
@@ -414,7 +550,7 @@ class CosmergonDashboard(App):
     }
 
     #fix-bar {
-        height: 3;
+        height: 4;
         background: #1e1e1e;
         border-top: solid #2a2a2a;
     }
@@ -443,6 +579,7 @@ class CosmergonDashboard(App):
         Binding("r", "refresh_now", "Refresh", show=False, priority=True),
         Binding("l", "log_screen", "Log", show=False, priority=True),
         Binding("m", "chat_screen", "Chat", show=False, priority=True),
+        Binding("v", "field_view", "Fields", show=False, priority=True),
         Binding("tab", "cycle_focus", "Focus", show=False, priority=True),
         Binding("question_mark", "help", "Help", show=False, priority=True),
         Binding("q", "quit", "Quit", show=False, priority=True),
@@ -698,8 +835,13 @@ class CosmergonDashboard(App):
             for rule in learned[-2:]:
                 lines.append(_c("dim", f"  • {rule[:72]}"))
 
-        # Activity feed — last 4 entries
-        feed = self._log[-4:]
+        # Activity feed — fill available panel height so chat stays at the bottom.
+        # Fixed rows consumed by other widgets: hint(1)+top(8)+ctx(1)+fix(3)+status(1)=14.
+        panel_h = max(6, self.app.size.height - 14)
+        learned_count = len(learned[-2:]) if learned else 0
+        chat_rows = 3 if self._messages else 0  # separator + up to 2 msgs
+        feed_n = max(1, panel_h - 1 - learned_count - chat_rows)
+        feed = self._log[-feed_n:]
         if feed:
             lines.extend(feed)
         else:
@@ -751,7 +893,8 @@ class CosmergonDashboard(App):
         c_color = t.guide if not self._compass_ever_set else t.cmd
         keys = [
             k("Tab", "Panel"), k("C", "Compass", c_color), k("P", "Place"), k("F", "Field"),
-            k("E", "Evolve"), k("M", "Chat"), k("U", "Upgrade"), k("?", "Help"), k("Q", "Quit"),
+            k("E", "Evolve"), k("V", "Fields"), k("M", "Chat"),
+            k("U", "Upgrade"), k("?", "Help"), k("Q", "Quit"),
         ]
         self._update_panel("fix-bar", "  ".join(keys))
 
@@ -1122,6 +1265,17 @@ class CosmergonDashboard(App):
         except Exception:
             pass
 
+    @work
+    async def action_field_view(self) -> None:
+        """Open full-screen Field View for the agent's Conway fields."""
+        state = self.agent.state
+        if not state or not state.fields:
+            self._add_log(_c(self._theme.warn, "No fields — press \\[F] first"))
+            return
+        await self.push_screen_wait(
+            FieldScreen(self.agent, list(state.fields), self._theme)
+        )
+
 
 # ---------------------------------------------------------------------------
 # Full-screen sub-screens
@@ -1273,6 +1427,251 @@ class ChatScreen(ModalScreen):
             err = _c(self._theme.warn, f"✗ Fehler: {result['error'][:60]}")
             scroll.mount(Label(err))
             self.query_one(Input).focus()
+
+
+# ---------------------------------------------------------------------------
+# FieldScreen — Conway field visualiser
+# ---------------------------------------------------------------------------
+
+_FV_SCROLL_STEP = 1
+_FV_SCROLL_STEP_FAST = 8
+_FV_MAP_W = 16
+_FV_MAP_H = 8
+_FV_MINIMAP_THRESHOLD = 60  # only show minimap when content_w >= this
+
+
+class FieldScreen(ModalScreen):
+    """Full-screen Conway field visualiser.  [V] to open, Esc/Q to close.
+
+    Zoom 1 (detail): 1 cell = 1 character, scrollable viewport + minimap.
+    Zoom 2 (overview): full 128x128 field compressed to ~32x32 characters.
+    """
+
+    DEFAULT_CSS = """
+    FieldScreen {
+        align: center middle;
+    }
+    FieldScreen > #fv-wrap {
+        width: 92%;
+        height: 88vh;
+        max-height: 54;
+        border: solid $accent;
+        background: $surface;
+    }
+    FieldScreen > #fv-wrap > #fv-header {
+        height: 2;
+        padding: 0 1;
+    }
+    FieldScreen > #fv-wrap > #fv-content {
+        height: 1fr;
+        padding: 0 1;
+        overflow: hidden hidden;
+    }
+    FieldScreen > #fv-wrap > #fv-footer {
+        height: 1;
+        padding: 0 1;
+    }
+    """
+
+    _NAV_KEYS: ClassVar[set[str]] = {
+        "up", "down", "left", "right",
+        "ctrl+up", "ctrl+down", "ctrl+left", "ctrl+right",
+        "home",
+    }
+
+    def __init__(
+        self,
+        agent: CosmergonAgent,
+        fields: list[Field],
+        theme: Theme,
+        initial_idx: int = 0,
+    ) -> None:
+        super().__init__()
+        self._agent = agent
+        self._fields = fields
+        self._theme = theme
+        self._idx = max(0, min(initial_idx, len(fields) - 1)) if fields else 0
+        self._cells: set[tuple[int, int]] = set()
+        self._field_w: int = 128
+        self._field_h: int = 128
+        self._vp_x: int = 0
+        self._vp_y: int = 0
+        self._zoom: int = 1
+        self._loading: bool = True
+        self._last_fetched_tick: int = -1
+        self._content_w: int = 80  # refined after mount
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="fv-wrap"):
+            yield Static("", id="fv-header")
+            yield Static("", id="fv-content")
+            yield Static("", id="fv-footer")
+
+    def on_mount(self) -> None:
+        # Approximate usable content width from terminal size (92% - borders)
+        self._content_w = max(40, int(self.app.size.width * 0.92) - 4)
+        self.set_interval(0.25, self._redraw)
+        self._fetch_cells()
+
+    @work
+    async def _fetch_cells(self) -> None:
+        """Fetch cell data for the current field; centres viewport on first load."""
+        self._loading = True
+        state = self._agent.state
+        self._last_fetched_tick = state.tick if state else 0
+        if not self._fields:
+            self._loading = False
+            return
+        field = self._fields[self._idx]
+        first_load = not self._cells
+        try:
+            raw = await self._agent.get_field_cells(field.id)
+            self._cells = _fv_parse_cells(raw)
+            if first_load:
+                cx, cy = _fv_centroid(self._cells, self._field_w, self._field_h)
+                vp_w, vp_h = self._viewport_dims()
+                self._vp_x = max(0, cx - vp_w // 2)
+                self._vp_y = max(0, cy - vp_h // 2)
+        except Exception:
+            self._cells = set()
+        self._loading = False
+
+    def _viewport_dims(self) -> tuple[int, int]:
+        """Return ``(vp_w, vp_h)`` in cells for the zoom-1 viewport."""
+        map_cols = (_FV_MAP_W + 2) if self._content_w >= _FV_MINIMAP_THRESHOLD else 0
+        vp_w = max(10, self._content_w - map_cols - 2)
+        vp_h = 20
+        return vp_w, vp_h
+
+    def _redraw(self) -> None:
+        """Re-render all FieldScreen panels; auto-refresh cells when tick advances."""
+        # Auto-refresh: re-fetch when game tick has advanced since last fetch
+        state = self._agent.state
+        current_tick = state.tick if state else 0
+        if current_tick != self._last_fetched_tick and not self._loading:
+            self._last_fetched_tick = current_tick
+            self._fetch_cells()
+
+        t = self._theme
+        n = len(self._fields)
+
+        # --- Header ---
+        if not self._fields:
+            h1 = _c(t.struct, "[bold]═ FIELD VIEW[/bold]")
+            no_fields_hint = "[dim]  No fields yet — press \\[F][/dim]"
+            self.query_one("#fv-header", Static).update(f"{h1}\n{no_fields_hint}")
+        else:
+            field = self._fields[self._idx]
+            tier = f"T{field.entity_tier or 0}"
+            etype = (field.entity_type or "novice")
+            idx_label = f"[{self._idx + 1}/{n}]"
+            zoom_label = "Zoom 2 — full field" if self._zoom == 2 else "Zoom 1 — viewport"
+            h1 = _c(t.struct, "[bold]═ FIELD VIEW[/bold]") + f"  {_c('dim', idx_label)}"
+            h2 = _c(
+                "dim",
+                f"  {field.id[:8]} · {tier} {etype} · {field.active_cell_count}c · {zoom_label}",
+            )
+            self.query_one("#fv-header", Static).update(f"{h1}\n{h2}")
+
+        # --- Content ---
+        content_widget = self.query_one("#fv-content", Static)
+        if self._loading:
+            content_widget.update(_c("dim", "  Loading…"))
+        elif not self._fields:
+            content_widget.update("")
+        elif self._zoom == 2:
+            out_w = min(32, max(10, self._content_w - 4))
+            out_h = out_w
+            rows = _fv_render_zoom2(
+                self._cells, self._field_w, self._field_h, out_w, out_h,
+                alive_char=f"[{t.pos}]▓[/{t.pos}]",
+                dead_char="[dim]░[/dim]",
+            )
+            content_widget.update("\n".join(rows))
+        else:
+            vp_w, vp_h = self._viewport_dims()
+            vp_rows = _fv_render_zoom1(
+                self._cells, self._vp_x, self._vp_y, vp_w, vp_h,
+                self._field_w, self._field_h,
+                alive_char="█",
+                dead_char="·",
+            )
+            if self._content_w >= _FV_MINIMAP_THRESHOLD:
+                mm_lines = _fv_render_minimap(
+                    self._cells, self._vp_x, self._vp_y, vp_w, vp_h,
+                    self._field_w, self._field_h,
+                    map_w=_FV_MAP_W, map_h=_FV_MAP_H,
+                    alive_char=f"[{t.pos}]▓[/{t.pos}]",
+                    dead_char="[dim]·[/dim]",
+                    vp_char=f"[{t.guide}]▒[/{t.guide}]",
+                )
+                combined: list[str] = []
+                for i, vp_row in enumerate(vp_rows):
+                    mm = mm_lines[i] if i < len(mm_lines) else ""
+                    combined.append(vp_row + ("  " + mm if mm else ""))
+                content_widget.update("\n".join(combined))
+            else:
+                content_widget.update("\n".join(vp_rows))
+
+        # --- Footer ---
+        footer_widget = self.query_one("#fv-footer", Static)
+        if self._zoom == 2:
+            footer_widget.update(
+                _c("dim", "Z detail  \\[[ \\]] field  R refresh  Esc back")
+            )
+        else:
+            footer_widget.update(
+                _c("dim", "↑↓←→ scroll  C+arr×8  Home  Z zoom  \\[[ \\]] field  Esc")
+            )
+
+    def on_key(self, event: Any) -> None:
+        k = event.key
+        if k in ("escape", "q"):
+            self.dismiss(None)
+            event.prevent_default()
+        elif k == "z":
+            self._zoom = 2 if self._zoom == 1 else 1
+            event.prevent_default()
+        elif k == "bracketleft":
+            self._nav_field(-1)
+            event.prevent_default()
+        elif k == "bracketright":
+            self._nav_field(1)
+            event.prevent_default()
+        elif k == "r":
+            self._cells = set()          # force centroid re-centre on manual refresh
+            self._last_fetched_tick = -1
+            self._fetch_cells()
+            event.prevent_default()
+        elif k in self._NAV_KEYS and self._zoom == 1:
+            self._scroll(k)
+            event.prevent_default()
+
+    def _nav_field(self, direction: int) -> None:
+        if not self._fields:
+            return
+        self._idx = (self._idx + direction) % len(self._fields)
+        self._cells = set()             # reset so centroid re-centres
+        self._last_fetched_tick = -1
+        self._fetch_cells()
+
+    def _scroll(self, key: str) -> None:
+        step = _FV_SCROLL_STEP_FAST if "ctrl+" in key else _FV_SCROLL_STEP
+        vp_w, vp_h = self._viewport_dims()
+        max_x = max(0, self._field_w - vp_w)
+        max_y = max(0, self._field_h - vp_h)
+        if "up" in key:
+            self._vp_y = max(0, self._vp_y - step)
+        elif "down" in key:
+            self._vp_y = min(max_y, self._vp_y + step)
+        elif "left" in key:
+            self._vp_x = max(0, self._vp_x - step)
+        elif "right" in key:
+            self._vp_x = min(max_x, self._vp_x + step)
+        elif key == "home":
+            cx, cy = _fv_centroid(self._cells, self._field_w, self._field_h)
+            self._vp_x = max(0, min(max_x, cx - vp_w // 2))
+            self._vp_y = max(0, min(max_y, cy - vp_h // 2))
 
 
 # ---------------------------------------------------------------------------
