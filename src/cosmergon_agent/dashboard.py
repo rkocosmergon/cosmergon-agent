@@ -425,6 +425,10 @@ class CosmergonDashboard(App):
         background: #1e1e1e;
         padding: 0 1;
     }
+
+    .panel-focused {
+        border: solid yellow;
+    }
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
@@ -461,6 +465,7 @@ class CosmergonDashboard(App):
         self._pending_action: _PendingAction | None = None  # queued on 429, fires next tick
         self._messages: list[dict] = []  # chat conversation cache (refreshed each tick)
         self._focus: str | None = None   # None | "agent" | "fields" | "log" | "chat"
+        self._focus_panel_id: str | None = None  # last panel id with .panel-focused class
 
     def compose(self) -> ComposeResult:
         yield Static("", id="hint-bar")
@@ -585,8 +590,24 @@ class CosmergonDashboard(App):
             self._panel_cache[widget_id] = content
             self.query_one(f"#{widget_id}", Static).update(content)
 
+    _FOCUS_TO_PANEL: ClassVar[dict[str, str]] = {
+        "agent": "agent-panel", "fields": "agent-panel",
+        "log": "log-panel", "chat": "chat-panel",
+    }
+
+    def _sync_focus_border(self) -> None:
+        target = self._FOCUS_TO_PANEL.get(self._focus or "")
+        if target == self._focus_panel_id:
+            return
+        if self._focus_panel_id:
+            self.query_one(f"#{self._focus_panel_id}", Static).remove_class("panel-focused")
+        if target:
+            self.query_one(f"#{target}", Static).add_class("panel-focused")
+        self._focus_panel_id = target
+
     def _redraw(self) -> None:
         state = self.agent.state
+        self._sync_focus_border()
         self._draw_hint_bar(state)
         self._draw_agent_panel(state)
         self._draw_economy_panel(state)
