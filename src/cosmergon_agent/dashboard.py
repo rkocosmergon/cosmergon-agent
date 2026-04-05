@@ -732,14 +732,16 @@ class CosmergonDashboard(App):
     def _draw_fix_bar(self) -> None:
         t = self._theme
 
-        def k(key: str, label: str) -> str:
-            return f"{_c(t.cmd, _hk(key))} {label}"
+        def k(key: str, label: str, color: str | None = None) -> str:
+            return f"{_c(color or t.cmd, _hk(key))} {label}"
 
-        row1 = "  ".join([
-            k("Tab", "Focus"), k("P", "Place"), k("F", "Field"), k("E", "Evolve"), k("L", "Log"),
-        ])
-        row2 = "  ".join([k("M", "Chat"), k("U", "Upgrade"), k("?", "Help"), k("Q", "Quit")])
-        self._update_panel("fix-bar", row1 + "\n" + row2)
+        # [C] orange until first compass use — onboarding signal
+        c_color = t.guide if not self._compass_ever_set else t.cmd
+        keys = [
+            k("Tab", "Panel"), k("C", "Compass", c_color), k("P", "Place"), k("F", "Field"),
+            k("E", "Evolve"), k("M", "Chat"), k("U", "Upgrade"), k("?", "Help"), k("Q", "Quit"),
+        ]
+        self._update_panel("fix-bar", "  ".join(keys))
 
     def _draw_status_bar(self, state: GameState | None) -> None:
         name = (state.agent_name if state and state.agent_name else None) or (
