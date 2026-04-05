@@ -109,6 +109,7 @@ class GameState:
     ranking: Ranking
     focus: Focus
     tick: int = 0
+    agent_name: str = ""
     subscription_tier: str = "free"
     world_briefing: WorldBriefing | None = None
     learned_rules: list[str] = field(default_factory=list)
@@ -133,6 +134,7 @@ class GameState:
 
         return cls(
             agent_id=data.get("agent_id", "unknown"),
+            agent_name=data.get("agent_name", ""),
             agent_type=data.get("agent_type", "independent_agent"),
             energy=float(data.get("energy_balance", data.get("energy", 0.0))),
             fields=fields,

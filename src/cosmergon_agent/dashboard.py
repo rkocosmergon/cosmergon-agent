@@ -723,13 +723,15 @@ class CosmergonDashboard(App):
         self._update_panel("fix-bar", row1 + "\n" + row2)
 
     def _draw_status_bar(self, state: GameState | None) -> None:
-        agent_id = (self.agent.agent_id or "?")[:8]
+        name = (state.agent_name if state and state.agent_name else None) or (
+            (self.agent.agent_id or "?")[:8]
+        )
         tier = state.subscription_tier if state else "?"
         tick = state.tick if state else "-"
         sep = " │ "
         tname = self._theme.name
         segments = [
-            agent_id,
+            name,
             f"tick {tick}",
             f"tier {tier}",
             f"sdk {__version__}",
