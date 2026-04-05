@@ -675,7 +675,7 @@ class CosmergonDashboard(App):
         t = self._theme
         focus_marker = _c(t.guide, " ▶") if self._focus == "log" else ""
         agent_name = (state.agent_name if state and state.agent_name else None) or "Agent"
-        hint = _c("dim", "  [L] fullscreen  [M] chat")
+        hint = _c("dim", r"  \[L] fullscreen  \[M] chat")
         lines = [_c(t.struct, f"[bold]═ LOG[/bold]{focus_marker}") + hint]
 
         # Learned rules — show last 2 (compact)
@@ -699,7 +699,7 @@ class CosmergonDashboard(App):
                 text = msg.get("message", "")
                 label = "Du" if sender == "player" else agent_name
                 color = t.data if sender == "player" else t.pos
-                lines.append(_c(color, f"  [{label}] {text[:68]}"))
+                lines.append(_c(color, f"  \\[{label}] {text[:68]}"))
 
         self._update_panel("log-panel", "\n".join(lines))
 
@@ -870,7 +870,7 @@ class CosmergonDashboard(App):
     # --- Actions ---
 
     def action_cycle_focus(self) -> None:
-        """Cycle Tab-focus through panels: None → agent → fields → log → chat → None."""
+        """Cycle Tab-focus through panels: None → agent → fields → log → None."""
         order: list[str | None] = [None, "agent", "fields", "log"]
         idx = order.index(self._focus)
         self._focus = order[(idx + 1) % len(order)]

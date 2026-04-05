@@ -86,12 +86,12 @@ async def _render(app: _TestDashboard, size: tuple[int, int] = (80, 36)):
 
 
 async def _render_chat(app: _TestDashboard, size: tuple[int, int] = (80, 36)):
-    """Run app headless, trigger redraw, return chat-panel Content."""
+    """Run app headless, trigger redraw, return log-panel Content (chat messages live in LOG)."""
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
         pilot.app._redraw()
         await pilot.pause()
-        return pilot.app.query_one("#chat-panel", Static).render()
+        return pilot.app.query_one("#log-panel", Static).render()
 
 
 async def _render_context(app: _TestDashboard, size: tuple[int, int] = (80, 36)):
@@ -1435,28 +1435,33 @@ def _make_dashboard_with_messages(messages: list[dict]) -> _TestDashboard:
 
 
 async def test_chat_panel_empty_shows_header() -> None:
-    """CHAT panel must always show its header even with no messages."""
+    """LOG panel must show chat hint in its header."""
     app = _make_dashboard()
-    chat = await _render_chat(app)
-    assert "CHAT" in chat.plain, "CHAT panel must show its header"
+    log = await _render_chat(app)
+    assert "chat" in log.plain, "LOG panel must show 'chat' hint in header"
 
 
 async def test_chat_panel_shows_player_message() -> None:
-    """CHAT panel must render player messages labeled '[Du]'."""
-    msgs = [{"sender": "player", "message": "Hello agent!", "message_type": "player_question", "created_at": "2026-01-01"}]
+    """Player messages must appear in LOG panel labeled 'Du'."""
+    msgs = [
+        {"sender": "player", "message": "Hello agent!", "message_type": "player_question",
+         "created_at": "2026-01-01"}
+    ]
     app = _make_dashboard_with_messages(msgs)
-    chat = await _render_chat(app)
-    assert "Du" in chat.plain, "Player message must appear as '[Du]'"
-    assert "Hello agent!" in chat.plain
+    log = await _render_chat(app)
+    assert "Du" in log.plain, "Player message must appear as '[Du]' in LOG"
+    assert "Hello agent!" in log.plain
 
 
 async def test_chat_panel_shows_agent_message() -> None:
-    """CHAT panel must render agent messages labeled '[Agent]'."""
-    msgs = [{"sender": "agent", "message": "Working on it.", "message_type": "reply", "created_at": "2026-01-01"}]
+    """Agent messages must appear in LOG panel labeled with agent name."""
+    msgs = [
+        {"sender": "agent", "message": "Working on it.", "message_type": "reply",
+         "created_at": "2026-01-01"}
+    ]
     app = _make_dashboard_with_messages(msgs)
-    chat = await _render_chat(app)
-    assert "Agent" in chat.plain, "Agent message must appear as '[Agent]'"
-    assert "Working on it." in chat.plain
+    log = await _render_chat(app)
+    assert "Working on it." in log.plain
 
 
 async def test_context_bar_no_focus_shows_tab_hint() -> None:
@@ -1528,7 +1533,7 @@ async def _get_focus_classes(app: _TestDashboard) -> dict[str, bool]:
         await pilot.pause()
         return {
             pid: pilot.app.query_one(f"#{pid}", Static).has_class("panel-focused")
-            for pid in ("agent-panel", "economy-panel", "log-panel", "chat-panel")
+            for pid in ("agent-panel", "economy-panel", "log-panel")
         }
 
 
@@ -1557,7 +1562,6 @@ async def test_agent_focus_highlights_agent_panel() -> None:
     classes = await _get_focus_classes(app)
     assert classes["agent-panel"], "agent-panel must be highlighted when focus='agent'"
     assert not classes["log-panel"], "log-panel must NOT be highlighted"
-    assert not classes["chat-panel"], "chat-panel must NOT be highlighted"
     assert not classes["economy-panel"], "economy-panel must NOT be highlighted"
 
 
@@ -1569,7 +1573,6 @@ async def test_fields_focus_highlights_agent_panel() -> None:
     classes = await _get_focus_classes(app)
     assert classes["agent-panel"], "agent-panel must be highlighted when focus='fields'"
     assert not classes["log-panel"]
-    assert not classes["chat-panel"]
 
 
 @pytest.mark.asyncio
@@ -1580,18 +1583,6 @@ async def test_log_focus_highlights_log_panel() -> None:
     classes = await _get_focus_classes(app)
     assert classes["log-panel"], "log-panel must be highlighted when focus='log'"
     assert not classes["agent-panel"]
-    assert not classes["chat-panel"]
-
-
-@pytest.mark.asyncio
-async def test_chat_focus_highlights_chat_panel() -> None:
-    """When _focus='chat', only chat-panel must have .panel-focused."""
-    app = _make_dashboard()
-    app._focus = "chat"
-    classes = await _get_focus_classes(app)
-    assert classes["chat-panel"], "chat-panel must be highlighted when focus='chat'"
-    assert not classes["agent-panel"]
-    assert not classes["log-panel"]
 
 
 @pytest.mark.asyncio
@@ -1613,15 +1604,6 @@ async def test_focus_marker_in_log_panel() -> None:
 
 
 @pytest.mark.asyncio
-async def test_focus_marker_in_chat_panel() -> None:
-    """▶ must appear in chat-panel text when focus='chat'."""
-    app = _make_dashboard()
-    app._focus = "chat"
-    text = await _get_panel_text(app, "chat-panel")
-    assert "▶" in text, "▶ marker must appear in chat-panel when focused"
-
-
-@pytest.mark.asyncio
 async def test_no_focus_marker_when_unfocused() -> None:
     """No panel must show ▶ when _focus=None."""
     app = _make_dashboard()
@@ -1630,14 +1612,14 @@ async def test_no_focus_marker_when_unfocused() -> None:
         await pilot.pause()
         pilot.app._redraw()
         await pilot.pause()
-        for pid in ("agent-panel", "log-panel", "chat-panel"):
+        for pid in ("agent-panel", "log-panel"):
             text = pilot.app.query_one(f"#{pid}", Static).render().plain
             assert "▶" not in text, f"▶ must NOT appear in {pid} when no panel is focused"
 
 
 @pytest.mark.asyncio
 async def test_tab_cycles_focus_and_border() -> None:
-    """Focus cycle None→agent→fields→log→chat→None: border must follow."""
+    """Focus cycle None→agent→fields→log→None: border must follow."""
     app = _make_dashboard()
     async with app.run_test(size=(80, 36)) as pilot:
         await pilot.pause()
@@ -1667,14 +1649,8 @@ async def test_tab_cycles_focus_and_border() -> None:
         assert pilot.app.query_one("#log-panel", Static).has_class("panel-focused")
         assert not pilot.app.query_one("#agent-panel", Static).has_class("panel-focused")
 
-        # → chat
-        cycle_and_redraw()
-        await pilot.pause()
-        assert pilot.app._focus == "chat"
-        assert pilot.app.query_one("#chat-panel", Static).has_class("panel-focused")
-
         # → None (full cycle)
         cycle_and_redraw()
         await pilot.pause()
         assert pilot.app._focus is None
-        assert not pilot.app.query_one("#chat-panel", Static).has_class("panel-focused")
+        assert not pilot.app.query_one("#log-panel", Static).has_class("panel-focused")
