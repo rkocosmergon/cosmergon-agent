@@ -177,3 +177,86 @@ def test_gamestate_compass_preset_defaults_none() -> None:
 
     state = GameState.from_api({"agent_id": "a", "energy_balance": 100.0})
     assert state.compass_preset is None
+
+
+# ---------------------------------------------------------------------------
+# get_messages() — returns list or [] on error
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_messages_returns_list_on_200() -> None:
+    """get_messages() returns the parsed list from a 200 response."""
+    agent = _make_agent()
+    messages = [
+        {"sender": "player", "message": "Hello?", "message_type": "player_question", "created_at": "2026-01-01"},
+        {"sender": "agent", "message": "Working on it.", "message_type": "reply", "created_at": "2026-01-01"},
+    ]
+    resp = _mock_response(200)
+    resp.json.return_value = messages
+    await _inject_client(agent, resp)
+
+    result = await agent.get_messages(limit=10)
+
+    assert result == messages
+
+
+@pytest.mark.asyncio
+async def test_get_messages_returns_empty_on_non_200() -> None:
+    """get_messages() returns [] when the server returns a non-200 status."""
+    agent = _make_agent()
+    resp = _mock_response(403)
+    await _inject_client(agent, resp)
+
+    result = await agent.get_messages()
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_get_messages_returns_empty_on_exception() -> None:
+    """get_messages() returns [] when a network exception occurs — never crashes."""
+    import httpx
+
+    agent = _make_agent()
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.request = AsyncMock(side_effect=httpx.TransportError("timeout"))
+    agent._client = mock_client
+
+    result = await agent.get_messages()
+
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# send_message() — returns dict on success, {"error": ...} on failure
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_message_returns_dict_on_201() -> None:
+    """send_message() returns the server response dict on 201 Created."""
+    agent = _make_agent()
+    server_resp = {"id": "msg-uuid-001", "created_at": "2026-01-01T12:00:00"}
+    resp = _mock_response(201)
+    resp.json.return_value = server_resp
+    await _inject_client(agent, resp)
+
+    result = await agent.send_message("Hello agent!")
+
+    assert result == server_resp
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_send_message_returns_error_dict_on_400() -> None:
+    """send_message() returns {"error": ...} when the server returns 400."""
+    agent = _make_agent()
+    resp = _mock_response(400)
+    resp.text = "Message is empty after sanitization"
+    await _inject_client(agent, resp)
+
+    result = await agent.send_message("")
+
+    assert "error" in result
+    assert "sanitization" in result["error"]

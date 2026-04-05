@@ -301,6 +301,43 @@ class CosmergonAgent:
             pass
         return None
 
+    async def get_messages(self, limit: int = 50) -> list[dict]:
+        """Fetch the chat conversation between player and this agent, oldest first.
+
+        Returns a list of message dicts with keys: sender, message, message_type, created_at.
+        Returns an empty list on error or if no conversation exists.
+        """
+        try:
+            resp = await self._request(
+                "GET",
+                f"/api/v1/agents/{self.agent_id}/messages",
+                params={"limit": min(limit, 100)},
+            )
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception:
+            pass
+        return []
+
+    async def send_message(self, text: str) -> dict:
+        """Send a message to this agent. The agent will reply in its next tick whisper.
+
+        Args:
+            text: Message to send (max 500 chars). Sanitized server-side.
+
+        Returns:
+            Dict with keys: id (UUID str), created_at (str) on success.
+            Dict with key: error (str) on failure (4xx/5xx).
+        """
+        resp = await self._request(
+            "POST",
+            f"/api/v1/agents/{self.agent_id}/messages",
+            json={"message": text},
+        )
+        if resp.status_code >= 400:
+            return {"error": resp.text}
+        return resp.json()
+
     # --- Webhook server ---
 
     def listen(

@@ -73,16 +73,34 @@ def _make_dashboard(
     return app
 
 
-async def _render(app: _TestDashboard, size: tuple[int, int] = (80, 24)):
-    """Run app headless, trigger redraw, return (agent, economy, journal) Content."""
+async def _render(app: _TestDashboard, size: tuple[int, int] = (80, 36)):
+    """Run app headless, trigger redraw, return (agent, economy, log) Content."""
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
         pilot.app._redraw()
         await pilot.pause()
         agent = pilot.app.query_one("#agent-panel", Static).render()
         economy = pilot.app.query_one("#economy-panel", Static).render()
-        journal = pilot.app.query_one("#journal-panel", Static).render()
-        return agent, economy, journal
+        log = pilot.app.query_one("#log-panel", Static).render()
+        return agent, economy, log
+
+
+async def _render_chat(app: _TestDashboard, size: tuple[int, int] = (80, 36)):
+    """Run app headless, trigger redraw, return chat-panel Content."""
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        return pilot.app.query_one("#chat-panel", Static).render()
+
+
+async def _render_context(app: _TestDashboard, size: tuple[int, int] = (80, 36)):
+    """Run app headless, trigger redraw, return context-bar Content."""
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        return pilot.app.query_one("#context-bar", Static).render()
 
 
 def _has_style(content, text_fragment: str, style_fragment: str) -> bool:
@@ -160,7 +178,7 @@ async def test_no_fields_warning_hotkey_visible():
         await pilot.pause()
         pilot.app._redraw()
         await pilot.pause()
-        journal = pilot.app.query_one("#journal-panel", Static).render()
+        journal = pilot.app.query_one("#log-panel", Static).render()
 
     assert "[F]" in journal.plain, "[F] in warning message consumed by Rich — use \\[F] in markup"
 
@@ -347,7 +365,7 @@ async def test_layout_minimum_content_visible(label: str, cols: int, rows: int) 
     assert any("WIRTSCHAFT" in t for t in visible), (
         f"[{label} {cols}x{rows}] WIRTSCHAFT header clipped"
     )
-    assert any("JOURNAL" in t for t in visible), f"[{label} {cols}x{rows}] JOURNAL header clipped"
+    assert any("LOG" in t for t in visible), f"[{label} {cols}x{rows}] LOG header clipped"
     assert any("AKTIV" in t for t in visible), f"[{label} {cols}x{rows}] Status AKTIV clipped"
 
 
@@ -446,7 +464,7 @@ async def _journal_after(pilot: object, *keys: str) -> object:
     await pilot.pause()
     pilot.app._redraw()
     await pilot.pause()
-    return pilot.app.query_one("#journal-panel", Static).render()
+    return pilot.app.query_one("#log-panel", Static).render()
 
 
 # --- create_field ---
@@ -562,7 +580,7 @@ async def test_pause_error_shows_in_journal() -> None:
         pilot.app._redraw()
         await pilot.pause()
         agent = pilot.app.query_one("#agent-panel", Static).render()
-        journal = pilot.app.query_one("#journal-panel", Static).render()
+        journal = pilot.app.query_one("#log-panel", Static).render()
     assert "AKTIV" in agent.plain, "State must not toggle on error"
     assert "✗" in journal.plain
     assert "pause" in journal.plain
@@ -621,7 +639,7 @@ async def test_compass_error_shows_in_journal() -> None:
         pilot.app._redraw()
         await pilot.pause()
         agent = pilot.app.query_one("#agent-panel", Static).render()
-        journal = pilot.app.query_one("#journal-panel", Static).render()
+        journal = pilot.app.query_one("#log-panel", Static).render()
 
     assert "✗" in journal.plain
     assert "compass" in journal.plain
@@ -647,7 +665,7 @@ async def test_upgrade_error_shows_in_journal() -> None:
         await pilot.pause()
         pilot.app._redraw()
         await pilot.pause()
-        journal = pilot.app.query_one("#journal-panel", Static).render()
+        journal = pilot.app.query_one("#log-panel", Static).render()
 
     assert "✗" in journal.plain
     assert "Upgrade" in journal.plain or "upgrade" in journal.plain.lower()
@@ -667,7 +685,7 @@ async def _render_hint_key(
         pilot.app._redraw()
         await pilot.pause()
         hint = pilot.app.query_one("#hint-bar", Static).render()
-        key = pilot.app.query_one("#key-bar", Static).render()
+        key = pilot.app.query_one("#fix-bar", Static).render()
     return hint, key
 
 
@@ -753,11 +771,15 @@ async def test_hint_bar_normal_shows_tick() -> None:
 
 
 async def test_key_bar_contains_all_hotkeys() -> None:
-    """Key bar must show all hotkeys as literal text (not consumed by Rich)."""
+    """Fix-bar must show all primary hotkeys as literal text (not consumed by Rich).
+
+    [C], [Space], [R] are still active bindings but moved off the visible bar
+    to save space for the new [L], [M], [Tab] shortcuts.
+    """
     app = _make_dashboard()
     _, key = await _render_hint_key(app)
-    for hotkey in ["[C]", "[P]", "[F]", "[E]", "[U]", "[Space]", "[R]", "[?]", "[Q]"]:
-        assert hotkey in key.plain, f"{hotkey} missing from key bar"
+    for hotkey in ["[Tab]", "[P]", "[F]", "[E]", "[L]", "[M]", "[U]", "[?]", "[Q]"]:
+        assert hotkey in key.plain, f"{hotkey} missing from fix-bar"
 
 
 @pytest.mark.parametrize("label,cols,rows", SIZE_MATRIX, ids=[s[0] for s in SIZE_MATRIX])
@@ -1260,7 +1282,7 @@ async def test_fire_pending_success_logs_result() -> None:
         await app._fire_pending()
         app._redraw()
         await pilot.pause()
-        journal = pilot.app.query_one("#journal-panel", Static).render()
+        journal = pilot.app.query_one("#log-panel", Static).render()
 
     assert "auto-retry" in journal.plain, "Must log 'auto-retry' when firing pending action"
     assert "✓" in journal.plain, "Success must be indicated in journal after auto-retry"
@@ -1283,7 +1305,7 @@ async def test_fire_pending_still_429_clears_queue_and_shows_error() -> None:
         await app._fire_pending()
         app._redraw()
         await pilot.pause()
-        journal = pilot.app.query_one("#journal-panel", Static).render()
+        journal = pilot.app.query_one("#log-panel", Static).render()
 
     assert app._pending_action is None, "Queue must be cleared even on second 429"
     assert "still rate limited" in journal.plain, "Error must mention 'still rate limited'"
@@ -1392,3 +1414,100 @@ async def test_compass_not_restored_when_preset_is_none() -> None:
 
     assert not app._compass_ever_set, "CTA must still show when no compass_preset from server"
     assert app._compass_preset == "autonomous", "Default preset must be unchanged"
+
+
+# ---------------------------------------------------------------------------
+# Paket 6: CHAT panel, context-bar, LOG/CHAT screens
+# ---------------------------------------------------------------------------
+
+
+def _make_dashboard_with_messages(messages: list[dict]) -> _TestDashboard:
+    """Dashboard with pre-loaded chat messages."""
+    agent = CosmergonAgent(api_key="AGENT-test:fakekey000000000000000000000")
+    state = fake_state()
+    agent._state = state
+    agent.agent_id = state.agent_id
+    app = _TestDashboard(agent=agent, theme=THEMES["cosmergon"])
+    app._messages = messages
+    return app
+
+
+async def test_chat_panel_empty_shows_header() -> None:
+    """CHAT panel must always show its header even with no messages."""
+    app = _make_dashboard()
+    chat = await _render_chat(app)
+    assert "CHAT" in chat.plain, "CHAT panel must show its header"
+
+
+async def test_chat_panel_shows_player_message() -> None:
+    """CHAT panel must render player messages labeled '[Du]'."""
+    msgs = [{"sender": "player", "message": "Hello agent!", "message_type": "player_question", "created_at": "2026-01-01"}]
+    app = _make_dashboard_with_messages(msgs)
+    chat = await _render_chat(app)
+    assert "Du" in chat.plain, "Player message must appear as '[Du]'"
+    assert "Hello agent!" in chat.plain
+
+
+async def test_chat_panel_shows_agent_message() -> None:
+    """CHAT panel must render agent messages labeled '[Agent]'."""
+    msgs = [{"sender": "agent", "message": "Working on it.", "message_type": "reply", "created_at": "2026-01-01"}]
+    app = _make_dashboard_with_messages(msgs)
+    chat = await _render_chat(app)
+    assert "Agent" in chat.plain, "Agent message must appear as '[Agent]'"
+    assert "Working on it." in chat.plain
+
+
+async def test_context_bar_no_focus_shows_tab_hint() -> None:
+    """Context-bar must show Tab hint when no panel is focused."""
+    app = _make_dashboard()
+    assert app._focus is None
+    ctx = await _render_context(app)
+    assert "Tab" in ctx.plain, "Context-bar must show Tab hint when no panel focused"
+
+
+async def test_context_bar_agent_focus_shows_compass_numbers() -> None:
+    """Context-bar must show numbered compass options when AGENT is focused."""
+    app = _make_dashboard()
+    app._focus = "agent"
+    ctx = await _render_context(app)
+    assert "[1]" in ctx.plain, "Context-bar must show [1] for first compass option"
+    assert "[7]" in ctx.plain, "Context-bar must show [7] for last compass option"
+
+
+async def test_log_screen_opens_on_l() -> None:
+    """Pressing [L] must push a LogScreen onto the screen stack."""
+    app = _make_dashboard(log=["[green]● Connected[/green]"])
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("l")
+        await pilot.pause()
+        await pilot.pause()
+        assert "LogScreen" in type(pilot.app.screen).__name__, (
+            "[L] must push a LogScreen, not stay on main dashboard"
+        )
+        await pilot.press("escape")
+        await pilot.pause()
+        assert "LogScreen" not in type(pilot.app.screen).__name__, (
+            "Esc must close LogScreen and return to main dashboard"
+        )
+
+
+async def test_chat_screen_opens_on_m() -> None:
+    """Pressing [M] must push a ChatScreen onto the screen stack."""
+    app = _make_dashboard()
+
+    async def _noop_send(*_args: object, **_kwargs: object) -> dict:
+        return {"id": "x", "created_at": "2026-01-01"}
+
+    app.agent.send_message = _noop_send  # type: ignore[method-assign]
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("m")
+        await pilot.pause()
+        await pilot.pause()
+        assert "ChatScreen" in type(pilot.app.screen).__name__, (
+            "[M] must push a ChatScreen, not stay on main dashboard"
+        )
+        await pilot.press("escape")
+        await pilot.pause()
+        assert "ChatScreen" not in type(pilot.app.screen).__name__, (
+            "Esc must close ChatScreen and return to main dashboard"
+        )

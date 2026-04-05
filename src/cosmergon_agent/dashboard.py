@@ -35,11 +35,11 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Label, Static
+from textual.widgets import Input, Label, Static
 
 from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError, __version__
-from cosmergon_agent.exceptions import RateLimitError
 from cosmergon_agent.exceptions import ConnectionError as CsgConnectionError
+from cosmergon_agent.exceptions import RateLimitError
 from cosmergon_agent.state import GameState
 
 logger = logging.getLogger(__name__)
@@ -365,14 +365,13 @@ class CosmergonDashboard(App):
     }
 
     #hint-bar {
-        height: 7;
+        height: 1;
         background: #252525;
-        padding: 1 2;
-        border-bottom: solid #2a2a2a;
+        padding: 0 1;
     }
 
     #top-row {
-        height: 11;
+        height: 8;
         min-height: 8;
     }
 
@@ -392,25 +391,39 @@ class CosmergonDashboard(App):
         overflow: hidden hidden;
     }
 
-    #journal-panel {
+    #log-panel {
+        background: #161616;
+        border: solid #2a2a2a;
+        padding: 0 1;
+        height: 7;
+        overflow: hidden hidden;
+    }
+
+    #chat-panel {
         background: #161616;
         border: solid #2a2a2a;
         padding: 0 1;
         height: 1fr;
+        min-height: 4;
         overflow: hidden hidden;
+    }
+
+    #context-bar {
+        height: 1;
+        background: #1e1e1e;
+        padding: 0 1;
+    }
+
+    #fix-bar {
+        height: 3;
+        background: #1e1e1e;
+        border-top: solid #2a2a2a;
     }
 
     #status-bar {
         height: 1;
         background: #1e1e1e;
         padding: 0 1;
-    }
-
-    #key-bar {
-        height: 4;
-        background: #1e1e1e;
-        padding: 0 1;
-        border-top: solid #2a2a2a;
     }
     """
 
@@ -422,6 +435,9 @@ class CosmergonDashboard(App):
         Binding("u", "upgrade", "Upgrade", show=False),
         Binding("space", "pause", "Pause", show=False),
         Binding("r", "refresh_now", "Refresh", show=False),
+        Binding("l", "log_screen", "Log", show=False),
+        Binding("m", "chat_screen", "Chat", show=False),
+        Binding("tab", "cycle_focus", "Focus", show=False),
         Binding("question_mark", "help", "Help", show=False),
         Binding("q", "quit", "Quit", show=False),
     ]
@@ -440,19 +456,22 @@ class CosmergonDashboard(App):
         self._tick_received_at: float = 0.0
         self._tick_interval: float = 60.0  # self-calibrating from observed tick gaps
         self._last_tick: int = -1
-        self._hint_history: list[str] = []
         self._panel_cache: dict[str, str] = {}  # widget-id → last rendered content
         self._fatal_error: str = ""  # set on AuthenticationError — shown in hint-bar
         self._pending_action: _PendingAction | None = None  # queued on 429, fires next tick
+        self._messages: list[dict] = []  # chat conversation cache (refreshed each tick)
+        self._focus: str | None = None   # None | "agent" | "fields" | "log" | "chat"
 
     def compose(self) -> ComposeResult:
         yield Static("", id="hint-bar")
         with Horizontal(id="top-row"):
             yield Static("", id="agent-panel")
             yield Static("", id="economy-panel")
-        yield Static("", id="journal-panel")
+        yield Static("", id="log-panel")
+        yield Static("", id="chat-panel")
+        yield Static("", id="context-bar")
+        yield Static("", id="fix-bar")
         yield Static("", id="status-bar")
-        yield Static("", id="key-bar")
 
     def on_mount(self) -> None:
         self._register_agent_handlers()
@@ -486,6 +505,11 @@ class CosmergonDashboard(App):
                 _c(color, f"[tick {state.tick}] {sign}{delta:.0f}E  {state.energy:,.0f} total")
             )
             await self._fire_pending()
+            # Refresh chat messages each tick (1 extra HTTP call / ~60s — non-fatal)
+            try:
+                self._messages = await self.agent.get_messages(limit=20)
+            except Exception:
+                pass
 
         @self.agent.on_error
         async def _error(result: Any) -> None:
@@ -557,9 +581,11 @@ class CosmergonDashboard(App):
         self._draw_hint_bar(state)
         self._draw_agent_panel(state)
         self._draw_economy_panel(state)
-        self._draw_journal_panel(state)
+        self._draw_log_panel(state)
+        self._draw_chat_panel()
+        self._draw_context_bar(state)
+        self._draw_fix_bar()
         self._draw_status_bar(state)
-        self._draw_key_bar()
 
     def _draw_agent_panel(self, state: GameState | None) -> None:
         t = self._theme
@@ -622,27 +648,79 @@ class CosmergonDashboard(App):
 
         self._update_panel("economy-panel", "\n".join(lines))
 
-    def _draw_journal_panel(self, state: GameState | None) -> None:
+    def _draw_log_panel(self, state: GameState | None) -> None:
         t = self._theme
-        lines = [_c(t.struct, "[bold]═ JOURNAL[/bold]")]
+        focus_marker = _c(t.guide, " ▶") if self._focus == "log" else ""
+        lines = [_c(t.struct, f"[bold]═ LOG[/bold]{focus_marker}") + _c("dim", "  [L] fullscreen")]
 
-        # Learned rules — show last 3
+        # Learned rules — show last 2 (compact)
         learned = (state.learned_rules if state else None) or []
         if learned:
-            lines.append(_c(t.struct, "Learned Rules:"))
-            for rule in learned[-3:]:
-                lines.append(_c(t.data, f"  • {rule[:90]}"))
-            lines.append("")
+            for rule in learned[-2:]:
+                lines.append(_c("dim", f"  • {rule[:72]}"))
 
-        # Activity feed
-        lines.append(_c(t.struct, "Activity:"))
-        feed = self._log[-10:]
+        # Activity feed — last 4 entries
+        feed = self._log[-4:]
         if feed:
             lines.extend(feed)
         else:
             lines.append("[dim]Connecting to cosmergon.com...[/dim]")
 
-        self._update_panel("journal-panel", "\n".join(lines))
+        self._update_panel("log-panel", "\n".join(lines))
+
+    def _draw_chat_panel(self) -> None:
+        t = self._theme
+        focus_marker = _c(t.guide, " ▶") if self._focus == "chat" else ""
+        lines = [_c(t.struct, f"[bold]═ CHAT[/bold]{focus_marker}") + _c("dim", "  [M] write")]
+
+        if not self._messages:
+            self._update_panel("chat-panel", "\n".join(lines))
+            return
+
+        # Show last messages, newest at bottom. Each message on its own line (truncated).
+        for msg in self._messages[-6:]:
+            sender = msg.get("sender", "")
+            text = msg.get("message", "")
+            label = "Du" if sender == "player" else "Agent"
+            color = t.data if sender == "player" else t.pos
+            lines.append(_c(color, f"\\[{label}] {text[:72]}"))
+
+        self._update_panel("chat-panel", "\n".join(lines))
+
+    def _draw_context_bar(self, state: GameState | None) -> None:
+        t = self._theme
+        if self._focus == "agent":
+            hints = "  ".join(
+                f"{_c(t.cmd, _hk(str(i + 1)))}{v.split()[1] if ' ' in v else v}"
+                for i, v in enumerate(_COMPASS_DISPLAY.values())
+            )
+            self._update_panel("context-bar", _c("dim", hints))
+        elif self._focus == "fields":
+            fields = (state.fields if state else None) or []
+            if fields:
+                parts = [
+                    f"{_c(t.cmd, _hk(str(i + 1)))}{f.id[:8]}"
+                    for i, f in enumerate(fields[:5])
+                ]
+                self._update_panel("context-bar", _c("dim", "  ".join(parts)))
+            else:
+                self._update_panel("context-bar", _c("dim", "No fields yet"))
+        elif self._focus in ("log", "chat"):
+            self._update_panel("context-bar", _c("dim", "[↑/↓] Scroll  [Esc] back"))
+        else:
+            self._update_panel("context-bar", _c("dim", _hk("Tab") + " Panel focus"))
+
+    def _draw_fix_bar(self) -> None:
+        t = self._theme
+
+        def k(key: str, label: str) -> str:
+            return f"{_c(t.cmd, _hk(key))} {label}"
+
+        row1 = "  ".join([
+            k("Tab", "Focus"), k("P", "Place"), k("F", "Field"), k("E", "Evolve"), k("L", "Log"),
+        ])
+        row2 = "  ".join([k("M", "Chat"), k("U", "↑Dev"), k("?", "Help"), k("Q", "Quit")])
+        self._update_panel("fix-bar", row1 + "\n" + row2)
 
     def _draw_status_bar(self, state: GameState | None) -> None:
         agent_id = (self.agent.agent_id or "?")[:8]
@@ -660,11 +738,7 @@ class CosmergonDashboard(App):
         self._update_panel("status-bar", f"[dim]{sep.join(segments)}[/dim]")
 
     def _set_feedback(self, msg: str, duration: float = 4.0) -> None:
-        """Show a timed message in the hint bar; previous feedback is archived to history."""
-        if self._feedback:
-            self._hint_history.append(self._feedback)
-            if len(self._hint_history) > 4:
-                self._hint_history = self._hint_history[-4:]
+        """Show a timed message in the hint bar (line 1 only)."""
         self._feedback = msg
         self._feedback_until = time.monotonic() + duration
 
@@ -716,11 +790,8 @@ class CosmergonDashboard(App):
                 return f"{self._feedback}  ·  {suffix}"
             return self._feedback
 
-        # Feedback expired — archive it so it shows in history below.
+        # Feedback expired — clear it.
         if self._feedback:
-            self._hint_history.append(self._feedback)
-            if len(self._hint_history) > 4:
-                self._hint_history = self._hint_history[-4:]
             self._feedback = ""
 
         # 2. No state yet
@@ -774,31 +845,25 @@ class CosmergonDashboard(App):
         return _c("dim", tick_part)
 
     def _draw_hint_bar(self, state: GameState | None) -> None:
-        """Render hint bar: Line 1 = guidance/feedback, Lines 2-5 = action history."""
-        lines = [self._compute_hint(state)]
-        for msg in reversed(self._hint_history[-4:]):
-            lines.append(msg)
-        self._update_panel("hint-bar", "\n".join(lines))
+        """Render hint bar: single line of active guidance or feedback."""
+        self._update_panel("hint-bar", self._compute_hint(state))
 
-    def _draw_key_bar(self) -> None:
-        t = self._theme
-
-        def k(key: str, label: str) -> str:
-            return f"{_c(t.cmd, _hk(key))} {label}"
-
-        row1 = "  ".join(
-            [
-                k("C", "Compass"),
-                k("P", "Place"),
-                k("F", "Field"),
-                k("E", "Evolve"),
-                k("U", "Upgrade"),
-            ]
-        )
-        row2 = "  ".join([k("Space", "Pause"), k("R", "Refresh"), k("?", "Help"), k("Q", "Quit")])
-        self._update_panel("key-bar", f"{row1}\n{row2}")
 
     # --- Actions ---
+
+    def action_cycle_focus(self) -> None:
+        """Cycle Tab-focus through panels: None → agent → fields → log → chat → None."""
+        order: list[str | None] = [None, "agent", "fields", "log", "chat"]
+        idx = order.index(self._focus)
+        self._focus = order[(idx + 1) % len(order)]
+
+    def on_key(self, event: Any) -> None:
+        """Numbers 1-7 set compass preset when AGENT is focused."""
+        if self._focus == "agent" and event.key in ("1", "2", "3", "4", "5", "6", "7"):
+            idx = int(event.key) - 1
+            if idx < len(_COMPASS_PRESETS):
+                self._apply_compass_preset(_COMPASS_PRESETS[idx])
+                event.prevent_default()
 
     @work
     async def action_compass(self) -> None:
@@ -806,7 +871,15 @@ class CosmergonDashboard(App):
         idx = await self.push_screen_wait(SelectModal("Set Compass direction", labels))
         if idx is None:
             return
-        preset = _COMPASS_PRESETS[idx]
+        await self._apply_compass_preset_async(_COMPASS_PRESETS[idx])
+
+    @work
+    async def _apply_compass_preset(self, preset: str) -> None:
+        """Shared compass-set logic used by [C] modal and number shortcuts."""
+        await self._apply_compass_preset_async(preset)
+
+    async def _apply_compass_preset_async(self, preset: str) -> None:
+        """Execute compass API call, update log and feedback."""
         compass_label = _COMPASS_DISPLAY.get(preset, preset)
         self._add_log(_c(self._theme.data, f"⠋ compass → {compass_label}..."))
         try:
@@ -817,9 +890,7 @@ class CosmergonDashboard(App):
             else:
                 self._compass_preset = preset
                 self._compass_ever_set = True
-                # First line: clean action confirmation with display label
                 self._add_log(_c(self._theme.pos, f"✓ compass: {compass_label}"))
-                # Second line: explanation word-truncated so it never overflows narrow panels
                 explanation = (result.get("explanation") or "").strip()
                 if explanation:
                     self._add_log(_c("dim", f"  {_truncate_words(explanation, 48)}"))
@@ -832,7 +903,6 @@ class CosmergonDashboard(App):
             self._add_log(_c("dim", f"⏳ {compass_label} — queued, fires next tick{wait_str}"))
             self._set_feedback(_c("dim", f"⏳ Queued: {compass_label} — next tick{wait_str}"))
         except CsgConnectionError:
-            # Network error — queue for one retry on the next tick
             self._pending_action = _PendingAction(
                 kind="compass", action=preset, params={}, display=compass_label
             )
@@ -990,6 +1060,165 @@ class CosmergonDashboard(App):
     @work
     async def action_help(self) -> None:
         await self.push_screen_wait(HelpModal(self._theme.name))
+
+    @work
+    async def action_log_screen(self) -> None:
+        """Open full-screen LOG view (read-only, scrollable)."""
+        await self.push_screen_wait(LogScreen(list(self._log), self._theme))
+
+    @work
+    async def action_chat_screen(self) -> None:
+        """Open full-screen CHAT view with input field."""
+        sent = await self.push_screen_wait(
+            ChatScreen(self.agent, list(self._messages), self._theme)
+        )
+        if sent:
+            self._add_log(_c(self._theme.data, f"→ [Du] {sent[:60]}"))
+            # Messages refresh on next tick; force an immediate fetch for responsiveness
+            try:
+                self._messages = await self.agent.get_messages(limit=20)
+            except Exception:
+                pass
+
+
+# ---------------------------------------------------------------------------
+# Full-screen sub-screens
+# ---------------------------------------------------------------------------
+
+
+class LogScreen(ModalScreen):
+    """Full-screen LOG view — all activity entries, scrollable. Esc to close."""
+
+    DEFAULT_CSS = """
+    LogScreen {
+        align: center middle;
+    }
+    LogScreen > #log-wrap {
+        width: 90%;
+        height: 85vh;
+        max-height: 50;
+        border: solid $accent;
+        background: $surface;
+    }
+    LogScreen > #log-wrap > #log-header {
+        height: 1;
+        padding: 0 2;
+    }
+    LogScreen > #log-wrap > VerticalScroll {
+        padding: 0 2 1 2;
+    }
+    """
+
+    def __init__(self, log_entries: list[str], theme: Theme) -> None:
+        super().__init__()
+        self._log_entries = log_entries
+        self._theme = theme
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="log-wrap"):
+            yield Label(
+                "[dim]↑ ↓ PgUp PgDn to scroll · Esc or Q to close[/dim]",
+                id="log-header",
+            )
+            with VerticalScroll():
+                if self._log_entries:
+                    for entry in self._log_entries:
+                        yield Label(entry)
+                else:
+                    yield Label("[dim]No activity yet.[/dim]")
+
+    def on_mount(self) -> None:
+        vs = self.query_one(VerticalScroll)
+        vs.focus()
+        vs.scroll_end(animate=False)
+
+    _SCROLL_KEYS: ClassVar[set[str]] = {"up", "down", "pageup", "pagedown", "home", "end"}
+
+    def on_key(self, event: Any) -> None:
+        if event.key not in self._SCROLL_KEYS:
+            self.dismiss(None)
+
+
+class ChatScreen(ModalScreen):
+    """Full-screen CHAT — scrollable history + input field. Enter sends, Esc closes."""
+
+    DEFAULT_CSS = """
+    ChatScreen {
+        align: center middle;
+    }
+    ChatScreen > #chat-wrap {
+        width: 90%;
+        height: 85vh;
+        max-height: 50;
+        border: solid $accent;
+        background: $surface;
+    }
+    ChatScreen > #chat-wrap > #chat-header {
+        height: 1;
+        padding: 0 2;
+    }
+    ChatScreen > #chat-wrap > #history-scroll {
+        padding: 0 2;
+        height: 1fr;
+    }
+    ChatScreen > #chat-wrap > #chat-input {
+        height: 3;
+        margin: 0 2;
+    }
+    """
+
+    def __init__(
+        self, agent: "CosmergonAgent", messages: list[dict], theme: Theme  # noqa: UP037
+    ) -> None:
+        super().__init__()
+        self._agent = agent
+        self._messages = messages
+        self._theme = theme
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="chat-wrap"):
+            yield Label(
+                "[dim]Enter: send · Esc: back · reply comes next tick[/dim]",
+                id="chat-header",
+            )
+            with VerticalScroll(id="history-scroll"):
+                if self._messages:
+                    for msg in self._messages:
+                        sender = msg.get("sender", "")
+                        text = msg.get("message", "")
+                        label = "Du" if sender == "player" else "Agent"
+                        color = self._theme.data if sender == "player" else self._theme.pos
+                        yield Label(_c(color, f"[{label}] {text}"))
+                else:
+                    yield Label("[dim]No messages yet.[/dim]")
+            yield Input(placeholder="Type a message...", id="chat-input")
+
+    def on_mount(self) -> None:
+        self.query_one(VerticalScroll).scroll_end(animate=False)
+        self.query_one(Input).focus()
+
+    def on_key(self, event: Any) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+            event.prevent_default()
+
+    def on_input_submitted(self, event: Any) -> None:
+        text = event.value.strip()
+        if not text:
+            return
+        event.input.clear()
+        self._send(text)
+
+    @work
+    async def _send(self, text: str) -> None:
+        result = await self._agent.send_message(text)
+        if "error" not in result:
+            self.dismiss(text)
+        else:
+            # Show inline error in history, stay open
+            err = _c(self._theme.warn, f"✗ Send failed: {result['error'][:60]}")
+            self.query_one("#history-scroll", VerticalScroll).mount(Label(err))
+            self.query_one(Input).focus()
 
 
 # ---------------------------------------------------------------------------
