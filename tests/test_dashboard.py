@@ -1460,12 +1460,12 @@ async def test_chat_panel_shows_agent_message() -> None:
     assert "Working on it." in log.plain
 
 
-async def test_context_bar_no_focus_shows_tab_hint() -> None:
-    """Context-bar must show Tab hint when no panel is focused."""
+async def test_context_bar_no_focus_is_empty() -> None:
+    """Context-bar must be empty when no panel is focused ([Tab] is in fix-bar)."""
     app = _make_dashboard()
     assert app._focus is None
     ctx = await _render_context(app)
-    assert "Tab" in ctx.plain, "Context-bar must show Tab hint when no panel focused"
+    assert ctx.plain.strip() == "", "Context-bar must be empty when no panel focused"
 
 
 async def test_context_bar_agent_focus_shows_compass_numbers() -> None:

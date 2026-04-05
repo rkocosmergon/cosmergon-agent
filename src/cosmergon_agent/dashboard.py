@@ -116,6 +116,13 @@ def _hk(key: str) -> str:
     return "\\[" + key + "]"
 
 
+def _energy_ref(energy: float, max_e: float = 5000.0) -> str:
+    """Return a compact max-energy reference like '5k' or '50k'."""
+    if max_e >= 1000:
+        return f"{int(max_e / 1000)}k"
+    return str(int(max_e))
+
+
 def _energy_bar(energy: float, max_e: float = 5000.0, width: int = 8) -> str:
     ratio = min(1.0, max(0.0, energy / max_e))
     full = int(ratio * width)
@@ -626,7 +633,11 @@ class CosmergonDashboard(App):
         status = "PAUSED" if self._paused else "ACTIVE"
         sc = t.warn if self._paused else t.pos
         bar = _energy_bar(state.energy)
-        lines.append(f"{_c(sc, f'● {status}')}  {_c(t.data, f'{state.energy:,.0f} E  {bar}')}")
+        e_ref = _c("dim", f"/{_energy_ref(state.energy)}")
+        lines.append(
+            f"{_c(sc, f'● {status}')}  {_c(t.data, f'{state.energy:,.0f}')}"
+            f"{e_ref}{_c(t.data, f'  {bar}')}"
+        )
 
         if state.ranking:
             score_part = (
@@ -663,12 +674,12 @@ class CosmergonDashboard(App):
 
         if state and state.world_briefing:
             wb = state.world_briefing
-            lines.append(_c(t.data, f"Rank:  #{wb.your_rank} / {wb.total_agents}"))
+            lines.append(_c(t.data, f"Rank:   #{wb.your_rank} / {wb.total_agents}"))
             if wb.top_agent:
-                lines.append(_c(t.data, f"Top:   {wb.top_agent[:32]}"))
+                lines.append(_c(t.data, f"Top:    {wb.top_agent[:32]}"))
             lines.append(_c(t.data, f"Market: {wb.market_summary[:32]}"))
             if wb.last_event:
-                lines.append(_c("dim", f"Last: {wb.last_event[:32]}"))
+                lines.append(_c("dim", f"Last:   {wb.last_event[:32]}"))
         elif state:
             lines.append(_c("dim", "Joining universe..."))
 
@@ -708,12 +719,13 @@ class CosmergonDashboard(App):
 
     def _draw_context_bar(self, state: GameState | None) -> None:
         t = self._theme
+        esc = f"  {_c(t.cmd, _hk('Esc'))} back"
         if self._focus == "agent":
             hints = "  ".join(
                 f"{_c(t.cmd, _hk(str(i + 1)))}{v.split()[1] if ' ' in v else v}"
                 for i, v in enumerate(_COMPASS_DISPLAY.values())
             )
-            self._update_panel("context-bar", _c("dim", hints))
+            self._update_panel("context-bar", _c("dim", hints) + esc)
         elif self._focus == "fields":
             fields = (state.fields if state else None) or []
             if fields:
@@ -721,13 +733,13 @@ class CosmergonDashboard(App):
                     f"{_c(t.cmd, _hk(str(i + 1)))}{f.id[:8]}"
                     for i, f in enumerate(fields[:5])
                 ]
-                self._update_panel("context-bar", _c("dim", "  ".join(parts)))
+                self._update_panel("context-bar", _c("dim", "  ".join(parts)) + esc)
             else:
-                self._update_panel("context-bar", _c("dim", "No fields yet"))
+                self._update_panel("context-bar", _c("dim", "No fields yet") + esc)
         elif self._focus == "log":
             self._update_panel("context-bar", _c("dim", "[↑/↓] Scroll  [Esc] back"))
         else:
-            self._update_panel("context-bar", _c("dim", _hk("Tab") + " Panel focus"))
+            self._update_panel("context-bar", "")
 
     def _draw_fix_bar(self) -> None:
         t = self._theme
@@ -747,13 +759,11 @@ class CosmergonDashboard(App):
         name = (state.agent_name if state and state.agent_name else None) or (
             (self.agent.agent_id or "?")[:8]
         )
-        tier = state.subscription_tier if state else "?"
         tick = state.tick if state else "-"
         sep = " │ "
         segments = [
             name,
             f"tick {tick}",
-            f"tier {tier}",
         ]
         self._update_panel("status-bar", f"[dim]{sep.join(segments)}[/dim]")
 
