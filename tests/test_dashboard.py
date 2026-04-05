@@ -1511,3 +1511,168 @@ async def test_chat_screen_opens_on_m() -> None:
         assert "ChatScreen" not in type(pilot.app.screen).__name__, (
             "Esc must close ChatScreen and return to main dashboard"
         )
+
+
+# ---------------------------------------------------------------------------
+# Focus border highlight (John Maeda Law 5 — DIFFERENCE)
+# ---------------------------------------------------------------------------
+
+
+async def _get_focus_classes(app: _TestDashboard) -> dict[str, bool]:
+    """Run headless, trigger redraw, return panel-id → has .panel-focused."""
+    async with app.run_test(size=(80, 36)) as pilot:
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        return {
+            pid: pilot.app.query_one(f"#{pid}", Static).has_class("panel-focused")
+            for pid in ("agent-panel", "economy-panel", "log-panel", "chat-panel")
+        }
+
+
+async def _get_panel_text(app: _TestDashboard, panel_id: str) -> str:
+    async with app.run_test(size=(80, 36)) as pilot:
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        return pilot.app.query_one(f"#{panel_id}", Static).render().plain
+
+
+@pytest.mark.asyncio
+async def test_no_focus_no_panel_highlighted() -> None:
+    """With _focus=None no panel must carry .panel-focused."""
+    app = _make_dashboard()
+    assert app._focus is None
+    classes = await _get_focus_classes(app)
+    assert not any(classes.values()), f"Expected no highlighted panel, got: {classes}"
+
+
+@pytest.mark.asyncio
+async def test_agent_focus_highlights_agent_panel() -> None:
+    """When _focus='agent', only agent-panel must have .panel-focused."""
+    app = _make_dashboard()
+    app._focus = "agent"
+    classes = await _get_focus_classes(app)
+    assert classes["agent-panel"], "agent-panel must be highlighted when focus='agent'"
+    assert not classes["log-panel"], "log-panel must NOT be highlighted"
+    assert not classes["chat-panel"], "chat-panel must NOT be highlighted"
+    assert not classes["economy-panel"], "economy-panel must NOT be highlighted"
+
+
+@pytest.mark.asyncio
+async def test_fields_focus_highlights_agent_panel() -> None:
+    """When _focus='fields', agent-panel must have .panel-focused (fields live inside it)."""
+    app = _make_dashboard()
+    app._focus = "fields"
+    classes = await _get_focus_classes(app)
+    assert classes["agent-panel"], "agent-panel must be highlighted when focus='fields'"
+    assert not classes["log-panel"]
+    assert not classes["chat-panel"]
+
+
+@pytest.mark.asyncio
+async def test_log_focus_highlights_log_panel() -> None:
+    """When _focus='log', only log-panel must have .panel-focused."""
+    app = _make_dashboard()
+    app._focus = "log"
+    classes = await _get_focus_classes(app)
+    assert classes["log-panel"], "log-panel must be highlighted when focus='log'"
+    assert not classes["agent-panel"]
+    assert not classes["chat-panel"]
+
+
+@pytest.mark.asyncio
+async def test_chat_focus_highlights_chat_panel() -> None:
+    """When _focus='chat', only chat-panel must have .panel-focused."""
+    app = _make_dashboard()
+    app._focus = "chat"
+    classes = await _get_focus_classes(app)
+    assert classes["chat-panel"], "chat-panel must be highlighted when focus='chat'"
+    assert not classes["agent-panel"]
+    assert not classes["log-panel"]
+
+
+@pytest.mark.asyncio
+async def test_focus_marker_in_agent_panel() -> None:
+    """▶ must appear in agent-panel text when focus='agent'."""
+    app = _make_dashboard()
+    app._focus = "agent"
+    text = await _get_panel_text(app, "agent-panel")
+    assert "▶" in text, "▶ marker must appear in agent-panel when focused"
+
+
+@pytest.mark.asyncio
+async def test_focus_marker_in_log_panel() -> None:
+    """▶ must appear in log-panel text when focus='log'."""
+    app = _make_dashboard()
+    app._focus = "log"
+    text = await _get_panel_text(app, "log-panel")
+    assert "▶" in text, "▶ marker must appear in log-panel when focused"
+
+
+@pytest.mark.asyncio
+async def test_focus_marker_in_chat_panel() -> None:
+    """▶ must appear in chat-panel text when focus='chat'."""
+    app = _make_dashboard()
+    app._focus = "chat"
+    text = await _get_panel_text(app, "chat-panel")
+    assert "▶" in text, "▶ marker must appear in chat-panel when focused"
+
+
+@pytest.mark.asyncio
+async def test_no_focus_marker_when_unfocused() -> None:
+    """No panel must show ▶ when _focus=None."""
+    app = _make_dashboard()
+    assert app._focus is None
+    async with app.run_test(size=(80, 36)) as pilot:
+        await pilot.pause()
+        pilot.app._redraw()
+        await pilot.pause()
+        for pid in ("agent-panel", "log-panel", "chat-panel"):
+            text = pilot.app.query_one(f"#{pid}", Static).render().plain
+            assert "▶" not in text, f"▶ must NOT appear in {pid} when no panel is focused"
+
+
+@pytest.mark.asyncio
+async def test_tab_cycles_focus_and_border() -> None:
+    """Focus cycle None→agent→fields→log→chat→None: border must follow."""
+    app = _make_dashboard()
+    async with app.run_test(size=(80, 36)) as pilot:
+        await pilot.pause()
+
+        def cycle_and_redraw() -> None:
+            pilot.app.action_cycle_focus()
+            pilot.app._redraw()
+
+        assert pilot.app._focus is None
+
+        # → agent
+        cycle_and_redraw()
+        await pilot.pause()
+        assert pilot.app._focus == "agent"
+        assert pilot.app.query_one("#agent-panel", Static).has_class("panel-focused")
+
+        # → fields
+        cycle_and_redraw()
+        await pilot.pause()
+        assert pilot.app._focus == "fields"
+        assert pilot.app.query_one("#agent-panel", Static).has_class("panel-focused")
+
+        # → log
+        cycle_and_redraw()
+        await pilot.pause()
+        assert pilot.app._focus == "log"
+        assert pilot.app.query_one("#log-panel", Static).has_class("panel-focused")
+        assert not pilot.app.query_one("#agent-panel", Static).has_class("panel-focused")
+
+        # → chat
+        cycle_and_redraw()
+        await pilot.pause()
+        assert pilot.app._focus == "chat"
+        assert pilot.app.query_one("#chat-panel", Static).has_class("panel-focused")
+
+        # → None (full cycle)
+        cycle_and_redraw()
+        await pilot.pause()
+        assert pilot.app._focus is None
+        assert not pilot.app.query_one("#chat-panel", Static).has_class("panel-focused")
