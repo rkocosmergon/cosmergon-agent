@@ -633,7 +633,7 @@ class CosmergonDashboard(App):
         status = "PAUSED" if self._paused else "ACTIVE"
         sc = t.warn if self._paused else t.pos
         bar = _energy_bar(state.energy)
-        e_ref = _c("dim", f"/{_energy_ref(state.energy)}")
+        e_ref = _c("dim", f"/{_energy_ref(state.energy)} E")
         lines.append(
             f"{_c(sc, f'● {status}')}  {_c(t.data, f'{state.energy:,.0f}')}"
             f"{e_ref}{_c(t.data, f'  {bar}')}"
