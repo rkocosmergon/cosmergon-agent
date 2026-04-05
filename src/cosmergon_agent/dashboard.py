@@ -424,18 +424,21 @@ class CosmergonDashboard(App):
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("c", "compass", "Compass", show=False),
-        Binding("p", "place_cells", "Place", show=False),
-        Binding("f", "create_field", "Field", show=False),
-        Binding("e", "evolve", "Evolve", show=False),
-        Binding("u", "upgrade", "Upgrade", show=False),
-        Binding("space", "pause", "Pause", show=False),
-        Binding("r", "refresh_now", "Refresh", show=False),
-        Binding("l", "log_screen", "Log", show=False),
-        Binding("m", "chat_screen", "Chat", show=False),
-        Binding("tab", "cycle_focus", "Focus", show=False),
-        Binding("question_mark", "help", "Help", show=False),
-        Binding("q", "quit", "Quit", show=False),
+        # priority=True: fire before focused widget — needed for Textual 8.x where
+        # App-level bindings don't fire reliably without it. Safe for all our keys
+        # because the ChatScreen modal blocks App bindings via ModalScreen isolation.
+        Binding("c", "compass", "Compass", show=False, priority=True),
+        Binding("p", "place_cells", "Place", show=False, priority=True),
+        Binding("f", "create_field", "Field", show=False, priority=True),
+        Binding("e", "evolve", "Evolve", show=False, priority=True),
+        Binding("u", "upgrade", "Upgrade", show=False, priority=True),
+        Binding("space", "pause", "Pause", show=False, priority=True),
+        Binding("r", "refresh_now", "Refresh", show=False, priority=True),
+        Binding("l", "log_screen", "Log", show=False, priority=True),
+        Binding("m", "chat_screen", "Chat", show=False, priority=True),
+        Binding("tab", "cycle_focus", "Focus", show=False, priority=True),
+        Binding("question_mark", "help", "Help", show=False, priority=True),
+        Binding("q", "quit", "Quit", show=False, priority=True),
     ]
 
     def __init__(self, agent: CosmergonAgent, theme: Theme) -> None:
