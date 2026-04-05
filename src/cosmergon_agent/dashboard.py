@@ -530,6 +530,15 @@ class CosmergonDashboard(App):
         if len(self._log) > _MAX_LOG:
             self._log = self._log[-_MAX_LOG:]
 
+    def _schedule_pending(self, pending: _PendingAction, retry_after: float = 65.0) -> None:
+        """Queue a pending action and schedule a timer-based retry.
+
+        Uses set_timer as a fallback so the retry fires even when the game tick
+        counter is stuck at 0 (on_tick would never fire in that case).
+        """
+        self._pending_action = pending
+        self.set_timer(max(retry_after, 5.0), self._fire_pending)
+
     async def _fire_pending(self) -> None:
         """Fire a queued action on the next tick. Clears the slot before firing."""
         if not self._pending_action:
@@ -904,14 +913,16 @@ class CosmergonDashboard(App):
                 self._set_feedback(_c(self._theme.pos, f"✓ Compass → {compass_label}"))
         except RateLimitError as exc:
             wait_str = f" ~{int(exc.retry_after)}s" if exc.retry_after > 1 else ""
-            self._pending_action = _PendingAction(
-                kind="compass", action=preset, params={}, display=compass_label
+            self._schedule_pending(
+                _PendingAction(kind="compass", action=preset, params={}, display=compass_label),
+                retry_after=exc.retry_after,
             )
             self._add_log(_c("dim", f"⏳ {compass_label} — queued, fires next tick{wait_str}"))
             self._set_feedback(_c("dim", f"⏳ Queued: {compass_label} — next tick{wait_str}"))
         except CsgConnectionError:
-            self._pending_action = _PendingAction(
-                kind="compass", action=preset, params={}, display=compass_label
+            self._schedule_pending(
+                _PendingAction(kind="compass", action=preset, params={}, display=compass_label),
+                retry_after=10.0,
             )
             self._add_log(_c("dim", f"⏳ {compass_label} — network error, retry next tick"))
             self._set_feedback(_c("dim", f"⏳ {compass_label} — retrying next tick"))
@@ -946,11 +957,14 @@ class CosmergonDashboard(App):
         except RateLimitError as exc:
             display = f"place_cells({_PRESETS[pi]})"
             wait_str = f" ~{int(exc.retry_after)}s" if exc.retry_after > 1 else ""
-            self._pending_action = _PendingAction(
-                kind="act",
-                action="place_cells",
-                params={"field_id": state.fields[fi].id, "preset": _PRESETS[pi]},
-                display=display,
+            self._schedule_pending(
+                _PendingAction(
+                    kind="act",
+                    action="place_cells",
+                    params={"field_id": state.fields[fi].id, "preset": _PRESETS[pi]},
+                    display=display,
+                ),
+                retry_after=exc.retry_after,
             )
             self._add_log(_c("dim", f"⏳ {display} — queued, fires next tick{wait_str}"))
             self._set_feedback(_c("dim", f"⏳ Queued: {display} — next tick{wait_str}"))
@@ -979,11 +993,14 @@ class CosmergonDashboard(App):
             self._set_feedback(_c(color, f"{icon} Field created{cs} — press \\[P] to place cells"))
         except RateLimitError as exc:
             wait_str = f" ~{int(exc.retry_after)}s" if exc.retry_after > 1 else ""
-            self._pending_action = _PendingAction(
-                kind="act",
-                action="create_field",
-                params={"cube_id": cubes[ci].id},
-                display="create_field",
+            self._schedule_pending(
+                _PendingAction(
+                    kind="act",
+                    action="create_field",
+                    params={"cube_id": cubes[ci].id},
+                    display="create_field",
+                ),
+                retry_after=exc.retry_after,
             )
             self._add_log(_c("dim", f"⏳ create_field — queued, fires next tick{wait_str}"))
             self._set_feedback(_c("dim", f"⏳ Queued: create_field — next tick{wait_str}"))
@@ -1019,11 +1036,14 @@ class CosmergonDashboard(App):
                 self._set_feedback(_c(color, f"{icon} Evolve: {msg}"))
         except RateLimitError as exc:
             wait_str = f" ~{int(exc.retry_after)}s" if exc.retry_after > 1 else ""
-            self._pending_action = _PendingAction(
-                kind="act",
-                action="evolve",
-                params={"field_id": state.fields[fi].id},
-                display="evolve",
+            self._schedule_pending(
+                _PendingAction(
+                    kind="act",
+                    action="evolve",
+                    params={"field_id": state.fields[fi].id},
+                    display="evolve",
+                ),
+                retry_after=exc.retry_after,
             )
             self._add_log(_c("dim", f"⏳ evolve — queued, fires next tick{wait_str}"))
             self._set_feedback(_c("dim", f"⏳ Queued: evolve — next tick{wait_str}"))
