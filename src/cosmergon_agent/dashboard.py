@@ -425,11 +425,6 @@ class CosmergonDashboard(App):
         background: #1e1e1e;
         padding: 0 1;
     }
-
-    .panel-focused {
-        background: #1e1a00;
-        border: solid #554400;
-    }
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
@@ -466,7 +461,6 @@ class CosmergonDashboard(App):
         self._pending_action: _PendingAction | None = None  # queued on 429, fires next tick
         self._messages: list[dict] = []  # chat conversation cache (refreshed each tick)
         self._focus: str | None = None   # None | "agent" | "fields" | "log" | "chat"
-        self._last_focus: str | None = None  # last highlighted panel id (prevents CSS thrashing)
 
     def compose(self) -> ComposeResult:
         yield Static("", id="hint-bar")
@@ -591,30 +585,8 @@ class CosmergonDashboard(App):
             self._panel_cache[widget_id] = content
             self.query_one(f"#{widget_id}", Static).update(content)
 
-    _FOCUS_PANEL: ClassVar[dict[str | None, str | None]] = {
-        None: None,
-        "agent": "agent-panel",
-        "fields": "agent-panel",
-        "log": "log-panel",
-        "chat": "chat-panel",
-    }
-    _ALL_PANELS: ClassVar[list[str]] = ["agent-panel", "economy-panel", "log-panel", "chat-panel"]
-
-    def _update_focus_highlight(self) -> None:
-        target = self._FOCUS_PANEL.get(self._focus)
-        if target == self._last_focus:
-            return
-        for pid in self._ALL_PANELS:
-            w = self.query_one(f"#{pid}", Static)
-            if pid == target:
-                w.add_class("panel-focused")
-            else:
-                w.remove_class("panel-focused")
-        self._last_focus = target
-
     def _redraw(self) -> None:
         state = self.agent.state
-        self._update_focus_highlight()
         self._draw_hint_bar(state)
         self._draw_agent_panel(state)
         self._draw_economy_panel(state)
@@ -626,7 +598,8 @@ class CosmergonDashboard(App):
 
     def _draw_agent_panel(self, state: GameState | None) -> None:
         t = self._theme
-        lines = [_c(t.struct, "[bold]═ AGENT[/bold]")]
+        focus_marker = _c(t.guide, " ▶") if self._focus in ("agent", "fields") else ""
+        lines = [_c(t.struct, "[bold]═ AGENT[/bold]") + focus_marker]
 
         if not state:
             lines.append(_c("dim", "Connecting..."))
