@@ -234,7 +234,7 @@ async def test_economy_placeholder_when_no_world_briefing():
     assert "Joining" in economy.plain, (
         "Economy panel must show a placeholder, not be empty, before world briefing arrives"
     )
-    assert "Rang" not in economy.plain, "Rang must not appear without world briefing"
+    assert "Rank" not in economy.plain, "Rank must not appear without world briefing"
 
 
 async def test_score_zero_not_shown():
@@ -362,11 +362,11 @@ async def test_layout_minimum_content_visible(label: str, cols: int, rows: int) 
     visible = _svg_visible(svg)
 
     assert any("AGENT" in t for t in visible), f"[{label} {cols}x{rows}] AGENT header clipped"
-    assert any("WIRTSCHAFT" in t for t in visible), (
-        f"[{label} {cols}x{rows}] WIRTSCHAFT header clipped"
+    assert any("ECONOMY" in t for t in visible), (
+        f"[{label} {cols}x{rows}] ECONOMY header clipped"
     )
     assert any("LOG" in t for t in visible), f"[{label} {cols}x{rows}] LOG header clipped"
-    assert any("AKTIV" in t for t in visible), f"[{label} {cols}x{rows}] Status AKTIV clipped"
+    assert any("ACTIVE" in t for t in visible), f"[{label} {cols}x{rows}] Status ACTIVE clipped"
 
 
 @pytest.mark.parametrize(
@@ -398,7 +398,7 @@ async def test_layout_economy_content_visible_wide(label: str, cols: int, rows: 
     assert any("listings" in t for t in visible), (
         f"[{label} {cols}x{rows}] market listings not visible"
     )
-    assert any("Rang" in t for t in visible), f"[{label} {cols}x{rows}] Rang (rank) not visible"
+    assert any("Rank" in t for t in visible), f"[{label} {cols}x{rows}] Rank not visible"
 
 
 # ---------------------------------------------------------------------------
@@ -581,7 +581,7 @@ async def test_pause_error_shows_in_journal() -> None:
         await pilot.pause()
         agent = pilot.app.query_one("#agent-panel", Static).render()
         journal = pilot.app.query_one("#log-panel", Static).render()
-    assert "AKTIV" in agent.plain, "State must not toggle on error"
+    assert "ACTIVE" in agent.plain, "State must not toggle on error"
     assert "✗" in journal.plain
     assert "pause" in journal.plain
 

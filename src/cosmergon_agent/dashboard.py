@@ -623,7 +623,7 @@ class CosmergonDashboard(App):
             return
 
         # Status + energy
-        status = "PAUSED" if self._paused else "AKTIV"
+        status = "PAUSED" if self._paused else "ACTIVE"
         sc = t.warn if self._paused else t.pos
         bar = _energy_bar(state.energy)
         lines.append(f"{_c(sc, f'● {status}')}  {_c(t.data, f'{state.energy:,.0f} E  {bar}')}")
@@ -659,14 +659,14 @@ class CosmergonDashboard(App):
 
     def _draw_economy_panel(self, state: GameState | None) -> None:
         t = self._theme
-        lines = [_c(t.struct, "[bold]═ WIRTSCHAFT[/bold]")]
+        lines = [_c(t.struct, "[bold]═ ECONOMY[/bold]")]
 
         if state and state.world_briefing:
             wb = state.world_briefing
-            lines.append(_c(t.data, f"Rang:  #{wb.your_rank} / {wb.total_agents}"))
+            lines.append(_c(t.data, f"Rank:  #{wb.your_rank} / {wb.total_agents}"))
             if wb.top_agent:
                 lines.append(_c(t.data, f"Top:   {wb.top_agent[:32]}"))
-            lines.append(_c(t.data, f"Markt: {wb.market_summary[:32]}"))
+            lines.append(_c(t.data, f"Market: {wb.market_summary[:32]}"))
             if wb.last_event:
                 lines.append(_c("dim", f"Last: {wb.last_event[:32]}"))
         elif state:
@@ -738,7 +738,7 @@ class CosmergonDashboard(App):
         row1 = "  ".join([
             k("Tab", "Focus"), k("P", "Place"), k("F", "Field"), k("E", "Evolve"), k("L", "Log"),
         ])
-        row2 = "  ".join([k("M", "Chat"), k("U", "↑Dev"), k("?", "Help"), k("Q", "Quit")])
+        row2 = "  ".join([k("M", "Chat"), k("U", "Upgrade"), k("?", "Help"), k("Q", "Quit")])
         self._update_panel("fix-bar", row1 + "\n" + row2)
 
     def _draw_status_bar(self, state: GameState | None) -> None:
@@ -748,13 +748,10 @@ class CosmergonDashboard(App):
         tier = state.subscription_tier if state else "?"
         tick = state.tick if state else "-"
         sep = " │ "
-        tname = self._theme.name
         segments = [
             name,
             f"tick {tick}",
             f"tier {tier}",
-            f"sdk {__version__}",
-            f"theme {tname}",
         ]
         self._update_panel("status-bar", f"[dim]{sep.join(segments)}[/dim]")
 
