@@ -582,7 +582,7 @@ class CosmergonDashboard(App):
         self._draw_agent_panel(state)
         self._draw_economy_panel(state)
         self._draw_log_panel(state)
-        self._draw_chat_panel()
+        self._draw_chat_panel(state)
         self._draw_context_bar(state)
         self._draw_fix_bar()
         self._draw_status_bar(state)
@@ -668,10 +668,15 @@ class CosmergonDashboard(App):
 
         self._update_panel("log-panel", "\n".join(lines))
 
-    def _draw_chat_panel(self) -> None:
+    def _draw_chat_panel(self, state: GameState | None) -> None:
         t = self._theme
         focus_marker = _c(t.guide, " ▶") if self._focus == "chat" else ""
-        lines = [_c(t.struct, f"[bold]═ CHAT[/bold]{focus_marker}") + _c("dim", "  [M] write")]
+        agent_name = (state.agent_name if state and state.agent_name else None) or "Agent"
+        header = _c(t.struct, f"[bold]═ CHAT: {agent_name}[/bold]{focus_marker}")
+        lines = [header + _c("dim", "  [M] write")]
+
+        if state and state.agent_mode == "api":
+            lines.append(_c("dim", "  Kein Auto-Antwort (API-Modus)"))
 
         if not self._messages:
             self._update_panel("chat-panel", "\n".join(lines))
@@ -1071,16 +1076,17 @@ class CosmergonDashboard(App):
     @work
     async def action_chat_screen(self) -> None:
         """Open full-screen CHAT view with input field."""
-        sent = await self.push_screen_wait(
-            ChatScreen(self.agent, list(self._messages), self._theme)
+        state = self.agent.state
+        agent_name = (state.agent_name if state and state.agent_name else None) or "Agent"
+        agent_mode = state.agent_mode if state else "api"
+        await self.push_screen_wait(
+            ChatScreen(self.agent, list(self._messages), self._theme, agent_name, agent_mode)
         )
-        if sent:
-            self._add_log(_c(self._theme.data, f"→ [Du] {sent[:60]}"))
-            # Messages refresh on next tick; force an immediate fetch for responsiveness
-            try:
-                self._messages = await self.agent.get_messages(limit=20)
-            except Exception:
-                pass
+        # Refresh messages after modal closes (Esc); next tick will also update.
+        try:
+            self._messages = await self.agent.get_messages(limit=20)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -1170,30 +1176,39 @@ class ChatScreen(ModalScreen):
     """
 
     def __init__(
-        self, agent: "CosmergonAgent", messages: list[dict], theme: Theme  # noqa: UP037
+        self,
+        agent: "CosmergonAgent",  # noqa: UP037
+        messages: list[dict],
+        theme: Theme,
+        agent_name: str = "Agent",
+        agent_mode: str = "api",
     ) -> None:
         super().__init__()
         self._agent = agent
         self._messages = messages
         self._theme = theme
+        self._agent_name = agent_name
+        self._agent_mode = agent_mode
 
     def compose(self) -> ComposeResult:
+        if self._agent_mode == "api":
+            api_hint = " · Kein Auto-Antwort (API-Modus)"
+        else:
+            api_hint = " · Antwort ~60s"
+        header_text = f"[dim]Chat: {self._agent_name}{api_hint} · Esc: zurück[/dim]"
         with Vertical(id="chat-wrap"):
-            yield Label(
-                "[dim]Enter: send · Esc: back · reply comes next tick[/dim]",
-                id="chat-header",
-            )
+            yield Label(header_text, id="chat-header")
             with VerticalScroll(id="history-scroll"):
                 if self._messages:
                     for msg in self._messages:
                         sender = msg.get("sender", "")
                         text = msg.get("message", "")
-                        label = "Du" if sender == "player" else "Agent"
+                        label = "Du" if sender == "player" else self._agent_name
                         color = self._theme.data if sender == "player" else self._theme.pos
                         yield Label(_c(color, f"[{label}] {text}"))
                 else:
-                    yield Label("[dim]No messages yet.[/dim]")
-            yield Input(placeholder="Type a message...", id="chat-input")
+                    yield Label("[dim]Noch keine Nachrichten.[/dim]")
+            yield Input(placeholder="Nachricht eingeben...", id="chat-input")
 
     def on_mount(self) -> None:
         self.query_one(VerticalScroll).scroll_end(animate=False)
@@ -1214,13 +1229,16 @@ class ChatScreen(ModalScreen):
     @work
     async def _send(self, text: str) -> None:
         result = await self._agent.send_message(text)
+        scroll = self.query_one("#history-scroll", VerticalScroll)
         if "error" not in result:
-            self.dismiss(text)
+            sent_label = _c(self._theme.data, f"[Du] {text}")
+            scroll.mount(Label(sent_label))
+            scroll.scroll_end(animate=False)
+            # Stay open — user closes with Esc. Parent refreshes on next tick.
         else:
-            # Show inline error in history, stay open
-            err = _c(self._theme.warn, f"✗ Send failed: {result['error'][:60]}")
-            self.query_one("#history-scroll", VerticalScroll).mount(Label(err))
-            self.query_one(Input).focus()
+            err = _c(self._theme.warn, f"✗ Fehler: {result['error'][:60]}")
+            scroll.mount(Label(err))
+        self.query_one(Input).focus()
 
 
 # ---------------------------------------------------------------------------

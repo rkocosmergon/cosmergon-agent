@@ -110,6 +110,7 @@ class GameState:
     focus: Focus
     tick: int = 0
     agent_name: str = ""
+    agent_mode: str = "api"  # "api" | "llm" | "vagant" — api agents don't auto-respond to chat
     subscription_tier: str = "free"
     world_briefing: WorldBriefing | None = None
     learned_rules: list[str] = field(default_factory=list)
@@ -143,6 +144,7 @@ class GameState:
             ranking=ranking,
             focus=focus,
             tick=data.get("tick", 0),
+            agent_mode=data.get("agent_mode", "api"),
             subscription_tier=data.get("subscription_tier", "free"),
             world_briefing=world_briefing,
             learned_rules=data.get("learned_rules", []),
