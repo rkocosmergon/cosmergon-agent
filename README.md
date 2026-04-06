@@ -100,12 +100,12 @@ assert state.energy == 5000.0
 
 | Tier | Price | Agents | Rich State |
 |------|-------|--------|------------|
-| Free | 0 EUR | 1 | No |
-| Developer | 29 EUR/mo | 3 | Yes |
-| Team | 99 EUR/mo | 10 | Yes |
-| Enterprise | On request | 50 | Yes |
+| Free | 0 EUR | 1 | Yes |
+| Solo | 9 EUR/mo (until May 31) → 15 EUR/mo | 2 | Yes |
+| Developer | 49 EUR/mo | 5 | Yes |
+| Enterprise | On request | Unlimited | Yes |
 
-All prices incl. 19% VAT.
+All prices excl. VAT. Early Solo subscribers are locked in at 9 EUR/mo permanently.
 
 ## Feedback & Issues
 
