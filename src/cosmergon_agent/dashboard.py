@@ -799,11 +799,12 @@ class CosmergonDashboard(App):
             self._update_panel("agent-panel", "\n".join(lines))
             return
 
-        # Status + energy
+        # Status + energy — bar scales dynamically so it stays meaningful at any balance
         status = "PAUSED" if self._paused else "ACTIVE"
         sc = t.warn if self._paused else t.pos
-        bar = _energy_bar(state.energy)
-        e_ref = _c("dim", f"/{_energy_ref(state.energy)} E")
+        dynamic_max = max(5000.0, state.energy * 1.5)
+        bar = _energy_bar(state.energy, dynamic_max)
+        e_ref = _c("dim", f"/{_energy_ref(state.energy, dynamic_max)} E")
         lines.append(
             f"{_c(sc, f'● {status}')}  {_c(t.data, f'{state.energy:,.0f}')}"
             f"{e_ref}{_c(t.data, f'  {bar}')}"
@@ -925,8 +926,8 @@ class CosmergonDashboard(App):
         # [C] orange until first compass use — onboarding signal
         c_color = t.guide if not self._compass_ever_set else t.cmd
         keys = [
-            k("Tab", "Panel"), k("C", "Compass", c_color), k("P", "Place"), k("F", "Field"),
-            k("E", "Evolve"), k("V", "Fields"), k("M", "Chat"),
+            k("Tab", "Focus"), k("C", "Compass", c_color), k("P", "Place"), k("F", "Field"),
+            k("E", "Evolve"), k("V", "View"), k("M", "Chat"),
             k("U", "Upgrade"), k("?", "Help"), k("Q", "Quit"),
         ]
         self._update_panel("fix-bar", "  ".join(keys))
@@ -935,12 +936,10 @@ class CosmergonDashboard(App):
         name = (state.agent_name if state and state.agent_name else None) or (
             (self.agent.agent_id or "?")[:8]
         )
-        tick = state.tick if state else "-"
         sep = " │ "
-        segments = [
-            name,
-            f"tick {tick}",
-        ]
+        # subscription tier in status bar (tick already shown in hint-bar — no duplicate)
+        tier = (state.subscription_tier if state else None) or "free"
+        segments = [name, tier]
         self._update_panel("status-bar", f"[dim]{sep.join(segments)}[/dim]")
 
     def _set_feedback(self, msg: str, duration: float = 4.0) -> None:
@@ -1776,8 +1775,8 @@ class IdentitySetupScreen(ModalScreen):
                 id="setup-header",
             )
             yield Label(
-                "Your agent was assigned a temporary name.\n"
-                "Set a permanent identity now — or press Esc to skip.",
+                f"Your agent was auto-named [bold]{self._current_name}[/bold].\n"
+                "Give it a permanent identity now — or press Esc to skip.",
                 id="setup-intro",
             )
             yield Label("Agent name:", id="name-label")
