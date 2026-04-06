@@ -21,7 +21,7 @@ from textual.widgets import Static
 
 from cosmergon_agent import CosmergonAgent, CosmergonError
 from cosmergon_agent.action import ActionResult
-from cosmergon_agent.dashboard import THEMES, CosmergonDashboard
+from cosmergon_agent.dashboard import THEMES, CosmergonDashboard, FieldScreen
 from cosmergon_agent.testing import fake_state
 
 # ---------------------------------------------------------------------------
@@ -1650,3 +1650,223 @@ async def test_tab_cycles_focus_and_border() -> None:
         await pilot.pause()
         assert pilot.app._focus is None
         assert not pilot.app.query_one("#log-panel", Static).has_class("panel-focused")
+
+
+# ---------------------------------------------------------------------------
+# FieldScreen — open/close, zoom, field navigation, header/footer content
+# ---------------------------------------------------------------------------
+
+
+def _make_fieldscreen_app(n_fields: int = 1) -> _TestDashboard:
+    """Dashboard with n fake fields; get_field_cells is a no-op (no network)."""
+    fields_data = [
+        {
+            "id": f"field-{i:04d}",
+            "cube_id": "cube-0001",
+            "z_position": i,
+            "active_cell_count": 5,
+            "entity_tier": 1,
+            "entity_type": "still_life",
+        }
+        for i in range(n_fields)
+    ]
+    state = fake_state(fields=fields_data)
+    agent = CosmergonAgent(api_key="AGENT-test:fakekey000000000000000000000")
+    agent._state = state
+    agent.agent_id = state.agent_id
+
+    async def _noop_cells(*_args: object, **_kwargs: object) -> dict[str, int]:
+        return {}
+
+    agent.get_field_cells = _noop_cells  # type: ignore[method-assign]
+
+    app = _TestDashboard(agent=agent, theme=THEMES["cosmergon"])
+    app._compass_ever_set = True
+    return app
+
+
+# --- Open / close ---
+
+
+async def test_field_screen_opens_on_v() -> None:
+    """Pressing [V] with at least one field must push FieldScreen onto the stack."""
+    app = _make_fieldscreen_app(n_fields=1)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("v")
+        await pilot.pause()
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, FieldScreen), (
+            "[V] must push a FieldScreen; got: " + type(pilot.app.screen).__name__
+        )
+
+
+async def test_field_screen_no_fields_stays_on_main() -> None:
+    """Pressing [V] with no fields must NOT push FieldScreen — log shows warning instead."""
+    app = _make_dashboard()  # default: no fields
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("v")
+        await pilot.pause()
+        await pilot.pause()
+        assert not isinstance(pilot.app.screen, FieldScreen), (
+            "[V] with no fields must NOT push FieldScreen"
+        )
+
+
+async def test_field_screen_closes_on_esc() -> None:
+    """Pressing Esc inside FieldScreen must dismiss it and return to main dashboard."""
+    app = _make_fieldscreen_app(n_fields=1)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("v")
+        await pilot.pause()
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, FieldScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(pilot.app.screen, FieldScreen), (
+            "Esc must close FieldScreen and return to main dashboard"
+        )
+
+
+# NOTE: 'q' is intentionally NOT tested here as a FieldScreen-closer.
+# The App-level BINDINGS define Binding("q", "quit", priority=True), which
+# intercepts 'q' before it can reach the ModalScreen's on_key handler.
+# Pressing 'q' quits the whole app — that is correct App behaviour.
+# Esc is the designated close key for FieldScreen (tested above).
+
+
+# --- Zoom toggle ---
+
+
+async def test_field_screen_default_zoom_is_1() -> None:
+    """FieldScreen must open in Zoom 1 (detail viewport) by default."""
+    app = _make_fieldscreen_app(n_fields=1)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("v")
+        await pilot.pause()
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, FieldScreen)
+        assert screen._zoom == 1, f"Default zoom must be 1, got {screen._zoom}"
+
+
+async def test_field_screen_z_toggles_to_zoom2() -> None:
+    """Pressing Z must switch from Zoom 1 to Zoom 2 (full-field overview)."""
+    app = _make_fieldscreen_app(n_fields=1)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("v")
+        await pilot.pause()
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, FieldScreen)
+        await pilot.press("z")
+        await pilot.pause()
+        assert screen._zoom == 2, f"After Z: zoom must be 2, got {screen._zoom}"
+
+
+async def test_field_screen_z_twice_back_to_zoom1() -> None:
+    """Pressing Z twice must return to Zoom 1 (toggle is symmetric)."""
+    app = _make_fieldscreen_app(n_fields=1)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("v")
+        await pilot.pause()
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, FieldScreen)
+        await pilot.press("z")
+        await pilot.pause()
+        await pilot.press("z")
+        await pilot.pause()
+        assert screen._zoom == 1, f"After Z×2: zoom must return to 1, got {screen._zoom}"
+
+
+# --- Field navigation ---
+
+
+async def test_field_screen_bracket_right_advances_idx() -> None:
+    """Pressing ] with 2 fields must advance the field index from 0 to 1."""
+    app = _make_fieldscreen_app(n_fields=2)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("v")
+        await pilot.pause()
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, FieldScreen)
+        assert screen._idx == 0, "Initial field index must be 0"
+        await pilot.press("]")
+        await pilot.pause()
+        assert screen._idx == 1, f"] must advance idx to 1, got {screen._idx}"
+
+
+async def test_field_screen_bracket_left_wraps_to_last() -> None:
+    """Pressing [ at index 0 with 2 fields must wrap around to index 1 (last)."""
+    app = _make_fieldscreen_app(n_fields=2)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("v")
+        await pilot.pause()
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, FieldScreen)
+        assert screen._idx == 0
+        await pilot.press("[")
+        await pilot.pause()
+        assert screen._idx == 1, (
+            f"[ at idx=0 with 2 fields must wrap to idx=1 (last), got {screen._idx}"
+        )
+
+
+# --- Header / footer content ---
+
+
+async def test_field_screen_header_shows_field_count() -> None:
+    """Header must show '[1/2]' when 2 fields exist and first is selected."""
+    app = _make_fieldscreen_app(n_fields=2)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("v")
+        await pilot.pause()
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, FieldScreen)
+        screen._redraw()
+        await pilot.pause()
+        header = screen.query_one("#fv-header", Static).render()
+        assert "[1/2]" in header.plain, (
+            f"Header must show '[1/2]' with 2 fields; got: {header.plain!r}"
+        )
+
+
+async def test_field_screen_footer_zoom1_shows_scroll_hint() -> None:
+    """Footer in Zoom 1 must contain scroll key hints (↑↓←→)."""
+    app = _make_fieldscreen_app(n_fields=1)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("v")
+        await pilot.pause()
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, FieldScreen)
+        assert screen._zoom == 1
+        screen._redraw()
+        await pilot.pause()
+        footer = screen.query_one("#fv-footer", Static).render()
+        assert "↑↓" in footer.plain, (
+            f"Zoom-1 footer must show scroll arrows; got: {footer.plain!r}"
+        )
+
+
+async def test_field_screen_footer_zoom2_shows_detail_hint() -> None:
+    """Footer in Zoom 2 must contain 'Z detail' (hint to return to zoom 1)."""
+    app = _make_fieldscreen_app(n_fields=1)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("v")
+        await pilot.pause()
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, FieldScreen)
+        await pilot.press("z")
+        await pilot.pause()
+        assert screen._zoom == 2
+        screen._redraw()
+        await pilot.pause()
+        footer = screen.query_one("#fv-footer", Static).render()
+        assert "Z detail" in footer.plain, (
+            f"Zoom-2 footer must show 'Z detail'; got: {footer.plain!r}"
+        )

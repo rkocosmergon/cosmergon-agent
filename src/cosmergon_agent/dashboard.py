@@ -1626,16 +1626,16 @@ class FieldScreen(ModalScreen):
 
     def on_key(self, event: Any) -> None:
         k = event.key
-        if k in ("escape", "q"):
+        if k == "escape":
             self.dismiss(None)
             event.prevent_default()
         elif k == "z":
             self._zoom = 2 if self._zoom == 1 else 1
             event.prevent_default()
-        elif k == "bracketleft":
+        elif k == "left_square_bracket":
             self._nav_field(-1)
             event.prevent_default()
-        elif k == "bracketright":
+        elif k == "right_square_bracket":
             self._nav_field(1)
             event.prevent_default()
         elif k == "r":
