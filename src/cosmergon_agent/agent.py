@@ -265,6 +265,31 @@ class CosmergonAgent:
             return {"error": resp.text}
         return resp.json()
 
+    async def patch_identity(
+        self,
+        agent_name: str | None = None,
+        persona: str | None = None,
+    ) -> dict:
+        """Update the agent's own display name and/or persona.
+
+        Args:
+            agent_name: New display name (3-50 chars, alphanumeric/_/-).
+            persona: New persona type (scientist, warrior, expansionist,
+                     trader, diplomat, farmer).
+
+        Returns:
+            Updated player dict on success, or {"error": ...} on failure.
+        """
+        payload: dict = {}
+        if agent_name is not None:
+            payload["agent_name"] = agent_name
+        if persona is not None:
+            payload["persona"] = persona
+        resp = await self._request("PATCH", "/api/v1/players/me", json=payload)
+        if resp.status_code >= 400:
+            return {"error": resp.text, "status_code": resp.status_code}
+        return resp.json()
+
     async def get_events(self, limit: int = 20) -> list[dict]:
         """Fetch recent game events for this agent (actions, compass changes, etc.).
 

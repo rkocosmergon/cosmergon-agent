@@ -110,6 +110,7 @@ class GameState:
     focus: Focus
     tick: int = 0
     agent_name: str = ""
+    persona_type: str = ""  # active persona (scientist, warrior, …) — empty if not yet set
     agent_mode: str = "api"  # "api" | "llm" | "vagant" — api agents don't auto-respond to chat
     subscription_tier: str = "free"
     world_briefing: WorldBriefing | None = None
@@ -136,6 +137,7 @@ class GameState:
         return cls(
             agent_id=data.get("agent_id", "unknown"),
             agent_name=data.get("agent_name", ""),
+            persona_type=data.get("persona_type", ""),
             agent_type=data.get("agent_type", "independent_agent"),
             energy=float(data.get("energy_balance", data.get("energy", 0.0))),
             fields=fields,

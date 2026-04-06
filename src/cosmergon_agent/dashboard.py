@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import time
 import webbrowser
 from dataclasses import dataclass
@@ -35,7 +36,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Input, Label, Static
+from textual.widgets import Input, Label, Select, Static
 
 from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError, __version__
 from cosmergon_agent.exceptions import ConnectionError as CsgConnectionError
@@ -57,6 +58,22 @@ _COMPASS_DISPLAY = {
     "explore": "🔭  Explore",
     "autonomous": "Autonomous",
 }
+
+_AUTO_AGENT_NAME = re.compile(r"^agent_[0-9a-f]{8}$")
+
+_PERSONA_OPTIONS: list[tuple[str, str]] = [
+    ("Scientist    — patient, evolves high-tier patterns", "scientist"),
+    ("Warrior      — aggressive, dominates through invasion", "warrior"),
+    ("Expansionist — spreads wide, maximises field presence", "expansionist"),
+    ("Trader       — analytical, arbitrages the marketplace", "trader"),
+    ("Diplomat     — cooperative, builds alliances", "diplomat"),
+    ("Farmer       — patient, optimises stable patterns for yield", "farmer"),
+]
+
+
+def _is_auto_name(name: str) -> bool:
+    """Return True if the name matches the auto-generated pattern agent_XXXXXXXX."""
+    return bool(_AUTO_AGENT_NAME.match(name))
 
 
 # ---------------------------------------------------------------------------
@@ -605,6 +622,7 @@ class CosmergonDashboard(App):
         self._messages: list[dict] = []  # chat conversation cache (refreshed each tick)
         self._focus: str | None = None   # None | "agent" | "fields" | "log"
         self._focus_panel_id: str | None = None  # last panel id with .panel-focused class
+        self._identity_prompted: bool = False  # True after identity setup shown once per session
 
     def compose(self) -> ComposeResult:
         yield Static("", id="hint-bar")
@@ -639,6 +657,9 @@ class CosmergonDashboard(App):
                     self._compass_preset = state.compass_preset
                     self._compass_ever_set = True
                 self._add_log(_c(self._theme.pos, f"● Connected  {state.energy:,.0f} E"))
+                if not self._identity_prompted and _is_auto_name(state.agent_name):
+                    self._identity_prompted = True
+                    self._show_identity_setup()
                 return
             delta = state.energy - self._last_energy
             self._last_energy = state.energy
@@ -667,6 +688,18 @@ class CosmergonDashboard(App):
             self._add_log(_c(self._theme.warn, self._fatal_error))
         except Exception as exc:
             self._add_log(_c(self._theme.warn, f"Agent error: {exc}"))
+
+    @work
+    async def _show_identity_setup(self) -> None:
+        """Open the IdentitySetupScreen modal and log the outcome."""
+        state = self.agent.state
+        current_name = state.agent_name if state else ""
+        current_persona = (state.persona_type if state else "") or "scientist"
+        result = await self.push_screen_wait(
+            IdentitySetupScreen(self.agent, current_name, current_persona, self._theme)
+        )
+        if result:
+            self._add_log(_c(self._theme.pos, f"✓ Identity set: {result['agent_name']}"))
 
     def _add_log(self, msg: str) -> None:
         self._log.append(msg)
@@ -1674,6 +1707,144 @@ class FieldScreen(ModalScreen):
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# IdentitySetupScreen — first-time identity setup for auto-generated names
+# ---------------------------------------------------------------------------
+
+
+class IdentitySetupScreen(ModalScreen):
+    """Modal shown once when the agent's name matches the auto-generated pattern.
+
+    The user can set a permanent agent name and choose a persona.
+    Pressing Esc skips without making any changes.
+    """
+
+    DEFAULT_CSS = """
+    IdentitySetupScreen {
+        align: center middle;
+    }
+    IdentitySetupScreen > #setup-wrap {
+        width: 72;
+        height: auto;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    IdentitySetupScreen > #setup-wrap > #setup-header {
+        height: 1;
+        margin-bottom: 1;
+    }
+    IdentitySetupScreen > #setup-wrap > #setup-intro {
+        height: 2;
+        margin-bottom: 1;
+    }
+    IdentitySetupScreen > #setup-wrap > #name-label {
+        height: 1;
+    }
+    IdentitySetupScreen > #setup-wrap > #name-input {
+        height: 3;
+        margin-bottom: 1;
+    }
+    IdentitySetupScreen > #setup-wrap > #persona-label {
+        height: 1;
+    }
+    IdentitySetupScreen > #setup-wrap > #persona-select {
+        margin-bottom: 1;
+    }
+    IdentitySetupScreen > #setup-wrap > #error-label {
+        height: 1;
+    }
+    """
+
+    def __init__(
+        self,
+        agent: CosmergonAgent,
+        current_name: str,
+        current_persona: str,
+        theme: Theme,
+    ) -> None:
+        super().__init__()
+        self._agent = agent
+        self._current_name = current_name
+        self._current_persona = current_persona or "scientist"
+        self._theme = theme
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="setup-wrap"):
+            yield Label(
+                "[dim]// Identity Setup · Enter in name field: save · Esc: skip[/dim]",
+                id="setup-header",
+            )
+            yield Label(
+                "Your agent was assigned a temporary name.\n"
+                "Set a permanent identity now — or press Esc to skip.",
+                id="setup-intro",
+            )
+            yield Label("Agent name:", id="name-label")
+            yield Input(
+                value=self._current_name,
+                placeholder="e.g. my-agent",
+                id="name-input",
+            )
+            yield Label("Persona (Tab to select):", id="persona-label")
+            yield Select(
+                options=_PERSONA_OPTIONS,
+                value=self._current_persona,
+                allow_blank=False,
+                id="persona-select",
+            )
+            yield Label("", id="error-label")
+
+    def on_mount(self) -> None:
+        inp = self.query_one("#name-input", Input)
+        inp.focus()
+        inp.action_end()
+
+    def on_key(self, event: Any) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+            event.prevent_default()
+
+    def on_input_submitted(self, event: Any) -> None:
+        name = event.value.strip()
+        if not name:
+            self._set_error("Agent name cannot be empty.")
+            return
+        if len(name) < 3:
+            self._set_error("Name must be at least 3 characters.")
+            return
+        if not re.match(r"^[a-zA-Z0-9_-]+$", name):
+            self._set_error("Only letters, digits, _ and - are allowed.")
+            return
+        persona_select = self.query_one("#persona-select", Select)
+        persona = (
+            str(persona_select.value)
+            if persona_select.value is not Select.NULL
+            else "scientist"
+        )
+        self._save(name, persona)
+
+    @work
+    async def _save(self, name: str, persona: str) -> None:
+        self._set_status("Saving…")
+        result = await self._agent.patch_identity(agent_name=name, persona=persona)
+        if "error" in result:
+            status = result.get("status_code", 0)
+            if status == 409:
+                self._set_error(f"Name '{name}' is already taken — choose another.")
+            else:
+                self._set_error(f"Error: {str(result['error'])[:80]}")
+            self.query_one("#name-input", Input).focus()
+        else:
+            self.dismiss({"agent_name": result.get("username", name), "persona": persona})
+
+    def _set_error(self, msg: str) -> None:
+        self.query_one("#error-label", Label).update(_c(self._theme.warn, msg))
+
+    def _set_status(self, msg: str) -> None:
+        self.query_one("#error-label", Label).update(_c("dim", msg))
+
+
 # Entry point
 # ---------------------------------------------------------------------------
 
