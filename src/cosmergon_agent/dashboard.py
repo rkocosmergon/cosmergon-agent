@@ -9,7 +9,7 @@ Usage:
 Hotkeys:
     C  Set Compass direction (highlighted until first use)
     P  Place cells       F  Create field     E  Evolve entity
-    Space  Pause/Resume  U  Upgrade → Developer
+    Space  Pause/Resume  U  Upgrade (next tier, opens browser)
     R  Refresh now       Q  Quit             ?  Help
 
 Themes: cosmergon (default), matrix, mono, high-contrast
@@ -468,7 +468,7 @@ class HelpModal(ModalScreen):
             "[cyan]\\[E][/cyan]  Evolve entity",
             "[cyan]\\[V][/cyan]  View Conway field (zoom, scroll, minimap)",
             "[cyan]\\[Space][/cyan]  Pause / Resume",
-            "[cyan]\\[U][/cyan]  Upgrade → Developer (opens browser)",
+            "[cyan]\\[U][/cyan]  Upgrade to next tier (opens browser)",
             "[cyan]\\[R][/cyan]  Refresh data",
             "[cyan]\\[Q][/cyan]  Quit",
             "",
@@ -1209,21 +1209,20 @@ class CosmergonDashboard(App):
             self._set_feedback(_c(self._theme.warn, f"✗ Evolve failed: {exc}"))
 
     async def action_upgrade(self) -> None:
-        self._add_log(_c(self._theme.data, "⠋ Opening upgrade page..."))
-        try:
-            resp = await self.agent._request(
-                "GET",
-                "/api/v1/billing/upgrade-link",
-                params={"tier": "developer"},
-                follow_redirects=False,
-            )
-            url = resp.headers.get("location", "https://cosmergon.com/pricing")
-            webbrowser.open(url)
-            self._add_log(_c(self._theme.pos, "✓ Browser opened"))
-            self._set_feedback(_c(self._theme.pos, "✓ Browser opened — complete upgrade there"))
-        except Exception as exc:
-            self._add_log(_c(self._theme.warn, f"✗ Upgrade link error: {exc}"))
-            self._set_feedback(_c(self._theme.warn, f"✗ Upgrade failed: {exc}"))
+        _upgrade_urls: dict[str, str] = {
+            "free": "https://cosmergon.com/solo.html",
+            "solo": "https://cosmergon.com/developer-plan.html",
+            "developer": "https://cosmergon.com/enterprise.html",
+        }
+        tier = (self.agent._state.subscription_tier if self.agent._state else "free")
+        url = _upgrade_urls.get(tier)
+        if url is None:
+            # enterprise — no higher tier
+            self._set_feedback(_c(self._theme.data, "✓ You are on the top tier (Enterprise)"))
+            return
+        webbrowser.open(url)
+        self._add_log(_c(self._theme.pos, f"✓ Upgrade page opened ({tier} → next tier)"))
+        self._set_feedback(_c(self._theme.pos, "✓ Browser opened — complete upgrade there"))
 
     async def action_pause(self) -> None:
         action = "resume" if self._paused else "pause"
