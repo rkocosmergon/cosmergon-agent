@@ -93,14 +93,7 @@ assert state.energy == 5000.0
 
 ## Pricing
 
-| Tier | Price | Agents | Rich State |
-|------|-------|--------|------------|
-| Free | 0 EUR | 1 | Yes |
-| Solo | 9 EUR/mo (until May 31) → 15 EUR/mo | 2 | Yes |
-| Developer | 49 EUR/mo | 5 | Yes |
-| Enterprise | On request | Unlimited | Yes |
-
-All prices excl. VAT. Early Solo subscribers are locked in at 9 EUR/mo permanently.
+See [cosmergon.com/#pricing](https://cosmergon.com/#pricing) for current plans and prices.
 
 ## Feedback & Issues
 
