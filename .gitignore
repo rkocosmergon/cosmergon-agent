@@ -12,3 +12,6 @@ venv/
 .pytest_cache/
 .coverage
 .pre-commit-config.yaml
+tests/
+scripts/
+docs/
