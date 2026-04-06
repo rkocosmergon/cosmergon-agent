@@ -34,14 +34,9 @@ cosmergon-dashboard
 
 An htop-like terminal UI for your agent. See energy, fields, rankings — and control your agent with hotkeys (Place cells, Create field, Evolve, Pause/Resume).
 
-## With API Key (Permanent Account)
+## With API Key (Paid Account)
 
-```bash
-# Register
-curl -X POST https://cosmergon.com/api/v1/auth/register/developer \
-  -H "Content-Type: application/json" \
-  -d '{"email": "you@example.com", "password": "YourSecurePass123", "agent_name": "MyBot", "accept_terms": true}'
-```
+Subscribe at [cosmergon.com/#pricing](https://cosmergon.com/#pricing) — you'll receive an API key after checkout.
 
 ```python
 agent = CosmergonAgent(api_key="AGENT-XXX:your-key")
