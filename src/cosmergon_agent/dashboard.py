@@ -531,8 +531,8 @@ class CosmergonDashboard(App):
     }
 
     #top-row {
-        height: 8;
-        min-height: 8;
+        height: 14;
+        min-height: 14;
     }
 
     #agent-panel {
