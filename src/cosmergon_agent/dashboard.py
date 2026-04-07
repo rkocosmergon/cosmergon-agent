@@ -829,13 +829,20 @@ class CosmergonDashboard(App):
         if state.fields:
             lines.append("")
             lines.append(_c(t.struct, "[bold]═ FIELDS[/bold]"))
+            narrow = self.app.size.width < 70
             for f in state.fields[:_MAX_FIELDS]:
                 tier = f"T{f.entity_tier or 0}"
                 etype = (f.entity_type or "novice")[:8]
-                bar_f = _energy_bar(f.active_cell_count, 200, 6)
-                lines.append(
-                    _c(t.data, f"  {f.id[:8]} {tier} {etype:8s} {bar_f} {f.active_cell_count}c")
-                )
+                if narrow:
+                    lines.append(_c(t.data, f"  {f.id[:8]} {tier} {etype} {f.active_cell_count}c"))
+                else:
+                    bar_f = _energy_bar(f.active_cell_count, 200, 6)
+                    lines.append(
+                        _c(t.data, f"  {f.id[:8]} {tier} {etype:8s} {bar_f} {f.active_cell_count}c")
+                    )
+            hidden = len(state.fields) - _MAX_FIELDS
+            if hidden > 0:
+                lines.append(_c("dim", f"  ... (+{hidden} more)  \\[V] to browse"))
 
         self._update_panel("agent-panel", "\n".join(lines))
 
