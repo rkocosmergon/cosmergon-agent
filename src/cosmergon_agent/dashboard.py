@@ -1311,6 +1311,11 @@ class CosmergonDashboard(App):
             self._set_feedback(_c(self._theme.warn, f"✗ {action} failed: {exc}"))
 
     async def action_refresh_now(self) -> None:
+        # Delegate to FieldScreen when it is active — App priority binding fires
+        # top-down in Textual 8 so it intercepts before FieldScreen's on_key.
+        if isinstance(self.screen, FieldScreen):
+            self.screen.action_refresh_field()
+            return
         self._add_log(_c(self._theme.data, "Refreshing..."))
 
     @work
@@ -1545,6 +1550,11 @@ class FieldScreen(ModalScreen):
     }
     """
 
+    # Override app-level 'r' priority binding so FieldScreen handles refresh itself.
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("r", "refresh_field", show=False, priority=True),
+    ]
+
     _NAV_KEYS: ClassVar[set[str]] = {
         "up", "down", "left", "right",
         "ctrl+up", "ctrl+down", "ctrl+left", "ctrl+right",
@@ -1715,14 +1725,15 @@ class FieldScreen(ModalScreen):
         elif k == "right_square_bracket":
             self._nav_field(1)
             event.prevent_default()
-        elif k == "r":
-            self._cells = set()          # force centroid re-centre on manual refresh
-            self._last_fetched_tick = -1
-            self._fetch_cells()
-            event.prevent_default()
         elif k in self._NAV_KEYS and self._zoom == 1:
             self._scroll(k)
             event.prevent_default()
+
+    def action_refresh_field(self) -> None:
+        """[R] — clear cells and re-fetch so centroid re-centres on manual refresh."""
+        self._cells = set()
+        self._last_fetched_tick = -1
+        self._fetch_cells()
 
     def _nav_field(self, direction: int) -> None:
         if not self._fields:
