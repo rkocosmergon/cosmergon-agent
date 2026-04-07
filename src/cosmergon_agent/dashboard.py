@@ -859,7 +859,17 @@ class CosmergonDashboard(App):
             if wb.last_event:
                 lines.append(_c("dim", f"Last:   {wb.last_event[:32]}"))
         elif state:
+            # No world briefing yet — show basic state so panel isn't empty
             lines.append(_c("dim", "Joining universe..."))
+            lines.append(_c(t.data, f"Tick:   {state.tick}"))
+            lines.append(_c(t.data, f"Energy: {state.energy:,.0f} E"))
+            if state.next_tick_at:
+                remaining = int(max(0, state.next_tick_at - time.time()))
+                lines.append(_c("dim", f"Next:   ~{remaining}s"))
+            elif self._tick_received_at > 0:
+                elapsed = time.monotonic() - self._tick_received_at
+                remaining = int(max(0, self._tick_interval - elapsed))
+                lines.append(_c("dim", f"Next:   ~{remaining}s"))
 
         self._update_panel("economy-panel", "\n".join(lines))
 
@@ -886,7 +896,31 @@ class CosmergonDashboard(App):
         if feed:
             lines.extend(feed)
         else:
-            lines.append("[dim]Connecting to cosmergon.com...[/dim]")
+            # Empty feed — structured welcome block instead of black void.
+            # Fills available space with context until real events arrive.
+            no_fields = not (state and state.fields)
+            welcome: list[str] = [
+                _c("dim", "Connecting to cosmergon.com..."),
+                "",
+                _c(t.struct, "  Conway cells evolve every tick (~60s)."),
+                _c("dim",   "  Energy is earned through active patterns."),
+                _c("dim",   "  Your agent lives on the server — always on."),
+                "",
+            ]
+            if no_fields:
+                welcome += [
+                    _c(t.guide, f"  {_hk('F')} Claim a field   {_hk('C')} Set Compass"),
+                    _c(t.guide, f"  {_hk('P')} Place cells     {_hk('V')} View field"),
+                    _c(t.guide, f"  {_hk('?')} Help"),
+                ]
+            else:
+                welcome += [
+                    _c(t.guide, f"  {_hk('C')} Set Compass     {_hk('P')} Place cells"),
+                    _c(t.guide, f"  {_hk('V')} View field      {_hk('?')} Help"),
+                ]
+            welcome.append("")
+            welcome.append(_c("dim", "  Activity will appear here once connected."))
+            lines.extend(welcome[:feed_n])
 
         # Chat messages — last 2, shown below activity feed
         if self._messages:
@@ -1549,6 +1583,7 @@ class FieldScreen(ModalScreen):
         # Approximate usable content width from terminal size (92% - borders)
         self._content_w = max(40, int(self.app.size.width * 0.92) - 4)
         self.set_interval(0.25, self._redraw)
+        self._redraw()  # immediate first render — shows "Loading…" without 0.25s flash
         self._fetch_cells()
 
     @work
@@ -1573,12 +1608,14 @@ class FieldScreen(ModalScreen):
         except Exception:
             self._cells = set()
         self._loading = False
+        self._redraw()  # render immediately after cells arrive, don't wait for next interval
 
     def _viewport_dims(self) -> tuple[int, int]:
         """Return ``(vp_w, vp_h)`` in cells for the zoom-1 viewport."""
         map_cols = (_FV_MAP_W + 2) if self._content_w >= _FV_MINIMAP_THRESHOLD else 0
         vp_w = max(10, self._content_w - map_cols - 2)
-        vp_h = 20
+        # Dynamic height: fv-wrap is 88vh capped at max-height:54, minus header(2)+footer(1)+pad(1)
+        vp_h = max(10, min(50, int(self.app.size.height * 0.88) - 4))
         return vp_w, vp_h
 
     def _redraw(self) -> None:
@@ -1618,8 +1655,10 @@ class FieldScreen(ModalScreen):
         elif not self._fields:
             content_widget.update("")
         elif self._zoom == 2:
-            out_w = min(32, max(10, self._content_w - 4))
-            out_h = out_w
+            # Dynamic size: fill available content area, not hardcoded square
+            content_h = max(10, min(50, int(self.app.size.height * 0.88) - 4))
+            out_w = min(content_h, max(10, self._content_w - 4))
+            out_h = content_h
             rows = _fv_render_zoom2(
                 self._cells, self._field_w, self._field_h, out_w, out_h,
                 alive_char=f"[{t.pos}]▓[/{t.pos}]",
@@ -1659,7 +1698,7 @@ class FieldScreen(ModalScreen):
             )
         else:
             footer_widget.update(
-                _c("dim", "↑↓←→ scroll  C+arr×8  Home  Z zoom  \\[[ \\]] field  Esc")
+                _c("dim", "↑↓←→ scroll  C+arr x8  Home  Z zoom  \\[[ \\]] field  Esc")
             )
 
     def on_key(self, event: Any) -> None:
