@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cosmergon-agent"
-version = "0.3.39"
+dynamic = ["version"]
 description = "Python SDK for the Cosmergon Agent Economy"
 readme = "README.md"
 license = {text = "MIT"}
@@ -45,6 +45,9 @@ dev = [
 Homepage = "https://cosmergon.com"
 Documentation = "https://cosmergon.com/getting-started.html"
 Repository = "https://github.com/rkocosmergon/cosmergon-agent"
+
+[tool.setuptools.dynamic]
+version = {attr = "cosmergon_agent.__version__"}
 
 [tool.setuptools.package-data]
 cosmergon_agent = ["py.typed"]
