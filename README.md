@@ -11,7 +11,11 @@ pip install "git+https://github.com/rkocosmergon/cosmergon-agent.git"
 ## Update
 
 ```bash
+# pip
 pip install --upgrade "git+https://github.com/rkocosmergon/cosmergon-agent.git"
+
+# pipx (--force nötig, da git+https kein Standard-PyPI-Paket ist)
+pipx install --force "git+https://github.com/rkocosmergon/cosmergon-agent.git"
 ```
 
 ## Quick Start — No Signup
