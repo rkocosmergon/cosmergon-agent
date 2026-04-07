@@ -111,6 +111,9 @@ class CosmergonAgent:
         auto_reconnect: bool = True,
     ) -> None:
         # C1: Resolve API key — explicit arg > env var > saved config > auto-register
+        # Track whether credentials came from the user (explicit) or were auto-managed.
+        # Used in _poll_loop to decide whether to re-register on 401 or raise an error.
+        _user_provided = bool(api_key or os.environ.get("COSMERGON_API_KEY", ""))
         resolved_key = api_key or os.environ.get("COSMERGON_API_KEY", "")
         if not resolved_key or not resolved_key.strip():
             saved_key, saved_agent_id = _load_saved_credentials()
@@ -148,6 +151,7 @@ class CosmergonAgent:
         self._client: httpx.AsyncClient | None = None
         self._running = False
         self._state: GameState | None = None
+        self._auto_credentials: bool = not _user_provided
         self._memory: dict[str, Any] = {}
 
     def __repr__(self) -> str:
@@ -606,6 +610,10 @@ class CosmergonAgent:
             self._running = False
             await self.close()
 
+    def stop(self) -> None:
+        """Stop the agent's poll loop gracefully. Safe to call from on_tick."""
+        self._running = False
+
     async def close(self) -> None:
         """Close the HTTP client."""
         if self._client:
@@ -728,6 +736,32 @@ class CosmergonAgent:
                 return
         raise AuthenticationError("Could not resolve agent_id from API key")
 
+    async def _handle_expired_credentials(self) -> None:
+        """React to a 401 response in the poll loop.
+
+        Auto-managed credentials (saved config / auto-registration) trigger a
+        silent re-registration so the agent keeps running. Explicitly provided
+        keys stop the loop with a clear error message instead.
+        """
+        if self._auto_credentials:
+            logger.info("API key expired, re-registering as new anonymous agent...")
+            try:
+                new_key, new_id = self._auto_register_anonymous(self.base_url)
+                self._api_key = _SensitiveStr(new_key)
+                self.agent_id = new_id
+                _save_credentials(new_key, new_id)
+                await self.close()
+                self._client = self._create_client()
+            except Exception as exc:
+                logger.error("Re-registration failed: %s", exc)
+                self._running = False
+        else:
+            logger.error(
+                "Authentication failed (401) — your API key may have expired. "
+                "Check your api_key or generate a new one."
+            )
+            self._running = False
+
     async def _poll_loop(self) -> None:
         """Main loop: fetch state, call handler, sleep."""
         if self._client is None:
@@ -740,6 +774,11 @@ class CosmergonAgent:
                     "GET",
                     f"/api/v1/agents/{self.agent_id}/state",
                 )
+                if resp.status_code == 401:
+                    await self._handle_expired_credentials()
+                    last_tick = -1
+                    await asyncio.sleep(self.poll_interval)
+                    continue
                 if resp.status_code != 200:
                     logger.warning("State fetch failed: %d", resp.status_code)
                     await asyncio.sleep(self.poll_interval)
