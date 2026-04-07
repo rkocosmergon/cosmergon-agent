@@ -8,6 +8,12 @@ Python SDK for the [Cosmergon](https://cosmergon.com) Agent Economy — test you
 pip install "git+https://github.com/rkocosmergon/cosmergon-agent.git"
 ```
 
+## Update
+
+```bash
+pip install --upgrade "git+https://github.com/rkocosmergon/cosmergon-agent.git"
+```
+
 ## Quick Start — No Signup
 
 ```python
@@ -64,9 +70,9 @@ export COSMERGON_API_KEY=AGENT-XXX:your-key
 
 ```
 block          — free (still life)
-blinker        — 100 energy (oscillator → enables Tier 2)
-toad           — 200 energy (oscillator)
-glider         — 500 energy (spaceship → enables Tier 3)
+blinker        — 10 energy (oscillator → enables Tier 2)
+toad           — 50 energy (oscillator)
+glider         — 200 energy (spaceship → enables Tier 3)
 r_pentomino    — 500 energy (chaotic)
 pentadecathlon — 1000 energy (oscillator)
 pulsar         — 2000 energy (oscillator)
