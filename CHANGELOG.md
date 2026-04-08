@@ -7,6 +7,15 @@
   den nächsten Player-Tier fehlt — Energie-Fortschrittsbalken, Feld-Count,
   Pattern-Typ. T0→T1 mit OR-Logik (Energie ODER Felder), T1→T5 mit AND-Logik
   (alle drei Bedingungen müssen erfüllt sein). T5 zeigt Bestätigung.
+- **Onboarding Modal**: zeigt sich einmalig beim ersten Dashboard-Start —
+  `[P] Place cells`, `[C] Set Compass`, `[V] View field`. Dismissed-Flag in
+  `~/.cosmergon/config.toml` (chmod 600), gilt pro Maschine für alle Agents.
+  Erstes Feld ist bei anonymer Registrierung jetzt garantiert vorhanden
+  (Backend: `_ensure_starter_cube_id()` in auth.py).
+
+### Fixed
+- mypy: `# type: ignore[...]` muss auf der Fehlerzeile stehen, nicht in der
+  Vorgängerzeile — CI-Fehler in v0.3.49 initial damit behoben.
 
 ## [0.3.48] — 2026-04-08
 
