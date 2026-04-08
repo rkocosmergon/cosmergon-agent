@@ -689,8 +689,7 @@ class CosmergonDashboard(App):
     }
     """
 
-    # type: ignore[assignment] — textual base uses wider union type
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
         # priority=True: fire before focused widget — needed for Textual 8.x where
         # App-level bindings don't fire reliably without it. Safe for all our keys
         # because the ChatScreen modal blocks App bindings via ModalScreen isolation.
@@ -713,8 +712,7 @@ class CosmergonDashboard(App):
         super().__init__()
         self.agent = agent
         self._theme = theme
-        # type: ignore[assignment] — shadows App._log method intentionally
-        self._log: list[str] = []
+        self._log: list[str] = []  # type: ignore[assignment]
         self._paused = False
         self._compass_preset = "autonomous"
         self._compass_ever_set = False
@@ -1673,8 +1671,7 @@ class FieldScreen(ModalScreen):
     """
 
     # Override app-level 'r' priority binding so FieldScreen handles refresh itself.
-    # type: ignore[assignment] — textual base uses wider union type
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
         Binding("r", "refresh_field", show=False, priority=True),
     ]
 
