@@ -82,7 +82,7 @@ class CosmergonWebhook:
                 f"{CosmergonWebhook.TIMESTAMP_TOLERANCE_SECONDS}s)"
             )
 
-        # Identical to backend webhook_dispatcher.py:_build_signature
+        # Identical to backend signature implementation
         signed_payload = f"{timestamp_header}.".encode() + payload
         expected = "sha256=" + hmac.new(
             secret.encode(), signed_payload, sha256

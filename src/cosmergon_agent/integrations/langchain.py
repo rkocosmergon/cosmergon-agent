@@ -77,7 +77,8 @@ def _make_act_tool(tool_decorator: object, client: httpx.Client, agent_id: str) 
                 transfer_energy, market_list, market_buy, etc.
             params: JSON string of action parameters.
         """
-        body = {"action": action, **json.loads(params)}
+        parsed = {k: v for k, v in json.loads(params).items() if k != "action"}
+        body = {"action": action, **parsed}
         resp = client.post(
             f"/api/v1/agents/{agent_id}/action",
             json=body,

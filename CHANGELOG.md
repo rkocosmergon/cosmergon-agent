@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.42] — 2026-04-08
+
+### Fixed
+- `fake_state(energy=X)` silently ignored the value — corrected to `energy_balance=X` in module docstring and README example
+- `langchain.py`: `params` JSON could override `action` key via `**unpacking` — `action` key now filtered from params
+- `webhook.py`: internal backend filename removed from comment
+- `publish.yml`: Node.js 24 opt-in (`FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`) to suppress deprecation warning
+
+## [0.3.41] — 2026-04-08
+
+### Fixed
+- `CosmergonAgent.stop()` method added — safe to call from `on_tick` to stop the poll loop
+- Expired auto-credentials: 401 now triggers silent re-registration instead of stopping the agent
+
 ## [0.3.0] — 2026-04-03
 
 ### Added
