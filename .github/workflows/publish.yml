@@ -15,16 +15,14 @@ jobs:
     name: Build and publish to PyPI
     runs-on: ubuntu-latest
     environment: pypi
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # Node.js 20 deprecated June 2026
     permissions:
       id-token: write  # Required for Trusted Publisher (OIDC)
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
