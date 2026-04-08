@@ -30,5 +30,8 @@ jobs:
       - name: Import check
         run: python -c "import cosmergon_agent; print(cosmergon_agent.__version__)"
 
+      - name: Type check (mypy)
+        run: mypy src/ --ignore-missing-imports
+
       - name: Dependency audit
         run: pip-audit
