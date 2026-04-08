@@ -48,6 +48,7 @@ except ImportError as _exc:
     ) from _exc
 
 from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError, __version__
+from cosmergon_agent.agent import _is_onboarding_dismissed, _set_onboarding_dismissed
 from cosmergon_agent.exceptions import ConnectionError as CsgConnectionError
 from cosmergon_agent.exceptions import RateLimitError
 from cosmergon_agent.state import Field, GameState
@@ -669,6 +670,8 @@ class CosmergonDashboard(App):
                 if not self._identity_prompted and _is_auto_name(state.agent_name):
                     self._identity_prompted = True
                     self._show_identity_setup()
+                elif not state.fields and not _is_onboarding_dismissed():
+                    self._show_onboarding_modal()
                 return
             delta = state.energy - self._last_energy
             self._last_energy = state.energy
@@ -709,6 +712,12 @@ class CosmergonDashboard(App):
         )
         if result:
             self._add_log(_c(self._theme.pos, f"✓ Identity set: {result['agent_name']}"))
+
+    @work
+    async def _show_onboarding_modal(self) -> None:
+        """Open the OnboardingModal and persist dismissal when the user closes it."""
+        await self.push_screen_wait(OnboardingModal(self._theme))
+        _set_onboarding_dismissed()
 
     def _add_log(self, msg: str) -> None:
         self._log.append(msg)
@@ -1916,6 +1925,71 @@ class IdentitySetupScreen(ModalScreen):
 
     def _set_status(self, msg: str) -> None:
         self.query_one("#error-label", Label).update(_c("dim", msg))
+
+
+# ---------------------------------------------------------------------------
+# OnboardingModal — shown once when agent has no fields (fields=0, not dismissed)
+# ---------------------------------------------------------------------------
+
+
+class OnboardingModal(ModalScreen):
+    """One-time hint modal shown on the first tick when the agent has no game fields.
+
+    Dismissed by pressing Enter, Space, or Escape — never shown again on this machine.
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
+        Binding("enter", "dismiss_modal", "Got it", show=False),
+        Binding("space", "dismiss_modal", "Got it", show=False),
+        Binding("escape", "dismiss_modal", "Got it", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    OnboardingModal {
+        align: center middle;
+    }
+    OnboardingModal > #onboard-wrap {
+        width: 54;
+        height: auto;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    OnboardingModal > #onboard-wrap > #onboard-title {
+        height: 1;
+        margin-bottom: 1;
+        text-style: bold;
+    }
+    OnboardingModal > #onboard-wrap > #onboard-body {
+        height: auto;
+        margin-bottom: 1;
+    }
+    OnboardingModal > #onboard-wrap > #onboard-footer {
+        height: 1;
+        content-align: center middle;
+    }
+    """
+
+    def __init__(self, theme: Theme) -> None:
+        super().__init__()
+        self._theme = theme
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="onboard-wrap"):
+            yield Label(
+                _c(self._theme.guide, "Your agent is alive — but needs a game field."),
+                id="onboard-title",
+            )
+            yield Label(
+                f"  {_c(self._theme.guide, '[F]')}  Create a field  — pick a cube to move into\n"
+                f"  {_c(self._theme.guide, '[P]')}  Place cells     — Glider, Blinker, ...\n"
+                f"  {_c(self._theme.guide, '[C]')}  Set compass     — give your agent a direction",
+                id="onboard-body",
+            )
+            yield Label(_c("dim", "[ Got it ]"), id="onboard-footer")
+
+    def action_dismiss_modal(self) -> None:
+        self.dismiss()
 
 
 # Entry point

@@ -76,6 +76,44 @@ def _save_credentials(api_key: str, agent_id: str | None) -> None:
         pass  # non-fatal — agent still works without persistence
 
 
+def _is_onboarding_dismissed() -> bool:
+    """Return True if the onboarding modal has been dismissed on this machine."""
+    if not _CONFIG_PATH.exists():
+        return False
+    try:
+        for line in _CONFIG_PATH.read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("onboarding_modal_dismissed"):
+                return line.split("=", 1)[1].strip().lower() == "true"
+    except Exception:
+        pass
+    return False
+
+
+def _set_onboarding_dismissed() -> None:
+    """Persist onboarding_modal_dismissed = true to ~/.cosmergon/config.toml.
+
+    Adds the key if absent, updates it if present — never clobbers other keys.
+    """
+    try:
+        _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        existing = _CONFIG_PATH.read_text(encoding="utf-8") if _CONFIG_PATH.exists() else ""
+        key = "onboarding_modal_dismissed"
+        lines = existing.splitlines()
+        updated, new_lines = False, []
+        for line in lines:
+            if line.strip().startswith(key):
+                new_lines.append(f"{key} = true")
+                updated = True
+            else:
+                new_lines.append(line)
+        if not updated:
+            new_lines.append(f"{key} = true")
+        _CONFIG_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        _CONFIG_PATH.chmod(0o600)
+    except Exception:
+        pass  # non-fatal
+
+
 class _SensitiveStr(str):
     """String that masks its value in repr/str to prevent accidental logging."""
 
