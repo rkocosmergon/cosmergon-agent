@@ -670,7 +670,7 @@ class CosmergonDashboard(App):
                 if not self._identity_prompted and _is_auto_name(state.agent_name):
                     self._identity_prompted = True
                     self._show_identity_setup()
-                elif not state.fields and not _is_onboarding_dismissed():
+                elif not _is_onboarding_dismissed():
                     self._show_onboarding_modal()
                 return
             delta = state.energy - self._last_energy
@@ -1977,13 +1977,13 @@ class OnboardingModal(ModalScreen):
     def compose(self) -> ComposeResult:
         with Vertical(id="onboard-wrap"):
             yield Label(
-                _c(self._theme.guide, "Your agent is alive — but needs a game field."),
+                _c(self._theme.guide, "Welcome to Cosmergon."),
                 id="onboard-title",
             )
             yield Label(
-                f"  {_c(self._theme.guide, '[F]')}  Create a field  — pick a cube to move into\n"
-                f"  {_c(self._theme.guide, '[P]')}  Place cells     — Glider, Blinker, ...\n"
-                f"  {_c(self._theme.guide, '[C]')}  Set compass     — give your agent a direction",
+                f"  {_c(self._theme.guide, '[P]')}  Place cells  — drop a Glider into your field\n"
+                f"  {_c(self._theme.guide, '[C]')}  Set compass  — give your agent a direction\n"
+                f"  {_c(self._theme.guide, '[V]')}  View field   — watch cells evolve live",
                 id="onboard-body",
             )
             yield Label(_c("dim", "[ Got it ]"), id="onboard-footer")
