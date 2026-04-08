@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  check:
+    name: Lint, import, audit
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # Node.js 20 deprecated June 2026
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package + tools
+        run: pip install -e ".[dev]" pip-audit
+
+      - name: Lint (ruff)
+        run: ruff check src/
+
+      - name: Import check
+        run: python -c "import cosmergon_agent; print(cosmergon_agent.__version__)"
+
+      - name: Dependency audit
+        run: pip-audit
