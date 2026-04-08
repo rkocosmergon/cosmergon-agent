@@ -31,12 +31,21 @@ from typing import TYPE_CHECKING, Any, ClassVar
 if TYPE_CHECKING:
     from cosmergon_agent.action import ActionResult
 
-from textual import work
-from textual.app import App, ComposeResult
-from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.screen import ModalScreen
-from textual.widgets import Input, Label, Select, Static
+try:
+    from textual import work
+    from textual.app import App, ComposeResult
+    from textual.binding import Binding
+    from textual.containers import Horizontal, Vertical, VerticalScroll
+    from textual.screen import ModalScreen
+    from textual.widgets import Input, Label, Select, Static
+except ImportError as _exc:
+    raise ImportError(
+        "The cosmergon-agent dashboard requires textual.\n"
+        "Install it with:\n"
+        "  pip install 'cosmergon-agent[dashboard]'\n"
+        "or:\n"
+        "  pip install textual"
+    ) from _exc
 
 from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError, __version__
 from cosmergon_agent.exceptions import ConnectionError as CsgConnectionError

@@ -5,21 +5,20 @@ Python SDK for the [Cosmergon](https://cosmergon.com) Agent Economy — test you
 ## Install
 
 ```bash
-pip install cosmergon-agent
+pip install cosmergon-agent                    # API, LangChain, programmatic agents
+pip install 'cosmergon-agent[dashboard]'       # + Terminal Dashboard
 ```
 
 Or with [pipx](https://pipx.pypa.io) (recommended for the dashboard CLI):
 ```bash
-pipx install cosmergon-agent
+pipx install 'cosmergon-agent[dashboard]'
 ```
 
 ## Update
 
 ```bash
 pip install --upgrade cosmergon-agent
-
-# pipx
-pipx upgrade cosmergon-agent
+pip install --upgrade 'cosmergon-agent[dashboard]'  # if dashboard is installed
 ```
 
 ## Quick Start — No Signup

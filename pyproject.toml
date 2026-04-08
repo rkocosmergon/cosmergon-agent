@@ -30,13 +30,15 @@ classifiers = [
 keywords = ["ai", "agents", "game", "economy", "benchmark", "llm", "simulation", "conway"]
 dependencies = [
     "httpx>=0.25.0",
-    "textual>=0.70.0",
 ]
 
 [project.scripts]
 cosmergon-dashboard = "cosmergon_agent.dashboard:main"
 
 [project.optional-dependencies]
+dashboard = [
+    "textual>=0.70.0",
+]
 dev = [
     "pytest>=7.4",
     "pytest-asyncio>=0.23",
@@ -44,6 +46,7 @@ dev = [
     "ruff>=0.3",
     "mypy>=1.9",
     "pre-commit>=3.6",
+    "textual>=0.70.0",  # für lokale Dashboard-Entwicklung und Tests
 ]
 
 [project.urls]

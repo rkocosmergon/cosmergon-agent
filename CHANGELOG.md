@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.44] — 2026-04-08
+
+### Changed
+- `textual` is now an optional dependency — install via `pip install 'cosmergon-agent[dashboard]'`
+  API-only users (`CosmergonAgent`, LangChain, programmatic agents) no longer pull in
+  textual and its transitive dependencies (rich, markdown-it-py, pygments, etc.).
+  Existing installs are not affected — textual stays installed on upgrade.
+  Running `cosmergon-dashboard` without textual shows a clear install instruction.
+
 ## [0.3.43] — 2026-04-09
 
 ### Fixed
