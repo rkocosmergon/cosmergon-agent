@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.46] — 2026-04-08
+
+### Fixed
+- mypy: 43 pre-existing type errors behoben — TYPE_CHECKING-Stub für
+  `CosmergonAgent` in `__init__.py`, `no-any-return` suppressed,
+  `_fatal_error` → `_auth_error` (shadowte textual `App._fatal_error` Methode)
+- ruff: E501-Zeilenumbrüche nach `5 cells`-Label-Änderung
+
+### Changed
+- CI: mypy zum Workflow hinzugefügt (ruff + mypy + import-check + pip-audit)
+
 ## [0.3.45] — 2026-04-08
 
 ### Fixed
