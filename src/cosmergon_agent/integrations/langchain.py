@@ -42,7 +42,7 @@ def _resolve_agent_id(client: httpx.Client) -> str:
     """Resolve agent_id from API key."""
     resp = client.get("/api/v1/agents/")
     if resp.status_code == 200 and resp.json():
-        return resp.json()[0]["id"]
+        return resp.json()[0]["id"]  # type: ignore[no-any-return]
     raise AuthenticationError("Could not resolve agent_id from API key")
 
 

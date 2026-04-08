@@ -1,6 +1,15 @@
 """Cosmergon Agent SDK — Python client for the Cosmergon Agent Economy."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 __version__ = "0.3.45"
+
+if TYPE_CHECKING:
+    # CosmergonAgent is lazy-loaded at runtime via __getattr__ to avoid
+    # circular imports, but mypy needs the real class for type checking.
+    from cosmergon_agent.agent import CosmergonAgent as CosmergonAgent
 
 from cosmergon_agent.action import ActionResult
 from cosmergon_agent.exceptions import (

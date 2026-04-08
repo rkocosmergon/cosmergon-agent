@@ -269,7 +269,7 @@ class CosmergonAgent:
         )
         if resp.status_code >= 400:
             return {"error": resp.text}
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def patch_identity(
         self,
@@ -294,7 +294,7 @@ class CosmergonAgent:
         resp = await self._request("PATCH", "/api/v1/players/me", json=payload)
         if resp.status_code >= 400:
             return {"error": resp.text, "status_code": resp.status_code}
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def get_events(self, limit: int = 20) -> list[dict]:
         """Fetch recent game events for this agent (actions, compass changes, etc.).
@@ -308,7 +308,7 @@ class CosmergonAgent:
                 params={"agent_id": str(self.agent_id), "limit": min(limit, 100)},
             )
             if resp.status_code == 200:
-                return resp.json().get("events", [])
+                return resp.json().get("events", [])  # type: ignore[no-any-return]
         except Exception:
             pass
         return []
@@ -345,7 +345,7 @@ class CosmergonAgent:
                 params={"limit": min(limit, 100)},
             )
             if resp.status_code == 200:
-                return resp.json()
+                return resp.json()  # type: ignore[no-any-return]
         except Exception:
             pass
         return []
@@ -367,7 +367,7 @@ class CosmergonAgent:
         )
         if resp.status_code >= 400:
             return {"error": resp.text}
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def get_field_cells(self, field_id: str) -> dict[str, int]:
         """Fetch the live cell data for a game field.
@@ -385,7 +385,7 @@ class CosmergonAgent:
                 f"/api/v1/game_fields/{field_id}/cells",
             )
             if resp.status_code == 200:
-                return (resp.json() or {}).get("cells", {})
+                return (resp.json() or {}).get("cells", {})  # type: ignore[no-any-return]
         except Exception:
             pass
         return {}
@@ -431,7 +431,7 @@ class CosmergonAgent:
         agent = self  # closure for the handler class below
 
         class _WebhookHandler(BaseHTTPRequestHandler):
-            def do_POST(self) -> None:
+            def do_POST(self) -> None:  # noqa: N802 — required by BaseHTTPRequestHandler interface
                 if self.path != path:
                     self.send_response(404)
                     self.end_headers()

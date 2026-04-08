@@ -96,7 +96,7 @@ class FakeTransport(httpx.AsyncBaseTransport):
         status_code: int = 200,
     ) -> None:
         """Register a mock response for a method + path combination."""
-        self._responses[(method.upper(), path)] = (status_code, json or {})
+        self._responses[(method.upper(), path)] = (status_code, json or {})  # type: ignore[assignment]
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         """Return mock response or 404."""

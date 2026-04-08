@@ -592,7 +592,7 @@ class CosmergonDashboard(App):
     }
     """
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]  # textual base uses wider union type
         # priority=True: fire before focused widget — needed for Textual 8.x where
         # App-level bindings don't fire reliably without it. Safe for all our keys
         # because the ChatScreen modal blocks App bindings via ModalScreen isolation.
@@ -615,7 +615,7 @@ class CosmergonDashboard(App):
         super().__init__()
         self.agent = agent
         self._theme = theme
-        self._log: list[str] = []
+        self._log: list[str] = []  # type: ignore[assignment]  # shadows App._log method intentionally
         self._paused = False
         self._compass_preset = "autonomous"
         self._compass_ever_set = False
@@ -626,7 +626,7 @@ class CosmergonDashboard(App):
         self._tick_interval: float = 60.0  # self-calibrating from observed tick gaps
         self._last_tick: int = -1
         self._panel_cache: dict[str, str] = {}  # widget-id → last rendered content
-        self._fatal_error: str = ""  # set on AuthenticationError — shown in hint-bar
+        self._auth_error: str = ""  # set on AuthenticationError — shown in hint-bar
         self._pending_action: _PendingAction | None = None  # queued on 429, fires next tick
         self._messages: list[dict] = []  # chat conversation cache (refreshed each tick)
         self._focus: str | None = None   # None | "agent" | "fields" | "log"
@@ -693,8 +693,8 @@ class CosmergonDashboard(App):
         try:
             await self.agent.start()
         except AuthenticationError as exc:
-            self._fatal_error = f"✗ Auth failed: {exc}"
-            self._add_log(_c(self._theme.warn, self._fatal_error))
+            self._auth_error = f"✗ Auth failed: {exc}"
+            self._add_log(_c(self._theme.warn, self._auth_error))
         except Exception as exc:
             self._add_log(_c(self._theme.warn, f"Agent error: {exc}"))
 
@@ -1023,8 +1023,8 @@ class CosmergonDashboard(App):
         t = self._theme
 
         # 0. Fatal error (e.g. auth failure) — shown permanently until restart
-        if self._fatal_error and not state:
-            return _c(t.warn, self._fatal_error)
+        if self._auth_error and not state:
+            return _c(t.warn, self._auth_error)
 
         # 1. Active feedback — show confirmation + countdown so user knows *when* it fires.
         if self._feedback and time.monotonic() < self._feedback_until:
@@ -1561,7 +1561,7 @@ class FieldScreen(ModalScreen):
     """
 
     # Override app-level 'r' priority binding so FieldScreen handles refresh itself.
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]  # textual base uses wider union type
         Binding("r", "refresh_field", show=False, priority=True),
     ]
 

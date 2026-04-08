@@ -122,6 +122,6 @@ class CosmergonWebhook:
             raise WebhookSignatureError("Webhook signature mismatch")
 
         try:
-            return json.loads(payload)
+            return json.loads(payload)  # type: ignore[no-any-return]
         except json.JSONDecodeError as exc:
             raise ValueError(f"Webhook payload is not valid JSON: {exc}") from exc
