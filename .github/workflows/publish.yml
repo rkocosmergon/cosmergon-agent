@@ -1,9 +1,11 @@
 name: Publish to PyPI
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:  # Manual trigger only — PyPI release gate: Beta + first paying customer
+    inputs:
+      version:
+        description: "Version to publish (e.g. 1.0.0)"
+        required: true
 
 jobs:
   build-and-publish:
