@@ -1949,7 +1949,7 @@ class OnboardingModal(ModalScreen):
         align: center middle;
     }
     OnboardingModal > #onboard-wrap {
-        width: 54;
+        width: 62;
         height: auto;
         border: solid $accent;
         background: $surface;
@@ -1981,12 +1981,12 @@ class OnboardingModal(ModalScreen):
                 id="onboard-title",
             )
             yield Label(
-                f"  {_c(self._theme.guide, '[P]')}  Place cells  — drop a Glider into your field\n"
-                f"  {_c(self._theme.guide, '[C]')}  Set compass  — give your agent a direction\n"
-                f"  {_c(self._theme.guide, '[V]')}  View field   — watch cells evolve live",
+                f"  {_c(self._theme.guide, _hk('P'))}  Place cells  — start with a Glider or Blinker\n"  # noqa: E501
+                f"  {_c(self._theme.guide, _hk('C'))}  Set compass  — give your agent a direction\n"
+                f"  {_c(self._theme.guide, _hk('V'))}  View field   — watch cells evolve live",
                 id="onboard-body",
             )
-            yield Label(_c("dim", "[ Got it ]"), id="onboard-footer")
+            yield Label(_c("dim", "\\[ Got it ]"), id="onboard-footer")
 
     def action_dismiss_modal(self) -> None:
         self.dismiss()
