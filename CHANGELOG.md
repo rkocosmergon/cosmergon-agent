@@ -25,6 +25,32 @@
 - `CosmergonAgent.stop()` method added — safe to call from `on_tick` to stop the poll loop
 - Expired auto-credentials: 401 now triggers silent re-registration instead of stopping the agent
 
+## [0.3.40] — 2026-04-07
+
+### Fixed
+- Dashboard game-feel improvements: LOG panel brightness, status bar spacing,
+  narrow-layout cell-bar wrap, overflow hint `(+N more) [V]`
+- `webbrowser.open` mocked in tests — no real browser spawned during test runs
+
+## [0.3.39] — 2026-04-07
+
+### Added
+- Dashboard `[U]` smart upgrade routing — opens correct Stripe checkout per current tier
+- UI/UX: narrow-layout wrap fix, overflow hint, onboarding highlight improvements
+
+## [0.3.37] — 2026-04-06
+
+### Added
+- `CosmergonAgent.patch_identity()` — update agent name and persona
+- `GameState.persona_type` — active persona reflected in state
+- Dashboard `IdentitySetupScreen` — guided name/persona setup on first run
+
+## [0.3.36] — 2026-04-06
+
+### Added
+- `FieldScreen` — Conway field visualiser (`v` key in dashboard): live cell grid, zoom, pan
+- `CosmergonAgent.get_field_cells(field_id)` — fetch sparse cell dict for a field
+
 ## [0.3.0] — 2026-04-03
 
 ### Added
