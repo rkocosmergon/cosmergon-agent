@@ -843,11 +843,11 @@ class CosmergonDashboard(App):
                 tier = f"T{f.entity_tier or 0}"
                 etype = (f.entity_type or "novice")[:8]
                 if narrow:
-                    lines.append(_c(t.data, f"  {f.id[:8]} {tier} {etype} {f.active_cell_count}c"))
+                    lines.append(_c(t.data, f"  {f.id[:8]} {tier} {etype} {f.active_cell_count} cells"))
                 else:
                     bar_f = _energy_bar(f.active_cell_count, 200, 6)
                     lines.append(
-                        _c(t.data, f"  {f.id[:8]} {tier} {etype:8s} {bar_f} {f.active_cell_count}c")
+                        _c(t.data, f"  {f.id[:8]} {tier} {etype:8s} {bar_f} {f.active_cell_count} cells")
                     )
             hidden = len(state.fields) - _MAX_FIELDS
             if hidden > 0:
@@ -1176,7 +1176,7 @@ class CosmergonDashboard(App):
             self._add_log(_c(self._theme.warn, "No fields — press \\[F] first"))
             return
         field_labels = [
-            f"{f.id[:8]} T{f.entity_tier or 0} ({f.active_cell_count}c)" for f in state.fields
+            f"{f.id[:8]} T{f.entity_tier or 0} ({f.active_cell_count} cells)" for f in state.fields
         ]
         fi = await self.push_screen_wait(SelectModal("Field", field_labels))
         if fi is None:
@@ -1567,7 +1567,7 @@ class FieldScreen(ModalScreen):
     _NAV_KEYS: ClassVar[set[str]] = {
         "up", "down", "left", "right",
         "ctrl+up", "ctrl+down", "ctrl+left", "ctrl+right",
-        "home",
+        "home", "h",
     }
 
     def __init__(
@@ -1615,15 +1615,18 @@ class FieldScreen(ModalScreen):
             self._loading = False
             return
         field = self._fields[self._idx]
-        first_load = not self._cells
+        was_empty = not self._cells
         try:
             raw = await self._agent.get_field_cells(field.id)
-            self._cells = _fv_parse_cells(raw)
-            if first_load:
-                cx, cy = _fv_centroid(self._cells, self._field_w, self._field_h)
+            new_cells = _fv_parse_cells(raw)
+            # Centre viewport when transitioning from empty → cells (catches the case where
+            # cells were placed after the view was opened and the first fetch returned nothing).
+            if was_empty and new_cells:
+                cx, cy = _fv_centroid(new_cells, self._field_w, self._field_h)
                 vp_w, vp_h = self._viewport_dims()
                 self._vp_x = max(0, cx - vp_w // 2)
                 self._vp_y = max(0, cy - vp_h // 2)
+            self._cells = new_cells
         except Exception:
             self._cells = set()
         self._loading = False
@@ -1659,11 +1662,11 @@ class FieldScreen(ModalScreen):
             tier = f"T{field.entity_tier or 0}"
             etype = (field.entity_type or "novice")
             idx_label = f"[{self._idx + 1}/{n}]"
-            zoom_label = "Zoom 2 — full field" if self._zoom == 2 else "Zoom 1 — viewport"
+            zoom_label = "Zoom 2 — full field" if self._zoom == 2 else "Zoom 1 — scrollable"
             h1 = _c(t.struct, "[bold]═ FIELD VIEW[/bold]") + f"  {_c('dim', idx_label)}"
             h2 = _c(
                 "dim",
-                f"  {field.id[:8]} · {tier} {etype} · {field.active_cell_count}c · {zoom_label}",
+                f"  {field.id[:8]} · {tier} {etype} · {field.active_cell_count} cells · {zoom_label}",
             )
             self.query_one("#fv-header", Static).update(f"{h1}\n{h2}")
 
@@ -1717,7 +1720,7 @@ class FieldScreen(ModalScreen):
             )
         else:
             footer_widget.update(
-                _c("dim", "↑↓←→ scroll  C+arr x8  Home  Z zoom  \\[[ \\]] field  Esc")
+                _c("dim", "↑↓←→ scroll · Ctrl+↑↓ fast · H center · Z zoom · [ ] field · R refresh · Esc")
             )
 
     def on_key(self, event: Any) -> None:
@@ -1765,7 +1768,7 @@ class FieldScreen(ModalScreen):
             self._vp_x = max(0, self._vp_x - step)
         elif "right" in key:
             self._vp_x = min(max_x, self._vp_x + step)
-        elif key == "home":
+        elif key in ("home", "h"):
             cx, cy = _fv_centroid(self._cells, self._field_w, self._field_h)
             self._vp_x = max(0, min(max_x, cx - vp_w // 2))
             self._vp_y = max(0, min(max_y, cy - vp_h // 2))

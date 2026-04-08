@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.45] — 2026-04-08
+
+### Fixed
+- **FieldScreen auto-center**: viewport now centres on cells when transitioning
+  from empty → populated (previously missed the case where cells were placed after
+  opening the view and the first fetch returned nothing — next tick would have
+  corrected it, but that's up to 60s delay)
+
+### Changed
+- **FieldScreen footer**: hints rewritten — `↑↓←→ scroll · Ctrl+↑↓ fast · H center · Z zoom · [ ] field · R refresh · Esc`
+- **`H` key**: alias for `Home` (centre viewport on cells)
+- **Zoom label**: `Zoom 1 — viewport` → `Zoom 1 — scrollable`
+- **Cell count**: `5c` → `5 cells` throughout FieldScreen (header, field list, place-cells dialog)
+
 ## [0.3.44] — 2026-04-08
 
 ### Changed
