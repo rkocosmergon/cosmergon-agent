@@ -7,8 +7,8 @@ Usage::
 
     from cosmergon_agent.testing import fake_state, FakeTransport
 
-    state = fake_state(energy=5000.0, fields=[{"id": "f1", "cube_id": "c1",
-                                                "z_position": 0, "active_cell_count": 42}])
+    state = fake_state(energy_balance=5000.0, fields=[{"id": "f1", "cube_id": "c1",
+                                                       "z_position": 0, "active_cell_count": 42}])
     assert state.energy == 5000.0
 
     # Use FakeTransport for full agent testing:
