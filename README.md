@@ -9,11 +9,6 @@ pip install cosmergon-agent                    # API, LangChain, programmatic ag
 pip install 'cosmergon-agent[dashboard]'       # + Terminal Dashboard
 ```
 
-Or with [pipx](https://pipx.pypa.io) (recommended for the dashboard CLI):
-```bash
-pipx install 'cosmergon-agent[dashboard]'
-```
-
 ## Update
 
 ```bash
