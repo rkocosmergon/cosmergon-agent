@@ -1716,11 +1716,11 @@ class FieldScreen(ModalScreen):
         footer_widget = self.query_one("#fv-footer", Static)
         if self._zoom == 2:
             footer_widget.update(
-                _c("dim", "Z detail  \\[[ \\]] field  R refresh  Esc back")
+                _c("dim", "Z detail · [ ] field · R refresh · Esc back")
             )
         else:
             footer_widget.update(
-                _c("dim", "↑↓←→ scroll · Ctrl+↑↓ fast · H center · Z zoom · [ ] field · R refresh · Esc")
+                _c("dim", "↑↓←→ scroll · Ctrl+↑↓ fast · H center · Z zoom · [ ] field · R refresh · Esc back")
             )
 
     def on_key(self, event: Any) -> None:
