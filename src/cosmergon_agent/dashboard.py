@@ -179,6 +179,102 @@ def _cost_str(cost: float) -> str:
     return f" (-{cost:,.0f} E)" if cost > 0 else ""
 
 
+# ---------------------------------------------------------------------------
+# Tier progress — next player tier requirements
+# ---------------------------------------------------------------------------
+
+# Mirrors backend config.py (TIER_N_ENERGY, TIER_N_FIELDS, TIER_N_ENTITY_TIER)
+# and entity_tiers.py. Update here when backend constants change.
+_PLAYER_TIER_REQS: dict[int, dict[str, Any]] = {
+    1: {"energy": 10_000.0, "fields_alt": 3},        # T0→T1: energy OR 3 fields
+    2: {"energy": 100_000.0, "fields": 5, "entity_tier": 2},
+    3: {"energy": 1_000_000.0, "fields": 10, "entity_tier": 3},
+    4: {"energy": 5_000_000.0, "fields": 20, "entity_tier": 4},
+    5: {"energy": 20_000_000.0, "fields": 50, "entity_tier": 5},
+}
+
+_ENTITY_TIER_NAMES: dict[int, str] = {
+    0: "novice", 1: "still life", 2: "oscillator",
+    3: "spaceship", 4: "gun", 5: "breeder",
+}
+
+
+def _fmt_e(val: float) -> str:
+    """Compact energy label for tier requirements: 1500→1.5k, 100000→100k, 1.5M."""
+    if val >= 1_000_000:
+        v = val / 1_000_000
+        return f"{v:g}M"
+    if val >= 1_000:
+        v = val / 1_000
+        return f"{v:g}k"
+    return f"{val:g}"
+
+
+def _tier_or_lines(energy: float, n_fields: int, reqs: dict[str, Any], t: Theme) -> list[str]:
+    """Condition rows for T0→T1: energy OR fields (either suffices)."""
+    e_req: float = reqs["energy"]
+    f_req: int = reqs["fields_alt"]
+    e_ok = energy >= e_req
+    f_ok = n_fields >= f_req
+    e_icon = _c(t.pos, "✓") if e_ok else _c(t.warn, "✗")
+    f_icon = _c(t.pos, "✓") if f_ok else _c(t.warn, "✗")
+    e_bar = _energy_bar(energy, e_req, 6)
+    f_bar = _energy_bar(float(n_fields), float(f_req), 6)
+    return [
+        _c(t.data, f"  E {e_bar} {_fmt_e(energy)}/{_fmt_e(e_req)} {e_icon}  (OR)"),
+        _c(t.data, f"  F {f_bar} {n_fields}/{f_req} fields {f_icon}"),
+    ]
+
+
+def _tier_and_lines(
+    energy: float, n_fields: int, best_entity: int, reqs: dict[str, Any], t: Theme
+) -> list[str]:
+    """Condition rows for T1→T5: energy AND fields AND pattern (all required)."""
+    e_req: float = reqs["energy"]
+    f_req: int = reqs["fields"]
+    p_req: int = reqs["entity_tier"]
+    e_ok = energy >= e_req
+    f_ok = n_fields >= f_req
+    p_ok = best_entity >= p_req
+    e_icon = _c(t.pos, "✓") if e_ok else _c(t.warn, "✗")
+    f_icon = _c(t.pos, "✓") if f_ok else _c(t.warn, "✗")
+    p_icon = _c(t.pos, "✓") if p_ok else _c(t.warn, "✗")
+    cur_p = _ENTITY_TIER_NAMES.get(best_entity, "novice")
+    req_p = _ENTITY_TIER_NAMES.get(p_req, "")
+    e_bar = _energy_bar(energy, e_req, 6)
+    f_bar = _energy_bar(float(n_fields), float(f_req), 6)
+    return [
+        _c(t.data, f"  E {e_bar} {_fmt_e(energy)}/{_fmt_e(e_req)} {e_icon}"),
+        _c(t.data, f"  F {f_bar} {n_fields}/{f_req} {f_icon}"),
+        _c(t.data, f"  P {cur_p} → {req_p} {p_icon}"),
+    ]
+
+
+def _tier_progress_lines(state: GameState, t: Theme) -> list[str]:
+    """Rich-formatted next-tier progress block for the economy panel.
+
+    T5 already reached → single confirmation line.
+    """
+    current = state.ranking.player_tier
+    next_t = current + 1
+    if next_t > 5:
+        return [_c(t.pos, "✓ Max tier (T5 Breeder)")]
+
+    reqs = _PLAYER_TIER_REQS[next_t]
+    tier_label = _ENTITY_TIER_NAMES.get(next_t, "").title()
+    header = _c(t.struct, f"─ NEXT T{next_t} {tier_label}")
+
+    n_fields = len(state.fields)
+    best_entity = max((f.entity_tier or 0 for f in state.fields), default=0)
+
+    if next_t == 1:
+        cond_lines = _tier_or_lines(state.energy, n_fields, reqs, t)
+    else:
+        cond_lines = _tier_and_lines(state.energy, n_fields, best_entity, reqs, t)
+
+    return [header, *cond_lines]
+
+
 @dataclass
 class _PendingAction:
     """Action queued because the tick limit (429) was hit.
@@ -593,7 +689,8 @@ class CosmergonDashboard(App):
     }
     """
 
-    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]  # textual base uses wider union type
+    # type: ignore[assignment] — textual base uses wider union type
+    BINDINGS: ClassVar[list[Binding]] = [
         # priority=True: fire before focused widget — needed for Textual 8.x where
         # App-level bindings don't fire reliably without it. Safe for all our keys
         # because the ChatScreen modal blocks App bindings via ModalScreen isolation.
@@ -616,7 +713,8 @@ class CosmergonDashboard(App):
         super().__init__()
         self.agent = agent
         self._theme = theme
-        self._log: list[str] = []  # type: ignore[assignment]  # shadows App._log method intentionally
+        # type: ignore[assignment] — shadows App._log method intentionally
+        self._log: list[str] = []
         self._paused = False
         self._compass_preset = "autonomous"
         self._compass_ever_set = False
@@ -889,6 +987,11 @@ class CosmergonDashboard(App):
                 elapsed = time.monotonic() - self._tick_received_at
                 remaining = int(max(0, self._tick_interval - elapsed))
                 lines.append(_c("dim", f"Next:   ~{remaining}s"))
+
+        # Tier progress — always visible when state is available
+        if state:
+            lines.append("")
+            lines.extend(_tier_progress_lines(state, t))
 
         self._update_panel("economy-panel", "\n".join(lines))
 
@@ -1570,7 +1673,8 @@ class FieldScreen(ModalScreen):
     """
 
     # Override app-level 'r' priority binding so FieldScreen handles refresh itself.
-    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]  # textual base uses wider union type
+    # type: ignore[assignment] — textual base uses wider union type
+    BINDINGS: ClassVar[list[Binding]] = [
         Binding("r", "refresh_field", show=False, priority=True),
     ]
 
@@ -1981,7 +2085,8 @@ class OnboardingModal(ModalScreen):
                 id="onboard-title",
             )
             yield Label(
-                f"  {_c(self._theme.guide, _hk('P'))}  Place cells  — start with a Glider or Blinker\n"  # noqa: E501
+                f"  {_c(self._theme.guide, _hk('P'))}"
+                f"  Place cells  — start with a Glider or Blinker\n"
                 f"  {_c(self._theme.guide, _hk('C'))}  Set compass  — give your agent a direction\n"
                 f"  {_c(self._theme.guide, _hk('V'))}  View field   — watch cells evolve live",
                 id="onboard-body",

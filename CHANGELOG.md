@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.49] — 2026-04-08
+
+### Added
+- **Evolution Requirements Panel**: economy panel zeigt jetzt direkt was für
+  den nächsten Player-Tier fehlt — Energie-Fortschrittsbalken, Feld-Count,
+  Pattern-Typ. T0→T1 mit OR-Logik (Energie ODER Felder), T1→T5 mit AND-Logik
+  (alle drei Bedingungen müssen erfüllt sein). T5 zeigt Bestätigung.
+
 ## [0.3.48] — 2026-04-08
 
 ### Fixed
