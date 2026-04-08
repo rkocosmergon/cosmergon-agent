@@ -1681,8 +1681,10 @@ class FieldScreen(ModalScreen):
         elif self._zoom == 2:
             # Dynamic size: fill available content area, not hardcoded square
             content_h = max(10, min(50, int(self.app.size.height * 0.88) - 4))
-            out_w = min(content_h, max(10, self._content_w - 4))
+            # Terminal chars are ~2x taller than wide — double the width so the
+            # 128x128 field renders as a square instead of a portrait rectangle.
             out_h = content_h
+            out_w = min(max(10, self._content_w - 4), out_h * 2)
             rows = _fv_render_zoom2(
                 self._cells, self._field_w, self._field_h, out_w, out_h,
                 alive_char=f"[{t.pos}]▓[/{t.pos}]",

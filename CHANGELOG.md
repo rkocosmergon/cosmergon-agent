@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.48] — 2026-04-08
+
+### Fixed
+- **Zoom 2 aspect ratio**: field rendered as portrait rectangle instead of
+  square — terminal chars are ~2× taller than wide, so `out_w` is now
+  `min(content_w, out_h * 2)` to compensate and render 128×128 as a square
+
 ## [0.3.47] — 2026-04-08
 
 ### Fixed
