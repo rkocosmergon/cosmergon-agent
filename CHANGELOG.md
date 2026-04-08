@@ -51,6 +51,12 @@
 - `FieldScreen` — Conway field visualiser (`v` key in dashboard): live cell grid, zoom, pan
 - `CosmergonAgent.get_field_cells(field_id)` — fetch sparse cell dict for a field
 
+## [0.3.1–0.3.35] — 2026-03-27 bis 2026-04-06
+
+Pre-PyPI development iterations (not published to PyPI).
+Incremental dashboard improvements, bugfixes, Compass, Chat, Identity Setup,
+FieldScreen, SSE client, Webhook listener, UI/UX panel fixes, test infrastructure.
+
 ## [0.3.0] — 2026-04-03
 
 ### Added
