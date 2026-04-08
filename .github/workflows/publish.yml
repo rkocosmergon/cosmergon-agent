@@ -1,7 +1,10 @@
 name: Publish to PyPI
 
 on:
-  workflow_dispatch:  # Manual trigger only — PyPI release gate: Beta + first paying customer
+  workflow_dispatch:
+    # MANUELL — nie auf push:tags ändern ohne explizite Gründer-Freigabe.
+    # Hintergrund: push:tags v* hat v0.3.40/0.3.41 ohne Go veröffentlicht (08.04.2026).
+    # Der Trusted Publisher auf PyPI ist aktiv — jede Trigger-Änderung publiziert sofort.
     inputs:
       version:
         description: "Version to publish (e.g. 1.0.0)"
