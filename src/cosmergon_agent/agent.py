@@ -431,7 +431,7 @@ class CosmergonAgent:
         agent = self  # closure for the handler class below
 
         class _WebhookHandler(BaseHTTPRequestHandler):
-            def do_POST(self) -> None:  # noqa: N802 — required by BaseHTTPRequestHandler interface
+            def do_POST(self) -> None:
                 if self.path != path:
                     self.send_response(404)
                     self.end_headers()
