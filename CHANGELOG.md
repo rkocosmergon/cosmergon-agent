@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.43] — 2026-04-09
+
+### Fixed
+- `~/.cosmergon/config.toml` permissions set to 0600 on write and on next read
+  (API key was world-readable at 0664 — security fix)
+
+### Changed
+- `README.md`: install command updated from `git+https://...` to `pip install cosmergon-agent`
+- `pyproject.toml`: added classifiers (Console, OS Independent, Typed, AsyncIO),
+  keywords, Bug Tracker and Changelog URLs
+
 ## [0.3.42] — 2026-04-08
 
 ### Fixed

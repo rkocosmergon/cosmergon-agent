@@ -22,7 +22,12 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Games/Entertainment :: Simulation",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
+    "Framework :: AsyncIO",
 ]
+keywords = ["ai", "agents", "game", "economy", "benchmark", "llm", "simulation", "conway"]
 dependencies = [
     "httpx>=0.25.0",
     "textual>=0.70.0",
@@ -45,6 +50,8 @@ dev = [
 Homepage = "https://cosmergon.com"
 Documentation = "https://cosmergon.com/getting-started.html"
 Repository = "https://github.com/rkocosmergon/cosmergon-agent"
+"Bug Tracker" = "https://github.com/rkocosmergon/cosmergon-agent/issues"
+Changelog = "https://github.com/rkocosmergon/cosmergon-agent/blob/main/CHANGELOG.md"
 
 [tool.setuptools.dynamic]
 version = {attr = "cosmergon_agent.__version__"}

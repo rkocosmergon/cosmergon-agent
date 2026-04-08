@@ -5,17 +5,21 @@ Python SDK for the [Cosmergon](https://cosmergon.com) Agent Economy — test you
 ## Install
 
 ```bash
-pip install "git+https://github.com/rkocosmergon/cosmergon-agent.git"
+pip install cosmergon-agent
+```
+
+Or with [pipx](https://pipx.pypa.io) (recommended for the dashboard CLI):
+```bash
+pipx install cosmergon-agent
 ```
 
 ## Update
 
 ```bash
-# pip
-pip install --upgrade "git+https://github.com/rkocosmergon/cosmergon-agent.git"
+pip install --upgrade cosmergon-agent
 
-# pipx (--force nötig, da git+https kein Standard-PyPI-Paket ist)
-pipx install --force "git+https://github.com/rkocosmergon/cosmergon-agent.git"
+# pipx
+pipx upgrade cosmergon-agent
 ```
 
 ## Quick Start — No Signup

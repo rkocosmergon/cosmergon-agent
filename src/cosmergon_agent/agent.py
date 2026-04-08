@@ -48,6 +48,7 @@ def _load_saved_credentials() -> tuple[str, str | None]:
     if not _CONFIG_PATH.exists():
         return "", None
     try:
+        _CONFIG_PATH.chmod(0o600)  # Fix permissions on existing files
         content = _CONFIG_PATH.read_text(encoding="utf-8")
         key, agent_id = "", None
         for line in content.splitlines():
@@ -70,6 +71,7 @@ def _save_credentials(api_key: str, agent_id: str | None) -> None:
             f'[agent]\napi_key = "{api_key}"\n{agent_id_line}',
             encoding="utf-8",
         )
+        _CONFIG_PATH.chmod(0o600)  # API key must not be world-readable
     except Exception:
         pass  # non-fatal — agent still works without persistence
 
