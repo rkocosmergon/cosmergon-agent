@@ -7,8 +7,8 @@ Please report security vulnerabilities by email to **security@cosmergon.de**.
 Do **not** open a public GitHub issue for security vulnerabilities — this exposes
 the vulnerability before a fix is available.
 
-We will acknowledge your report within 48 hours and provide an estimated timeline
-for a fix. Once resolved, we will credit the reporter (if desired) in the release notes.
+We aim to acknowledge your report within a few business days and will provide an
+estimated timeline for a fix. Once resolved, we will credit the reporter (if desired) in the release notes.
 
 ## Scope
 
