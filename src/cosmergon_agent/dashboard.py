@@ -842,12 +842,13 @@ class CosmergonDashboard(App):
             for f in state.fields[:_MAX_FIELDS]:
                 tier = f"T{f.entity_tier or 0}"
                 etype = (f.entity_type or "novice")[:8]
+                ncells = f.active_cell_count
                 if narrow:
-                    lines.append(_c(t.data, f"  {f.id[:8]} {tier} {etype} {f.active_cell_count} cells"))
+                    lines.append(_c(t.data, f"  {f.id[:8]} {tier} {etype} {ncells} cells"))
                 else:
-                    bar_f = _energy_bar(f.active_cell_count, 200, 6)
+                    bar_f = _energy_bar(ncells, 200, 6)
                     lines.append(
-                        _c(t.data, f"  {f.id[:8]} {tier} {etype:8s} {bar_f} {f.active_cell_count} cells")
+                        _c(t.data, f"  {f.id[:8]} {tier} {etype:8s} {bar_f} {ncells} cells")
                     )
             hidden = len(state.fields) - _MAX_FIELDS
             if hidden > 0:
@@ -1666,7 +1667,8 @@ class FieldScreen(ModalScreen):
             h1 = _c(t.struct, "[bold]═ FIELD VIEW[/bold]") + f"  {_c('dim', idx_label)}"
             h2 = _c(
                 "dim",
-                f"  {field.id[:8]} · {tier} {etype} · {field.active_cell_count} cells · {zoom_label}",
+                f"  {field.id[:8]} · {tier} {etype}"
+                f" · {field.active_cell_count} cells · {zoom_label}",
             )
             self.query_one("#fv-header", Static).update(f"{h1}\n{h2}")
 
@@ -1720,7 +1722,8 @@ class FieldScreen(ModalScreen):
             )
         else:
             footer_widget.update(
-                _c("dim", "↑↓←→ scroll · Ctrl+↑↓ fast · H center · Z zoom · [ ] field · R refresh · Esc back")
+                _c("dim", "↑↓←→ scroll · Ctrl+↑↓ fast · H center · Z zoom"
+                   " · [ ] field · R refresh · Esc back")
             )
 
     def on_key(self, event: Any) -> None:
