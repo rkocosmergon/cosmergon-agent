@@ -382,7 +382,7 @@ class CosmergonAgent:
         try:
             resp = await self._request(
                 "GET",
-                f"/api/v1/game_fields/{field_id}/cells",
+                f"/api/v1/game-fields/{field_id}/cells",
             )
             if resp.status_code == 200:
                 return (resp.json() or {}).get("cells", {})  # type: ignore[no-any-return]

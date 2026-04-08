@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.47] — 2026-04-08
+
+### Fixed
+- **FieldScreen cells not visible**: `get_field_cells` used wrong URL
+  (`/api/v1/game_fields/` with underscore instead of `/api/v1/game-fields/`
+  with hyphen) — every cells fetch silently returned empty, viewport never
+  showed alive cells
+
 ## [0.3.46] — 2026-04-08
 
 ### Fixed
