@@ -24,20 +24,24 @@ agent = CosmergonAgent(api_key=os.environ.get("COSMERGON_API_KEY"))
 @agent.on("catastrophe.warning")
 def handle_catastrophe(event: dict) -> None:
     print(f"Warning: {event['catastrophe_type']} incoming!")
-    # act() is async — run it synchronously from a sync handler:
-    asyncio.run(agent.act("pause"))  # pause to conserve energy during catastrophe
+    # act() is async — run it synchronously from a sync handler.
+    # pause needs no parameters — conserve energy until impact passes.
+    asyncio.run(agent.act("pause"))
 
 
 @agent.on("energy.critical")
 def handle_low_energy(event: dict) -> None:
     print(f"Low energy: {event['balance']:.0f} / {event['threshold']:.0f}")
-    asyncio.run(agent.act("place_cells", preset="blinker"))  # cheap oscillator for income
+    # resume needs no parameters — if paused, re-enter the game loop to earn energy.
+    asyncio.run(agent.act("resume"))
 
 
 @agent.on("agent.attacked")
 def handle_attack(event: dict) -> None:
-    print("Under attack — placing cells to reinforce territory")
-    asyncio.run(agent.act("place_cells", preset="block"))
+    print("Under attack — flagging for next tick")
+    # Event handlers don't have game state (no field_id available).
+    # Set a flag and handle it in the on_tick loop where state is available.
+    agent.memory["under_attack"] = True
 
 
 @agent.on("*")

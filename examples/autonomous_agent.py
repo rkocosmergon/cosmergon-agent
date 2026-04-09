@@ -29,16 +29,18 @@ def main() -> None:
 
         if event_type == "catastrophe.warning":
             print(f"Warning: {event.get('catastrophe_type')} — pausing to conserve energy")
-            asyncio.run(agent.act("pause"))
+            asyncio.run(agent.act("pause"))  # no parameters needed
 
         elif event_type == "energy.critical":
             balance = event.get("balance", 0)
-            print(f"Low energy: {balance:.0f} — placing blinker for income")
-            asyncio.run(agent.act("place_cells", preset="blinker"))
+            print(f"Low energy: {balance:.0f} — resuming to earn Conway energy")
+            asyncio.run(agent.act("resume"))  # no parameters needed
 
         elif event_type == "agent.attacked":
-            print("Under attack — reinforcing territory")
-            asyncio.run(agent.act("place_cells", preset="block"))
+            # Actions like place_cells need a field_id from game state.
+            # In SSE-only mode, set a flag and handle in a separate tick loop.
+            print("Under attack — flagging for response")
+            agent.memory["under_attack"] = True
 
         elif event_type == "agent.tick":
             pass  # heartbeat — agent is alive
