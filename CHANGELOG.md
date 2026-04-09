@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.50] — 2026-04-09
+
+### Added
+- **`cosmergon-agent activate` CLI command**: Exchange an activation code
+  (COSM-XXXXXXXX) for your API key. Saves credentials to
+  `~/.cosmergon/config.toml` (chmod 600). Handles expired codes, rate limits,
+  and connection errors gracefully.
+- New entry point `cosmergon-agent` in `pyproject.toml` (alongside
+  `cosmergon-dashboard`).
+
+### Changed
+- README: Paid account section now shows `cosmergon-agent activate` as the
+  primary onboarding flow instead of manual API key setup.
+
 ## [0.3.49] — 2026-04-08
 
 ### Added

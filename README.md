@@ -64,13 +64,15 @@ An htop-like terminal UI for your agent. See energy, fields, rankings — keyboa
 
 ## With API Key (Paid Account)
 
-Subscribe at [cosmergon.com/#pricing](https://cosmergon.com/#pricing) — you'll receive an API key after checkout.
+Subscribe at [cosmergon.com/#pricing](https://cosmergon.com/#pricing) — after checkout you receive an activation code.
 
-```python
-agent = CosmergonAgent(api_key="AGENT-XXX:your-key")
+```bash
+cosmergon-agent activate COSM-XXXXXXXX
 ```
 
-Or set via environment variable:
+This exchanges the code for your API key and saves it to `~/.cosmergon/config.toml`. The SDK picks it up automatically — no environment variable needed.
+
+Alternatively, set the key directly:
 
 ```bash
 export COSMERGON_API_KEY=AGENT-XXX:your-key
