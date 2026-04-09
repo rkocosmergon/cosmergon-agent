@@ -799,7 +799,12 @@ class CosmergonDashboard(App):
 
     @work
     async def _show_identity_setup(self) -> None:
-        """Open the IdentitySetupScreen modal and log the outcome."""
+        """Open the IdentitySetupScreen modal and log the outcome.
+
+        After identity setup closes, shows the onboarding modal if not yet
+        dismissed — sequenced here because the if/elif in _on_tick_update means
+        only one of the two can be shown on the first tick.
+        """
         state = self.agent.state
         current_name = state.agent_name if state else ""
         current_persona = (state.persona_type if state else "") or "scientist"
@@ -808,6 +813,10 @@ class CosmergonDashboard(App):
         )
         if result:
             self._add_log(_c(self._theme.pos, f"✓ Identity set: {result['agent_name']}"))
+        # Show onboarding tips if not yet dismissed on this machine
+        if not _is_onboarding_dismissed():
+            await self.push_screen_wait(OnboardingModal(self._theme))
+            _set_onboarding_dismissed()
 
     @work
     async def _show_onboarding_modal(self) -> None:
@@ -1619,11 +1628,11 @@ class ChatScreen(ModalScreen):
             sent_label = _c(self._theme.data, f"[Du] {text}")
             scroll.mount(Label(sent_label))
             scroll.scroll_end(animate=False)
-            self.dismiss(text)  # close modal — focus returns to dashboard
         else:
             err = _c(self._theme.warn, f"✗ Fehler: {result['error'][:60]}")
             scroll.mount(Label(err))
-            self.query_one(Input).focus()
+        # Stay open — user closes with Esc, which triggers message refresh
+        self.query_one(Input).focus()
 
 
 # ---------------------------------------------------------------------------
