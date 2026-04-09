@@ -47,7 +47,7 @@ def _activate(code: str, base_url: str) -> None:
         if prefix.startswith("AGENT-"):
             agent_id = prefix[6:]
 
-    _save_credentials(api_key, agent_id)
+    _save_credentials(api_key, agent_id, activated=True)
 
     print()
     print("\u2713  Activated!")

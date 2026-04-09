@@ -40,40 +40,53 @@ _MAX_BACKOFF = 30.0
 _CONFIG_PATH = Path.home() / ".cosmergon" / "config.toml"
 
 
-def _load_saved_credentials() -> tuple[str, str | None]:
-    """Load api_key and agent_id from ~/.cosmergon/config.toml.
+def _load_saved_credentials() -> tuple[str, str | None, bool]:
+    """Load api_key, agent_id, and activated flag from ~/.cosmergon/config.toml.
 
-    Returns (api_key, agent_id) or ("", None) if not found.
+    Returns (api_key, agent_id, activated) or ("", None, False) if not found.
+    activated=True means credentials were saved via 'cosmergon-agent activate',
+    i.e. they belong to a paid account — never silently re-register on 401.
     """
     if not _CONFIG_PATH.exists():
-        return "", None
+        return "", None, False
     try:
         _CONFIG_PATH.chmod(0o600)  # Fix permissions on existing files
         content = _CONFIG_PATH.read_text(encoding="utf-8")
-        key, agent_id = "", None
+        key, agent_id, activated = "", None, False
         for line in content.splitlines():
             line = line.strip()
             if line.startswith("api_key"):
                 key = line.split("=", 1)[1].strip().strip('"')
             elif line.startswith("agent_id"):
                 agent_id = line.split("=", 1)[1].strip().strip('"')
-        return key, agent_id or None
+            elif line.startswith("activated"):
+                activated = line.split("=", 1)[1].strip().lower() == "true"
+        # Guard against header injection via crafted config (strip CRLF)
+        key = key.replace("\r", "").replace("\n", "")
+        return key, agent_id or None, activated
     except Exception:
-        return "", None
+        return "", None, False
 
 
-def _save_credentials(api_key: str, agent_id: str | None) -> None:
-    """Persist api_key and agent_id to ~/.cosmergon/config.toml."""
+def _save_credentials(api_key: str, agent_id: str | None, *, activated: bool = False) -> None:
+    """Persist api_key and agent_id to ~/.cosmergon/config.toml.
+
+    Uses atomic write (temp file → chmod → rename) to prevent config corruption
+    on crash or disk-full, and to close the TOCTOU window between write and chmod.
+    activated=True marks credentials as coming from 'cosmergon-agent activate'.
+    """
     try:
         _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         agent_id_line = f'agent_id = "{agent_id}"\n' if agent_id else ""
-        _CONFIG_PATH.write_text(
-            f'[agent]\napi_key = "{api_key}"\n{agent_id_line}',
-            encoding="utf-8",
-        )
-        _CONFIG_PATH.chmod(0o600)  # API key must not be world-readable
-    except Exception:
-        pass  # non-fatal — agent still works without persistence
+        activated_line = "activated = true\n" if activated else ""
+        content = f'[agent]\napi_key = "{api_key}"\n{agent_id_line}{activated_line}'
+        # Atomic write: write to temp → chmod → rename (prevents partial writes)
+        tmp_path = _CONFIG_PATH.with_suffix(".toml.tmp")
+        tmp_path.write_text(content, encoding="utf-8")
+        tmp_path.chmod(0o600)  # Secure before rename — never world-readable
+        tmp_path.replace(_CONFIG_PATH)
+    except Exception as exc:
+        logger.warning("Failed to save credentials to %s: %s", _CONFIG_PATH, exc)
 
 
 def _is_onboarding_dismissed() -> bool:
@@ -93,6 +106,7 @@ def _set_onboarding_dismissed() -> None:
     """Persist onboarding_modal_dismissed = true to ~/.cosmergon/config.toml.
 
     Adds the key if absent, updates it if present — never clobbers other keys.
+    Uses atomic write (temp file → chmod → rename) to prevent corruption.
     """
     try:
         _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -108,8 +122,11 @@ def _set_onboarding_dismissed() -> None:
                 new_lines.append(line)
         if not updated:
             new_lines.append(f"{key} = true")
-        _CONFIG_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-        _CONFIG_PATH.chmod(0o600)
+        content = "\n".join(new_lines) + "\n"
+        tmp_path = _CONFIG_PATH.with_suffix(".toml.tmp")
+        tmp_path.write_text(content, encoding="utf-8")
+        tmp_path.chmod(0o600)
+        tmp_path.replace(_CONFIG_PATH)
     except Exception:
         pass  # non-fatal
 
@@ -156,11 +173,16 @@ class CosmergonAgent:
         _user_provided = bool(api_key or os.environ.get("COSMERGON_API_KEY", ""))
         resolved_key = api_key or os.environ.get("COSMERGON_API_KEY", "")
         if not resolved_key or not resolved_key.strip():
-            saved_key, saved_agent_id = _load_saved_credentials()
+            saved_key, saved_agent_id, saved_activated = _load_saved_credentials()
             if saved_key:
                 resolved_key = saved_key
                 if not agent_id:
                     agent_id = saved_agent_id
+                if saved_activated:
+                    # Credentials saved via 'activate' command — treat as user-provided.
+                    # On 401, stop with an error instead of silently re-registering as
+                    # a new anonymous free agent (which would silently drop paid tier).
+                    _user_provided = True
                 logger.info("Loaded credentials from %s", _CONFIG_PATH)
             else:
                 # Auto-register anonymous agent and persist credentials
@@ -819,8 +841,9 @@ class CosmergonAgent:
                 self._running = False
         else:
             logger.error(
-                "Authentication failed (401) — your API key may have expired. "
-                "Check your api_key or generate a new one."
+                "Authentication failed (401) — your API key has been revoked or expired. "
+                "Run 'cosmergon-agent activate <code>' to reactivate, "
+                "or contact support at contact@cosmergon.de"
             )
             self._running = False
 
