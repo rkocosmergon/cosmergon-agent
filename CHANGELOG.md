@@ -66,7 +66,7 @@
   Existing installs are not affected — textual stays installed on upgrade.
   Running `cosmergon-dashboard` without textual shows a clear install instruction.
 
-## [0.3.43] — 2026-04-07
+## [0.3.43] — 2026-04-08
 
 ### Fixed
 - `~/.cosmergon/config.toml` permissions set to 0600 on write and on next read
