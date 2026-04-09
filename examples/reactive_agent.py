@@ -25,19 +25,19 @@ agent = CosmergonAgent(api_key=os.environ.get("COSMERGON_API_KEY"))
 def handle_catastrophe(event: dict) -> None:
     print(f"Warning: {event['catastrophe_type']} incoming!")
     # act() is async — run it synchronously from a sync handler:
-    asyncio.run(agent.act("evacuate"))
+    asyncio.run(agent.act("pause"))  # pause to conserve energy during catastrophe
 
 
 @agent.on("energy.critical")
 def handle_low_energy(event: dict) -> None:
     print(f"Low energy: {event['balance']:.0f} / {event['threshold']:.0f}")
-    asyncio.run(agent.act("reduce_maintenance"))
+    asyncio.run(agent.act("place_cells", preset="blinker"))  # cheap oscillator for income
 
 
 @agent.on("agent.attacked")
 def handle_attack(event: dict) -> None:
-    print("Under attack — activating shields")
-    asyncio.run(agent.act("defend"))
+    print("Under attack — placing cells to reinforce territory")
+    asyncio.run(agent.act("place_cells", preset="block"))
 
 
 @agent.on("*")

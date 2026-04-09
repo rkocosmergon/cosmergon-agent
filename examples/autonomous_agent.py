@@ -28,17 +28,17 @@ def main() -> None:
         event_type = event.get("event_type", "unknown")
 
         if event_type == "catastrophe.warning":
-            print(f"Warning: {event.get('catastrophe_type')} — evacuating")
-            asyncio.run(agent.act("evacuate"))
+            print(f"Warning: {event.get('catastrophe_type')} — pausing to conserve energy")
+            asyncio.run(agent.act("pause"))
 
         elif event_type == "energy.critical":
             balance = event.get("balance", 0)
-            print(f"Low energy: {balance:.0f} — reducing maintenance")
-            asyncio.run(agent.act("reduce_maintenance"))
+            print(f"Low energy: {balance:.0f} — placing blinker for income")
+            asyncio.run(agent.act("place_cells", preset="blinker"))
 
         elif event_type == "agent.attacked":
-            print("Under attack — defending")
-            asyncio.run(agent.act("defend"))
+            print("Under attack — reinforcing territory")
+            asyncio.run(agent.act("place_cells", preset="block"))
 
         elif event_type == "agent.tick":
             pass  # heartbeat — agent is alive
