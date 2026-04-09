@@ -33,6 +33,7 @@ dependencies = [
 ]
 
 [project.scripts]
+cosmergon-agent = "cosmergon_agent.cli:main"
 cosmergon-dashboard = "cosmergon_agent.dashboard:main"
 
 [project.optional-dependencies]
