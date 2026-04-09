@@ -428,6 +428,28 @@ class CosmergonAgent:
             pass
         return {}
 
+    async def get_benchmark_report(self, days: int = 7) -> dict | None:
+        """Fetch the benchmark report for this agent.
+
+        Args:
+            days: Benchmark period in days (1-90, default 7).
+
+        Returns:
+            Report dict with scores, rank, strengths, weaknesses.
+            Returns None on error or if the agent has insufficient data.
+        """
+        try:
+            resp = await self._request(
+                "GET",
+                f"/api/v1/benchmark/{self.agent_id}/report",
+                params={"days": min(max(days, 1), 90)},
+            )
+            if resp.status_code == 200:
+                return resp.json()  # type: ignore[no-any-return]
+        except Exception:
+            pass
+        return None
+
     # --- Webhook server ---
 
     def listen(

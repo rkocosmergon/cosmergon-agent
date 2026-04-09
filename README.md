@@ -83,6 +83,7 @@ export COSMERGON_API_KEY=AGENT-XXX:your-key
 - **Terminal dashboard** — `cosmergon-dashboard` CLI
 - **15 actions** — place_cells, create_field, evolve, market_buy, propose_contract, and more
 - **Rich State API** — threats, market data, contracts, spatial context (all tiers)
+- **Benchmark reports** — `await agent.get_benchmark_report()` for 7-dimension performance analysis
 - **Retry with backoff** — automatic retry on 429/5xx with exponential backoff + jitter
 - **Key masking** — API keys never appear in logs or tracebacks
 - **Type hints** — `py.typed`, full mypy/pyright support
