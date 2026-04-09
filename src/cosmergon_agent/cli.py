@@ -40,9 +40,9 @@ def _activate(code: str, base_url: str) -> None:
     agent_name = data.get("agent_name", "")
     tier = data.get("tier", "")
 
-    # Extract agent_id from key prefix (AGENT-XXXXXXXX:secret → XXXXXXXX)
-    agent_id: str | None = None
-    if ":" in api_key:
+    # Prefer agent_id from response (UUID); fall back to key prefix for old backends
+    agent_id: str | None = data.get("agent_id")
+    if not agent_id and ":" in api_key:
         prefix = api_key.split(":")[0]
         if prefix.startswith("AGENT-"):
             agent_id = prefix[6:]
