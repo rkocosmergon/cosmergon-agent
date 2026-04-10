@@ -27,7 +27,7 @@ classifiers = [
     "Typing :: Typed",
     "Framework :: AsyncIO",
 ]
-keywords = ["ai", "agents", "game", "economy", "benchmark", "llm", "simulation", "conway"]
+keywords = ["ai", "agents", "mcp", "tool", "economy", "benchmark", "llm", "simulation", "conway", "autonomous", "trading"]
 dependencies = [
     "httpx>=0.25.0",
     "tomli>=2.0; python_version < '3.11'",
