@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.0] — 2026-04-10
+
+### Added
+- **MCP Server as Python module**: `mcp/server.py` moved to
+  `src/cosmergon_agent/mcp.py`. New entry point `cosmergon-mcp` —
+  install via `pip install cosmergon-agent`, register via
+  `claude mcp add cosmergon -- cosmergon-mcp`.
+- **MCP Auto-Registration**: MCP server auto-registers an anonymous agent
+  when no `COSMERGON_API_KEY` is set (env > config.toml > auto-register).
+  On 401 (expired key): automatic re-registration. Network errors return
+  clean messages instead of crashes.
+- **Per-instance config.toml**: New `config.py` module using `tomllib` +
+  `tomli-w` for proper TOML parsing. Config format supports multiple server
+  instances via `[instances.*]` sections — federation-ready. Old `[agent]`
+  format is migrated automatically.
+
+### Changed
+- `agent.py`, `cli.py`, `dashboard.py`: credential functions moved to
+  `config.py` (shared module, no more handwritten TOML parsing).
+- `tomli-w` added as runtime dependency; `tomli` added for Python < 3.11.
+
+### Removed
+- `mcp/` directory (server.py + README.md) — replaced by the package module.
+
 ## [0.3.50] — 2026-04-09
 
 ### Added
