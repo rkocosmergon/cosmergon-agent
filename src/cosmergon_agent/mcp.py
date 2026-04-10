@@ -8,6 +8,8 @@ Usage:
   python -m cosmergon_agent.mcp                          # via module
   claude mcp add cosmergon -- cosmergon-mcp              # register with Claude Code
 
+No API key needed — auto-registers an anonymous agent on first use.
+
 Tools:
   - cosmergon_observe: Get agent's current game state
   - cosmergon_act: Execute a game action
@@ -26,50 +28,133 @@ import uuid
 import httpx
 
 from cosmergon_agent import __version__
+from cosmergon_agent.config import load_credentials, save_credentials
 
 # MCP protocol: communicates via stdin/stdout JSON-RPC
 # https://modelcontextprotocol.io/docs/spec
 
 
-def _get_api_key() -> str:
-    """Get API key from environment."""
+# ---------------------------------------------------------------------------
+# Credential resolution (env > config.toml > auto-register)
+# ---------------------------------------------------------------------------
+
+_credentials: tuple[str, str] | None = None
+
+
+async def _resolve_credentials() -> tuple[str, str]:
+    """Resolve API key and base URL.  Auto-registers if nothing is saved."""
+    global _credentials
+    if _credentials and _credentials[0]:
+        return _credentials
+
+    base_url = os.environ.get("COSMERGON_BASE_URL", "https://cosmergon.com")
+
+    # 1. Env var
     key = os.environ.get("COSMERGON_API_KEY", "")
-    if not key:
-        _error("COSMERGON_API_KEY environment variable required")
-    return key
+    if key:
+        _credentials = (key, base_url)
+        return key, base_url
+
+    # 2. Config.toml
+    saved_key, _, _ = load_credentials()
+    if saved_key:
+        _error("Loaded credentials from ~/.cosmergon/config.toml")
+        _credentials = (saved_key, base_url)
+        return saved_key, base_url
+
+    # 3. Auto-register
+    key, agent_id = await _auto_register(base_url)
+    if key:
+        save_credentials(key, agent_id, base_url=base_url)
+    else:
+        _error("Auto-registration failed — tools will return errors")
+    _credentials = (key, base_url)
+    return key, base_url
 
 
-def _get_base_url() -> str:
-    """Get API base URL from environment."""
-    return os.environ.get("COSMERGON_BASE_URL", "https://cosmergon.com")
+async def _auto_register(base_url: str) -> tuple[str, str | None]:
+    """Register an anonymous agent.  Returns (api_key, agent_id)."""
+    url = f"{base_url.rstrip('/')}/api/v1/auth/register/anonymous-agent"
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=True) as client:
+            resp = await client.post(url, json={})
+    except httpx.ConnectError:
+        _error(f"Cannot reach {base_url} — check your connection")
+        return "", None
+    except httpx.TimeoutException:
+        _error(f"Timeout connecting to {base_url} — try again later")
+        return "", None
+
+    if resp.status_code == 429:
+        _error("Too many registrations from this IP — try again later")
+        return "", None
+    if resp.status_code != 200:
+        _error(f"Registration failed ({resp.status_code})")
+        return "", None
+
+    data = resp.json()
+    key = data.get("api_key", "")
+    agent_id = data.get("agent_id")
+    name = data.get("agent_name", agent_id or "anonymous")
+    _error(f"Registered new agent: {name} at {base_url}")
+    return key, agent_id
+
+
+async def _force_reregister() -> tuple[str, str]:
+    """Re-register on 401.  Overwrites cached and saved credentials."""
+    global _credentials
+    base_url = (
+        _credentials[1]
+        if _credentials
+        else os.environ.get("COSMERGON_BASE_URL", "https://cosmergon.com")
+    )
+    _error("API key expired, re-registering as new anonymous agent...")
+    key, agent_id = await _auto_register(base_url)
+    if key:
+        save_credentials(key, agent_id, base_url=base_url)
+        _credentials = (key, base_url)
+    else:
+        _credentials = None
+    return key, base_url
+
+
+# ---------------------------------------------------------------------------
+# HTTP helpers
+# ---------------------------------------------------------------------------
 
 
 async def _api_get(path: str, api_key: str, base_url: str) -> dict:
     """HTTP GET to Cosmergon API."""
-    async with httpx.AsyncClient(timeout=30, verify=True) as client:
-        resp = await client.get(
-            f"{base_url}/api/v1{path}",
-            headers={
-                "Authorization": f"api-key {api_key}",
-                "User-Agent": f"cosmergon-mcp/{__version__}",
-            },
-        )
-        return {"status": resp.status_code, "data": resp.json()}
+    try:
+        async with httpx.AsyncClient(timeout=30, verify=True) as client:
+            resp = await client.get(
+                f"{base_url}/api/v1{path}",
+                headers={
+                    "Authorization": f"api-key {api_key}",
+                    "User-Agent": f"cosmergon-mcp/{__version__}",
+                },
+            )
+            return {"status": resp.status_code, "data": resp.json()}
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        return {"status": 0, "data": {"error": f"Network error: {exc}"}}
 
 
 async def _api_post(path: str, body: dict, api_key: str, base_url: str) -> dict:
     """HTTP POST to Cosmergon API."""
-    async with httpx.AsyncClient(timeout=30, verify=True) as client:
-        resp = await client.post(
-            f"{base_url}/api/v1{path}",
-            json=body,
-            headers={
-                "Authorization": f"api-key {api_key}",
-                "User-Agent": f"cosmergon-mcp/{__version__}",
-                "X-Idempotency-Key": str(uuid.uuid4()),
-            },
-        )
-        return {"status": resp.status_code, "data": resp.json()}
+    try:
+        async with httpx.AsyncClient(timeout=30, verify=True) as client:
+            resp = await client.post(
+                f"{base_url}/api/v1{path}",
+                json=body,
+                headers={
+                    "Authorization": f"api-key {api_key}",
+                    "User-Agent": f"cosmergon-mcp/{__version__}",
+                    "X-Idempotency-Key": str(uuid.uuid4()),
+                },
+            )
+            return {"status": resp.status_code, "data": resp.json()}
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        return {"status": 0, "data": {"error": f"Network error: {exc}"}}
 
 
 # --- Tool definitions ---
@@ -89,7 +174,8 @@ TOOLS = [
                     "type": "string",
                     "enum": ["summary", "rich"],
                     "description": (
-                        "summary = basic state, rich = full context (Developer tier required)"
+                        "summary = basic state, "
+                        "rich = full context (Developer tier required)"
                     ),
                     "default": "summary",
                 },
@@ -111,7 +197,9 @@ TOOLS = [
                 },
                 "params": {
                     "type": "object",
-                    "description": "Action-specific parameters (e.g., cube_id, preset, field_id)",
+                    "description": (
+                        "Action-specific parameters (e.g., cube_id, preset, field_id)"
+                    ),
                     "default": {},
                 },
             },
@@ -146,6 +234,7 @@ TOOLS = [
 
 # --- MCP Protocol handling ---
 
+
 def _write(msg: dict) -> None:
     """Write JSON-RPC message to stdout."""
     sys.stdout.write(json.dumps(msg) + "\n")
@@ -153,7 +242,7 @@ def _write(msg: dict) -> None:
 
 
 def _error(message: str) -> None:
-    """Write error to stderr."""
+    """Write diagnostic to stderr (MCP log channel)."""
     sys.stderr.write(f"cosmergon-mcp: {message}\n")
     sys.stderr.flush()
 
@@ -210,43 +299,50 @@ async def _handle_request(request: dict) -> dict | None:
 
 async def _call_tool(name: str, arguments: dict) -> dict:
     """Execute a tool and return the result."""
-    api_key = _get_api_key()
-    base_url = _get_base_url()
+    api_key, base_url = await _resolve_credentials()
+    if not api_key:
+        return {"error": "No API key. Set COSMERGON_API_KEY or check your connection."}
+
+    # cosmergon_info uses public endpoints — no agent_id needed
+    if name == "cosmergon_info":
+        info = await _api_get("/game/info", api_key, base_url)
+        metrics = await _api_get("/game/metrics", api_key, base_url)
+        return {"rules": info["data"], "metrics": metrics["data"]}
+
+    # All other tools need agent_id — resolve with 401 retry
+    agents = await _api_get("/agents/", api_key, base_url)
+    if agents["status"] == 401:
+        api_key, base_url = await _force_reregister()
+        if not api_key:
+            return {"error": "Authentication failed and re-registration failed."}
+        agents = await _api_get("/agents/", api_key, base_url)
+
+    if agents["status"] != 200 or not agents["data"]:
+        return {"error": "Could not resolve agent. Check your API key."}
+    agent_id = agents["data"][0]["id"]
 
     if name == "cosmergon_observe":
         detail = arguments.get("detail", "summary")
-        # Resolve agent_id from API key
-        agents = await _api_get("/agents/", api_key, base_url)
-        if agents["status"] != 200 or not agents["data"]:
-            return {"error": "Could not resolve agent. Check your API key."}
-        agent_id = agents["data"][0]["id"]
-        state = await _api_get(f"/agents/{agent_id}/state?detail={detail}", api_key, base_url)
+        state = await _api_get(
+            f"/agents/{agent_id}/state?detail={detail}", api_key, base_url,
+        )
         return state["data"]  # type: ignore[no-any-return]
 
     if name == "cosmergon_act":
         action = arguments.get("action", "")
         params = arguments.get("params", {})
-        agents = await _api_get("/agents/", api_key, base_url)
-        if agents["status"] != 200 or not agents["data"]:
-            return {"error": "Could not resolve agent."}
-        agent_id = agents["data"][0]["id"]
         body = {"action": action, **params}
-        result = await _api_post(f"/agents/{agent_id}/action", body, api_key, base_url)
+        result = await _api_post(
+            f"/agents/{agent_id}/action", body, api_key, base_url,
+        )
         return result["data"]  # type: ignore[no-any-return]
 
     if name == "cosmergon_benchmark":
         days = arguments.get("days", 7)
-        agents = await _api_get("/agents/", api_key, base_url)
-        if agents["status"] != 200 or not agents["data"]:
-            return {"error": "Could not resolve agent."}
-        agent_id = agents["data"][0]["id"]
-        report = await _api_get(f"/benchmark/{agent_id}/report?days={days}", api_key, base_url)
+        report = await _api_get(
+            f"/benchmark/{agent_id}/report?days={days}", api_key, base_url,
+        )
         return report["data"]  # type: ignore[no-any-return]
-
-    if name == "cosmergon_info":
-        info = await _api_get("/game/info", api_key, base_url)
-        metrics = await _api_get("/game/metrics", api_key, base_url)
-        return {"rules": info["data"], "metrics": metrics["data"]}
 
     return {"error": f"Unknown tool: {name}"}
 
@@ -254,6 +350,7 @@ async def _call_tool(name: str, arguments: dict) -> dict:
 async def _main() -> None:
     """Main MCP server loop — reads JSON-RPC from stdin, writes to stdout."""
     _error("Cosmergon MCP server started")
+    await _resolve_credentials()
 
     for line in sys.stdin:
         line = line.strip()

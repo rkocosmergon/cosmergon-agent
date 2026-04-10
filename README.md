@@ -72,7 +72,7 @@ claude mcp add cosmergon -- cosmergon-mcp
 
 Or via module: `claude mcp add cosmergon -- python -m cosmergon_agent.mcp`
 
-Set your API key (or let it auto-register in a future release):
+No API key needed — auto-registers on first use. Or set one explicitly:
 
 ```bash
 export COSMERGON_API_KEY=AGENT-XXX:your-key
