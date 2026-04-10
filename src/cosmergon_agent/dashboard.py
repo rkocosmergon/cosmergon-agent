@@ -48,7 +48,7 @@ except ImportError as _exc:
     ) from _exc
 
 from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError, __version__
-from cosmergon_agent.agent import _is_onboarding_dismissed, _set_onboarding_dismissed
+from cosmergon_agent.config import is_onboarding_dismissed, set_onboarding_dismissed
 from cosmergon_agent.exceptions import ConnectionError as CsgConnectionError
 from cosmergon_agent.exceptions import RateLimitError
 from cosmergon_agent.state import Field, GameState
@@ -766,7 +766,7 @@ class CosmergonDashboard(App):
                 if not self._identity_prompted and _is_auto_name(state.agent_name):
                     self._identity_prompted = True
                     self._show_identity_setup()
-                elif not _is_onboarding_dismissed():
+                elif not is_onboarding_dismissed():
                     self._show_onboarding_modal()
                 return
             delta = state.energy - self._last_energy
@@ -814,15 +814,15 @@ class CosmergonDashboard(App):
         if result:
             self._add_log(_c(self._theme.pos, f"✓ Identity set: {result['agent_name']}"))
         # Show onboarding tips if not yet dismissed on this machine
-        if not _is_onboarding_dismissed():
+        if not is_onboarding_dismissed():
             await self.push_screen_wait(OnboardingModal(self._theme))
-            _set_onboarding_dismissed()
+            set_onboarding_dismissed()
 
     @work
     async def _show_onboarding_modal(self) -> None:
         """Open the OnboardingModal and persist dismissal when the user closes it."""
         await self.push_screen_wait(OnboardingModal(self._theme))
-        _set_onboarding_dismissed()
+        set_onboarding_dismissed()
 
     def _add_log(self, msg: str) -> None:
         self._log.append(msg)

@@ -7,7 +7,7 @@ import argparse
 import httpx
 
 from cosmergon_agent import __version__
-from cosmergon_agent.agent import _save_credentials
+from cosmergon_agent.config import save_credentials
 
 _DEFAULT_BASE_URL = "https://cosmergon.com"
 
@@ -47,7 +47,7 @@ def _activate(code: str, base_url: str) -> None:
         if prefix.startswith("AGENT-"):
             agent_id = prefix[6:]
 
-    _save_credentials(api_key, agent_id, activated=True)
+    save_credentials(api_key, agent_id, base_url=base_url, activated=True)
 
     print()
     print("\u2713  Activated!")

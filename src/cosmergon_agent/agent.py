@@ -11,13 +11,13 @@ import random
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterator
-from pathlib import Path
 from typing import Any
 
 import httpx
 
 from cosmergon_agent import __version__
 from cosmergon_agent.action import ActionResult
+from cosmergon_agent.config import CONFIG_PATH, load_credentials, save_credentials
 from cosmergon_agent.exceptions import (
     AuthenticationError,
     CosmergonError,
@@ -36,99 +36,6 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MAX_RETRIES = 3
 _INITIAL_BACKOFF = 0.5
 _MAX_BACKOFF = 30.0
-
-_CONFIG_PATH = Path.home() / ".cosmergon" / "config.toml"
-
-
-def _load_saved_credentials() -> tuple[str, str | None, bool]:
-    """Load api_key, agent_id, and activated flag from ~/.cosmergon/config.toml.
-
-    Returns (api_key, agent_id, activated) or ("", None, False) if not found.
-    activated=True means credentials were saved via 'cosmergon-agent activate',
-    i.e. they belong to a paid account — never silently re-register on 401.
-    """
-    if not _CONFIG_PATH.exists():
-        return "", None, False
-    try:
-        _CONFIG_PATH.chmod(0o600)  # Fix permissions on existing files
-        content = _CONFIG_PATH.read_text(encoding="utf-8")
-        key, agent_id, activated = "", None, False
-        for line in content.splitlines():
-            line = line.strip()
-            if line.startswith("api_key"):
-                key = line.split("=", 1)[1].strip().strip('"')
-            elif line.startswith("agent_id"):
-                agent_id = line.split("=", 1)[1].strip().strip('"')
-            elif line.startswith("activated"):
-                activated = line.split("=", 1)[1].strip().lower() == "true"
-        # Guard against header injection via crafted config (strip CRLF)
-        key = key.replace("\r", "").replace("\n", "")
-        return key, agent_id or None, activated
-    except Exception:
-        return "", None, False
-
-
-def _save_credentials(api_key: str, agent_id: str | None, *, activated: bool = False) -> None:
-    """Persist api_key and agent_id to ~/.cosmergon/config.toml.
-
-    Uses atomic write (temp file → chmod → rename) to prevent config corruption
-    on crash or disk-full, and to close the TOCTOU window between write and chmod.
-    activated=True marks credentials as coming from 'cosmergon-agent activate'.
-    """
-    try:
-        _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        agent_id_line = f'agent_id = "{agent_id}"\n' if agent_id else ""
-        activated_line = "activated = true\n" if activated else ""
-        content = f'[agent]\napi_key = "{api_key}"\n{agent_id_line}{activated_line}'
-        # Atomic write: write to temp → chmod → rename (prevents partial writes)
-        tmp_path = _CONFIG_PATH.with_suffix(".toml.tmp")
-        tmp_path.write_text(content, encoding="utf-8")
-        tmp_path.chmod(0o600)  # Secure before rename — never world-readable
-        tmp_path.replace(_CONFIG_PATH)
-    except Exception as exc:
-        logger.warning("Failed to save credentials to %s: %s", _CONFIG_PATH, exc)
-
-
-def _is_onboarding_dismissed() -> bool:
-    """Return True if the onboarding modal has been dismissed on this machine."""
-    if not _CONFIG_PATH.exists():
-        return False
-    try:
-        for line in _CONFIG_PATH.read_text(encoding="utf-8").splitlines():
-            if line.strip().startswith("onboarding_modal_dismissed"):
-                return line.split("=", 1)[1].strip().lower() == "true"
-    except Exception:
-        pass
-    return False
-
-
-def _set_onboarding_dismissed() -> None:
-    """Persist onboarding_modal_dismissed = true to ~/.cosmergon/config.toml.
-
-    Adds the key if absent, updates it if present — never clobbers other keys.
-    Uses atomic write (temp file → chmod → rename) to prevent corruption.
-    """
-    try:
-        _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        existing = _CONFIG_PATH.read_text(encoding="utf-8") if _CONFIG_PATH.exists() else ""
-        key = "onboarding_modal_dismissed"
-        lines = existing.splitlines()
-        updated, new_lines = False, []
-        for line in lines:
-            if line.strip().startswith(key):
-                new_lines.append(f"{key} = true")
-                updated = True
-            else:
-                new_lines.append(line)
-        if not updated:
-            new_lines.append(f"{key} = true")
-        content = "\n".join(new_lines) + "\n"
-        tmp_path = _CONFIG_PATH.with_suffix(".toml.tmp")
-        tmp_path.write_text(content, encoding="utf-8")
-        tmp_path.chmod(0o600)
-        tmp_path.replace(_CONFIG_PATH)
-    except Exception:
-        pass  # non-fatal
 
 
 class _SensitiveStr(str):
@@ -173,7 +80,7 @@ class CosmergonAgent:
         _user_provided = bool(api_key or os.environ.get("COSMERGON_API_KEY", ""))
         resolved_key = api_key or os.environ.get("COSMERGON_API_KEY", "")
         if not resolved_key or not resolved_key.strip():
-            saved_key, saved_agent_id, saved_activated = _load_saved_credentials()
+            saved_key, saved_agent_id, saved_activated = load_credentials()
             if saved_key:
                 resolved_key = saved_key
                 if not agent_id:
@@ -183,13 +90,13 @@ class CosmergonAgent:
                     # On 401, stop with an error instead of silently re-registering as
                     # a new anonymous free agent (which would silently drop paid tier).
                     _user_provided = True
-                logger.info("Loaded credentials from %s", _CONFIG_PATH)
+                logger.info("Loaded credentials from %s", CONFIG_PATH)
             else:
                 # Auto-register anonymous agent and persist credentials
                 resolved_key, auto_agent_id = self._auto_register_anonymous(base_url)
                 if not agent_id:
                     agent_id = auto_agent_id
-                _save_credentials(resolved_key, agent_id)
+                save_credentials(resolved_key, agent_id, base_url=base_url)
         # M1: Input validation
         if not base_url.startswith(("http://", "https://")):
             raise ValueError("base_url must start with http:// or https://")
@@ -833,7 +740,7 @@ class CosmergonAgent:
                 new_key, new_id = self._auto_register_anonymous(self.base_url)
                 self._api_key = _SensitiveStr(new_key)
                 self.agent_id = new_id
-                _save_credentials(new_key, new_id)
+                save_credentials(new_key, new_id, base_url=self.base_url)
                 await self.close()
                 self._client = self._create_client()
             except Exception as exc:
