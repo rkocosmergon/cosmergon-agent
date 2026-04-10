@@ -35,6 +35,7 @@ dependencies = [
 [project.scripts]
 cosmergon-agent = "cosmergon_agent.cli:main"
 cosmergon-dashboard = "cosmergon_agent.dashboard:main"
+cosmergon-mcp = "cosmergon_agent.mcp:run"
 
 [project.optional-dependencies]
 dashboard = [

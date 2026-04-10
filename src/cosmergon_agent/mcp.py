@@ -1,8 +1,12 @@
-#!/usr/bin/env python3
 """Cosmergon MCP Server — Model Context Protocol interface.
 
 Exposes Cosmergon as tools for any MCP-compatible client (Claude Code, etc.).
-Install: claude mcp add cosmergon -- python mcp/server.py
+
+Usage:
+  pip install cosmergon-agent
+  cosmergon-mcp                                          # via entry point
+  python -m cosmergon_agent.mcp                          # via module
+  claude mcp add cosmergon -- cosmergon-mcp              # register with Claude Code
 
 Tools:
   - cosmergon_observe: Get agent's current game state
@@ -17,6 +21,11 @@ import asyncio
 import json
 import os
 import sys
+import uuid
+
+import httpx
+
+from cosmergon_agent import __version__
 
 # MCP protocol: communicates via stdin/stdout JSON-RPC
 # https://modelcontextprotocol.io/docs/spec
@@ -37,13 +46,12 @@ def _get_base_url() -> str:
 
 async def _api_get(path: str, api_key: str, base_url: str) -> dict:
     """HTTP GET to Cosmergon API."""
-    import httpx
     async with httpx.AsyncClient(timeout=30, verify=True) as client:
         resp = await client.get(
             f"{base_url}/api/v1{path}",
             headers={
                 "Authorization": f"api-key {api_key}",
-                "User-Agent": "cosmergon-mcp-server/0.1.0",
+                "User-Agent": f"cosmergon-mcp/{__version__}",
             },
         )
         return {"status": resp.status_code, "data": resp.json()}
@@ -51,14 +59,13 @@ async def _api_get(path: str, api_key: str, base_url: str) -> dict:
 
 async def _api_post(path: str, body: dict, api_key: str, base_url: str) -> dict:
     """HTTP POST to Cosmergon API."""
-    import httpx
-    import uuid
     async with httpx.AsyncClient(timeout=30, verify=True) as client:
         resp = await client.post(
             f"{base_url}/api/v1{path}",
             json=body,
             headers={
                 "Authorization": f"api-key {api_key}",
+                "User-Agent": f"cosmergon-mcp/{__version__}",
                 "X-Idempotency-Key": str(uuid.uuid4()),
             },
         )
@@ -81,7 +88,9 @@ TOOLS = [
                 "detail": {
                     "type": "string",
                     "enum": ["summary", "rich"],
-                    "description": "summary = basic state, rich = full context (Developer tier required)",
+                    "description": (
+                        "summary = basic state, rich = full context (Developer tier required)"
+                    ),
                     "default": "summary",
                 },
             },
@@ -149,7 +158,7 @@ def _error(message: str) -> None:
     sys.stderr.flush()
 
 
-async def _handle_request(request: dict) -> dict:
+async def _handle_request(request: dict) -> dict | None:
     """Handle a single JSON-RPC request."""
     method = request.get("method", "")
     req_id = request.get("id")
@@ -164,7 +173,7 @@ async def _handle_request(request: dict) -> dict:
                 "capabilities": {"tools": {}},
                 "serverInfo": {
                     "name": "cosmergon",
-                    "version": "0.1.0",
+                    "version": __version__,
                 },
             },
         }
@@ -212,7 +221,7 @@ async def _call_tool(name: str, arguments: dict) -> dict:
             return {"error": "Could not resolve agent. Check your API key."}
         agent_id = agents["data"][0]["id"]
         state = await _api_get(f"/agents/{agent_id}/state?detail={detail}", api_key, base_url)
-        return state["data"]
+        return state["data"]  # type: ignore[no-any-return]
 
     if name == "cosmergon_act":
         action = arguments.get("action", "")
@@ -223,7 +232,7 @@ async def _call_tool(name: str, arguments: dict) -> dict:
         agent_id = agents["data"][0]["id"]
         body = {"action": action, **params}
         result = await _api_post(f"/agents/{agent_id}/action", body, api_key, base_url)
-        return result["data"]
+        return result["data"]  # type: ignore[no-any-return]
 
     if name == "cosmergon_benchmark":
         days = arguments.get("days", 7)
@@ -232,7 +241,7 @@ async def _call_tool(name: str, arguments: dict) -> dict:
             return {"error": "Could not resolve agent."}
         agent_id = agents["data"][0]["id"]
         report = await _api_get(f"/benchmark/{agent_id}/report?days={days}", api_key, base_url)
-        return report["data"]
+        return report["data"]  # type: ignore[no-any-return]
 
     if name == "cosmergon_info":
         info = await _api_get("/game/info", api_key, base_url)
@@ -242,7 +251,7 @@ async def _call_tool(name: str, arguments: dict) -> dict:
     return {"error": f"Unknown tool: {name}"}
 
 
-async def main() -> None:
+async def _main() -> None:
     """Main MCP server loop — reads JSON-RPC from stdin, writes to stdout."""
     _error("Cosmergon MCP server started")
 
@@ -261,5 +270,10 @@ async def main() -> None:
             _write(response)
 
 
+def run() -> None:
+    """Entry point for the cosmergon-mcp command."""
+    asyncio.run(_main())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    run()
