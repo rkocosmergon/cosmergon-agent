@@ -66,6 +66,39 @@ class Focus:
 
 
 @dataclass(frozen=True)
+class AgentSituation:
+    """Structured facts about the agent's current situation.
+
+    Non-imperative — all values are descriptive facts, never instructions.
+    The developer decides what to do with these facts.
+    """
+
+    fields_owned: int = 0
+    fields_without_cells: int = 0
+    energy_trend: str = "stable"
+    affordable_presets: tuple[str, ...] = ()
+    benchmark_ready: bool = False
+    benchmark_days_remaining: int = 0
+    active_catastrophe: str | None = None
+    catastrophe_warning_ticks: int | None = None
+    dormant_spores_on_fields: int = 0
+
+    @classmethod
+    def from_api(cls, data: dict) -> AgentSituation:
+        return cls(
+            fields_owned=data.get("fields_owned", 0),
+            fields_without_cells=data.get("fields_without_cells", 0),
+            energy_trend=data.get("energy_trend", "stable"),
+            affordable_presets=tuple(data.get("affordable_presets", [])),
+            benchmark_ready=data.get("benchmark_ready", False),
+            benchmark_days_remaining=data.get("benchmark_days_remaining", 0),
+            active_catastrophe=data.get("active_catastrophe"),
+            catastrophe_warning_ticks=data.get("catastrophe_warning_ticks"),
+            dormant_spores_on_fields=data.get("dormant_spores_on_fields", 0),
+        )
+
+
+@dataclass(frozen=True)
 class WorldBriefing:
     """Economy-wide context included in every state response."""
 
@@ -74,13 +107,15 @@ class WorldBriefing:
     market_summary: str = ""
     top_agent: str | None = None
     last_event: str | None = None
-    tip: str = ""
+    tip: str = ""  # Deprecated: static reference only (OWASP LLM01/LLM06)
     infra_fund_pct: float = 0.0
     infra_fund_msg: str = ""
+    situation: AgentSituation = AgentSituation()
 
     @classmethod
     def from_api(cls, data: dict) -> WorldBriefing:
         fund = data.get("infrastructure_fund") or {}
+        sit = data.get("agent_situation") or {}
         return cls(
             total_agents=data.get("total_agents", 0),
             your_rank=data.get("your_rank", 0),
@@ -90,6 +125,7 @@ class WorldBriefing:
             tip=data.get("tip", ""),
             infra_fund_pct=float(fund.get("progress_pct", 0.0)),
             infra_fund_msg=fund.get("message", ""),
+            situation=AgentSituation.from_api(sit),
         )
 
 

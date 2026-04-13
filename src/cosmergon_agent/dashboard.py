@@ -51,7 +51,7 @@ from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError,
 from cosmergon_agent.config import is_onboarding_dismissed, set_onboarding_dismissed
 from cosmergon_agent.exceptions import ConnectionError as CsgConnectionError
 from cosmergon_agent.exceptions import RateLimitError
-from cosmergon_agent.state import Field, GameState
+from cosmergon_agent.state import AgentSituation, Field, GameState
 
 logger = logging.getLogger(__name__)
 
@@ -722,6 +722,7 @@ class CosmergonDashboard(App):
         self._tick_received_at: float = 0.0
         self._tick_interval: float = 60.0  # self-calibrating from observed tick gaps
         self._last_tick: int = -1
+        self._last_situation_log: str = ""  # dedup system messages
         self._panel_cache: dict[str, str] = {}  # widget-id → last rendered content
         self._auth_error: str = ""  # set on AuthenticationError — shown in hint-bar
         self._pending_action: _PendingAction | None = None  # queued on 429, fires next tick
@@ -776,6 +777,7 @@ class CosmergonDashboard(App):
             self._add_log(
                 _c(color, f"[tick {state.tick}] {sign}{delta:.0f}E  {state.energy:,.0f} total")
             )
+            self._log_situation(state)
             await self._fire_pending()
             # Refresh chat messages each tick (1 extra HTTP call / ~60s — non-fatal)
             try:
@@ -823,6 +825,31 @@ class CosmergonDashboard(App):
         """Open the OnboardingModal and persist dismissal when the user closes it."""
         await self.push_screen_wait(OnboardingModal(self._theme))
         set_onboarding_dismissed()
+
+    def _log_situation(self, state: GameState) -> None:
+        """Log system messages from agent_situation (client-side, descriptive only).
+
+        Messages are generated locally from structured server data — the server
+        never sends free-text instructions (OWASP LLM01/LLM06 mitigation).
+        Only logs when situation changes to avoid spam.
+        """
+        sit = state.world_briefing.situation if state.world_briefing else AgentSituation()
+        msgs: list[str] = []
+        if sit.fields_owned > 0 and sit.fields_without_cells > 0:
+            msgs.append(f"{sit.fields_without_cells} of {sit.fields_owned} fields have no cells")
+        if sit.benchmark_ready:
+            msgs.append("7-day benchmark report is ready")
+        elif sit.benchmark_days_remaining > 0:
+            msgs.append(f"Benchmark ready in {sit.benchmark_days_remaining}d")
+        if sit.dormant_spores_on_fields > 0:
+            msgs.append(f"{sit.dormant_spores_on_fields} dormant spores on your fields")
+        if sit.active_catastrophe:
+            msgs.append(f"Active catastrophe: {sit.active_catastrophe}")
+        key = "|".join(msgs)
+        if key and key != self._last_situation_log:
+            self._last_situation_log = key
+            for m in msgs:
+                self._add_log(_c("dim", f"[SYSTEM] {m}"))
 
     def _add_log(self, msg: str) -> None:
         self._log.append(msg)
