@@ -735,7 +735,10 @@ class CosmergonAgent:
         keys stop the loop with a clear error message instead.
         """
         if self._auto_credentials:
-            logger.info("API key expired, re-registering as new anonymous agent...")
+            logger.warning(
+                "API key expired — registering as NEW anonymous agent. "
+                "Your previous agent is no longer accessible from this device."
+            )
             try:
                 new_key, new_id = self._auto_register_anonymous(self.base_url)
                 self._api_key = _SensitiveStr(new_key)

@@ -96,7 +96,10 @@ async def _auto_register(base_url: str) -> tuple[str, str | None]:
     key = data.get("api_key", "")
     agent_id = data.get("agent_id")
     name = data.get("agent_name", agent_id or "anonymous")
-    _error(f"Registered new agent: {name} at {base_url}")
+    _error(
+        f"Created new agent: {name}. "
+        f"To use an existing agent: set COSMERGON_API_KEY environment variable."
+    )
     return key, agent_id
 
 
@@ -108,7 +111,11 @@ async def _force_reregister() -> tuple[str, str]:
         if _credentials
         else os.environ.get("COSMERGON_BASE_URL", "https://cosmergon.com")
     )
-    _error("API key expired, re-registering as new anonymous agent...")
+    _error(
+        "API key expired — registering as NEW anonymous agent. "
+        "Previous agent is no longer accessible. "
+        "To keep your agent: set COSMERGON_API_KEY or upgrade at cosmergon.com/upgrade"
+    )
     key, agent_id = await _auto_register(base_url)
     if key:
         save_credentials(key, agent_id, base_url=base_url)

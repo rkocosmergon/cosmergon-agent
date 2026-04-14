@@ -10,6 +10,7 @@ Hotkeys:
     C  Set Compass direction (highlighted until first use)
     P  Place cells       F  Create field     E  Evolve entity
     Space  Pause/Resume  U  Upgrade (next tier, opens browser)
+    K  Show API key + config path
     R  Refresh now       Q  Quit             ?  Help
 
 Themes: cosmergon (default), matrix, mono, high-contrast
@@ -592,6 +593,7 @@ class HelpModal(ModalScreen):
             "[cyan]\\[V][/cyan]  View Conway field (zoom, scroll, minimap)",
             "[cyan]\\[Space][/cyan]  Pause / Resume",
             "[cyan]\\[U][/cyan]  Upgrade to next tier (opens browser)",
+            "[cyan]\\[K][/cyan]  Show API key + config path",
             "[cyan]\\[R][/cyan]  Refresh data",
             "[cyan]\\[Q][/cyan]  Quit",
             "",
@@ -612,6 +614,68 @@ class HelpModal(ModalScreen):
     def on_key(self, event: Any) -> None:
         if event.key not in self._SCROLL_KEYS:
             self.dismiss(None)
+
+
+class KeyModal(ModalScreen):
+    """Show API key, config path, and upgrade tip. Esc/Enter/Space to close."""
+
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
+        Binding("escape", "close_key", "Close", show=False),
+        Binding("enter", "close_key", "Close", show=False),
+        Binding("space", "close_key", "Close", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    KeyModal {
+        align: center middle;
+    }
+    KeyModal > #key-wrap {
+        width: 64;
+        height: auto;
+        max-height: 20;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    KeyModal > #key-wrap > #key-header {
+        height: 1;
+        padding: 0 0 1 0;
+    }
+    """
+
+    def __init__(self, api_key: str, config_path: str, tier: str, agent_name: str) -> None:
+        super().__init__()
+        self._api_key = api_key
+        self._config_path = config_path
+        self._tier = tier
+        self._agent_name = agent_name
+
+    def compose(self) -> ComposeResult:
+        lines: list[str] = [
+            f"[bold]Agent:[/bold]  {self._agent_name}",
+            f"[bold]Tier:[/bold]   {self._tier}",
+            "",
+            f"[bold]API Key:[/bold]",
+            f"  [cyan]{self._api_key}[/cyan]",
+            "",
+            f"[bold]Config:[/bold]",
+            f"  [dim]{self._config_path}[/dim]",
+        ]
+        if self._tier == "free":
+            lines += [
+                "",
+                "[dim]Permanent key? Upgrade at cosmergon.com/upgrade[/dim]",
+            ]
+        with Vertical(id="key-wrap"):
+            yield Label("[dim]Esc / Enter / Space to close[/dim]", id="key-header")
+            for line in lines:
+                yield Label(line)
+
+    def on_mount(self) -> None:
+        self.query_one("#key-wrap").focus()
+
+    def action_close_key(self) -> None:
+        self.dismiss(None)
 
 
 # ---------------------------------------------------------------------------
@@ -704,6 +768,7 @@ class CosmergonDashboard(App):
         Binding("m", "chat_screen", "Chat", show=False, priority=True),
         Binding("v", "field_view", "Fields", show=False, priority=True),
         Binding("tab", "cycle_focus", "Focus", show=False, priority=True),
+        Binding("k", "show_key", "Key", show=False, priority=True),
         Binding("question_mark", "help", "Help", show=False, priority=True),
         Binding("q", "quit", "Quit", show=False, priority=True),
     ]
@@ -1125,9 +1190,20 @@ class CosmergonDashboard(App):
         keys = [
             k("Tab", "Focus"), k("C", "Compass", c_color), k("P", "Place"), k("F", "Field"),
             k("E", "Evolve"), k("V", "View"), k("M", "Chat"),
-            k("U", "Upgrade"), k("?", "Help"), k("Q", "Quit"),
+            k("U", "Upgrade"), k("K", "Key"), k("?", "Help"), k("Q", "Quit"),
         ]
         self._update_panel("fix-bar", "  ".join(keys))
+
+    def _get_plain_key(self) -> str:
+        """Return the unmasked API key (for KeyModal display)."""
+        return str.__str__(self.agent._api_key) if self.agent._api_key else ""
+
+    def _get_masked_key(self) -> str:
+        """Return masked API key for status bar (first 8 chars + dots)."""
+        plain = self._get_plain_key()
+        if len(plain) <= 8:
+            return plain or "?"
+        return plain[:8] + "····"
 
     def _draw_status_bar(self, state: GameState | None) -> None:
         name = (state.agent_name if state and state.agent_name else None) or (
@@ -1136,7 +1212,8 @@ class CosmergonDashboard(App):
         sep = " │ "
         # subscription tier in status bar (tick already shown in hint-bar — no duplicate)
         tier = (state.subscription_tier if state else None) or "free"
-        segments = [name, tier]
+        key_masked = self._get_masked_key()
+        segments = [name, tier, key_masked]
         self._update_panel("status-bar", f"[dim]{sep.join(segments)}[/dim]")
 
     def _set_feedback(self, msg: str, duration: float = 4.0) -> None:
@@ -1473,6 +1550,17 @@ class CosmergonDashboard(App):
             self.screen.action_refresh_field()
             return
         self._add_log(_c(self._theme.data, "Refreshing..."))
+
+    @work
+    async def action_show_key(self) -> None:
+        from cosmergon_agent.config import CONFIG_PATH
+
+        state = self.agent.state
+        name = (state.agent_name if state else None) or (self.agent.agent_id or "?")[:8]
+        tier = (state.subscription_tier if state else None) or "free"
+        await self.push_screen_wait(
+            KeyModal(self._get_plain_key(), str(CONFIG_PATH), tier, name)
+        )
 
     @work
     async def action_help(self) -> None:
@@ -2130,8 +2218,170 @@ class OnboardingModal(ModalScreen):
         self.dismiss()
 
 
+# ---------------------------------------------------------------------------
+# FirstStartApp — shown before Dashboard when no credentials exist
+# ---------------------------------------------------------------------------
+
+
+class FirstStartApp(App):
+    """Mini-app: [Enter] New agent / [K] Enter existing key."""
+
+    DEFAULT_CSS = """
+    FirstStartApp {
+        background: $surface;
+        align: center middle;
+    }
+    #fs-box {
+        width: 52;
+        height: auto;
+        padding: 1 3;
+        border: solid $accent;
+        background: $surface;
+    }
+    #fs-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    #fs-subtitle {
+        text-align: center;
+        margin-bottom: 1;
+    }
+    #fs-options {
+        margin-top: 1;
+    }
+    #fs-hint {
+        margin-top: 1;
+    }
+    #fs-input {
+        display: none;
+        margin-top: 1;
+    }
+    #fs-error {
+        display: none;
+        margin-top: 1;
+        color: $error;
+    }
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
+        Binding("enter", "new_agent", show=False, priority=True),
+        Binding("k", "enter_key", show=False, priority=True),
+        Binding("q", "quit", show=False, priority=True),
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.result_key: str = ""  # populated if user enters a key
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="fs-box"):
+            yield Label("[bold cyan]COSMERGON[/bold cyan]", id="fs-title")
+            yield Label("[dim]No agent found on this device.[/dim]", id="fs-subtitle")
+            yield Label(
+                "[cyan]\\[Enter][/cyan]  Start a new free agent\n"
+                "[cyan]\\[K][/cyan]      I have a key\n\n"
+                "[dim]Your key is shown in the dashboard anytime. Press \\[K].[/dim]",
+                id="fs-options",
+            )
+            yield Input(placeholder="Paste your AGENT-... key", id="fs-input")
+            yield Label("", id="fs-error")
+
+    def action_new_agent(self) -> None:
+        inp = self.query_one("#fs-input", Input)
+        if inp.display:
+            return  # input is open — Enter submits the input, not this action
+        self.result_key = ""
+        self.exit()
+
+    def action_enter_key(self) -> None:
+        inp = self.query_one("#fs-input", Input)
+        if inp.display:
+            return  # already open
+        inp.display = True
+        inp.focus()
+        # Unbind K so typing works
+        self._bindings.keys.pop("k", None)
+
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
+        key = event.value.strip()
+        if not key:
+            return
+        # Recognize prefix — Master Key gets resolved to agent key
+        if key.upper().startswith("CSMR-"):
+            resolved = _resolve_token(key, "https://cosmergon.com")
+            if resolved:
+                self.result_key = resolved
+                self.exit()
+            else:
+                err = self.query_one("#fs-error", Label)
+                err.update("[bold]Could not resolve Master Key.[/bold] Check key and try again.")
+                err.display = True
+            return
+        self.result_key = key
+        self.exit()
+
+
 # Entry point
 # ---------------------------------------------------------------------------
+
+
+def _needs_first_start(api_key: str | None) -> bool:
+    """Return True when the first-start screen should be shown."""
+    if api_key or os.environ.get("COSMERGON_API_KEY", ""):
+        return False
+    from cosmergon_agent.config import load_credentials
+
+    saved_key, _, _ = load_credentials()
+    return not saved_key
+
+
+def _resolve_token(token: str, base_url: str) -> str | None:
+    """Exchange a Master Key (CSMR-...) for the first agent's API key.
+
+    Calls GET /api/v1/players/me/agents with X-Player-Token header.
+    Returns the API key of the first (oldest) agent, or None on error.
+    """
+    import httpx
+
+    url = f"{base_url.rstrip('/')}/api/v1/players/me/agents"
+    try:
+        resp = httpx.get(url, headers={"X-Player-Token": token}, timeout=15.0)
+    except (httpx.ConnectError, httpx.TimeoutException):
+        print(f"\n\u2717  Cannot reach {base_url} — check your internet connection.")
+        return None
+
+    if resp.status_code == 403:
+        print("\n\u2717  Master keys are available with Solo and Developer plans.")
+        print("   cosmergon.com/pricing")
+        return None
+    if resp.status_code == 401:
+        print("\n\u2717  Invalid Master Key. Check your key and try again.")
+        return None
+    if resp.status_code == 429:
+        print("\n\u2717  Too many requests. Master key endpoints are limited to 3 per hour.")
+        return None
+    if resp.status_code != 200:
+        print(f"\n\u2717  Error ({resp.status_code}): {resp.text[:200]}")
+        return None
+
+    data = resp.json()
+    agents = data.get("agents", [])
+    if not agents:
+        print("\n\u2717  No agents found for this account.")
+        print("   Create one at cosmergon.com or via the API.")
+        return None
+
+    agent = agents[0]
+    api_key = agent.get("api_key", "")
+    name = agent.get("agent_name", "?")
+    tier = data.get("subscription_tier", "?")
+    print(f"\n  \u2713  Master Key accepted ({tier} tier)")
+    print(f"     Agent: {name}")
+    if len(agents) > 1:
+        print(f"     ({len(agents)} agents total — connected to oldest)")
+    print()
+    return api_key
 
 
 def main() -> None:
@@ -2142,13 +2392,42 @@ def main() -> None:
         "Config: ~/.cosmergon/dashboard.toml  |  COSMERGON_THEME env var",
     )
     parser.add_argument("--api-key", help="API key (auto-registers if omitted)")
+    parser.add_argument("--token", help="Master Key (CSMR-...) — full support coming soon")
     parser.add_argument("--base-url", default="https://cosmergon.com")
     parser.add_argument("--theme", choices=list(THEMES), default=None)
     args = parser.parse_args()
     logging.basicConfig(level=logging.WARNING)
+
+    # --token: resolve Master Key to agent API key via GET /players/me/agents
+    if args.token:
+        if args.token.upper().startswith("CSMR-"):
+            resolved_via_token = _resolve_token(args.token, args.base_url)
+            if resolved_via_token:
+                args.api_key = resolved_via_token
+            else:
+                raise SystemExit(1)
+        else:
+            # If not CSMR- prefix, treat as api_key (forward-compat)
+            args.api_key = args.token
+
     theme = _load_theme(args.theme)
+    resolved_key = args.api_key
+
+    # First-start screen: shown when no credentials exist
+    if _needs_first_start(resolved_key):
+        try:
+            first_start = FirstStartApp()
+            first_start.run()
+            if first_start.result_key:
+                resolved_key = first_start.result_key
+            # else: result_key is "" → auto-register (default behavior)
+        except Exception:
+            pass  # graceful degradation: auto-register if FirstStartApp fails
+
     try:
-        agent = CosmergonAgent(api_key=args.api_key, base_url=args.base_url, poll_interval=10.0)
+        agent = CosmergonAgent(
+            api_key=resolved_key, base_url=args.base_url, poll_interval=10.0
+        )
         CosmergonDashboard(agent=agent, theme=theme).run()
     except CosmergonError as exc:
         msg = str(exc)
