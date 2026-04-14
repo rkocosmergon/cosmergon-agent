@@ -666,8 +666,11 @@ class KeyModal(ModalScreen):
                 "",
                 "[dim]Permanent key? Upgrade at cosmergon.com/upgrade[/dim]",
             ]
+        lines += [
+            "",
+            "[dim]Press Esc to close[/dim]",
+        ]
         with Vertical(id="key-wrap"):
-            yield Label("[dim]Esc / Enter / Space to close[/dim]", id="key-header")
             for line in lines:
                 yield Label(line)
 
