@@ -28,7 +28,7 @@ import uuid
 import httpx
 
 from cosmergon_agent import __version__
-from cosmergon_agent.config import load_credentials, save_credentials
+from cosmergon_agent.config import load_credentials, load_token, save_agent, save_credentials, save_token
 
 # MCP protocol: communicates via stdin/stdout JSON-RPC
 # https://modelcontextprotocol.io/docs/spec
@@ -42,27 +42,43 @@ _credentials: tuple[str, str] | None = None
 
 
 async def _resolve_credentials() -> tuple[str, str]:
-    """Resolve API key and base URL.  Auto-registers if nothing is saved."""
+    """Resolve API key and base URL.
+
+    Priority (first match wins):
+      1. COSMERGON_API_KEY env var
+      2. COSMERGON_PLAYER_TOKEN + COSMERGON_AGENT_NAME env vars → token resolution
+      3. config.toml (saved credentials)
+      4. auto-register (new anonymous free agent)
+    """
     global _credentials
     if _credentials and _credentials[0]:
         return _credentials
 
     base_url = os.environ.get("COSMERGON_BASE_URL", "https://cosmergon.com")
 
-    # 1. Env var
+    # 1. COSMERGON_API_KEY env var
     key = os.environ.get("COSMERGON_API_KEY", "")
     if key:
         _credentials = (key, base_url)
         return key, base_url
 
-    # 2. Config.toml
+    # 2. COSMERGON_PLAYER_TOKEN env var → token resolution
+    token = os.environ.get("COSMERGON_PLAYER_TOKEN", "")
+    if token:
+        agent_name = os.environ.get("COSMERGON_AGENT_NAME", "") or None
+        key = await _resolve_via_token(token, base_url, agent_name)
+        if key:
+            _credentials = (key, base_url)
+            return key, base_url
+
+    # 3. Config.toml
     saved_key, _, _ = load_credentials()
     if saved_key:
         _error("Loaded credentials from ~/.cosmergon/config.toml")
         _credentials = (saved_key, base_url)
         return saved_key, base_url
 
-    # 3. Auto-register
+    # 4. Auto-register
     key, agent_id = await _auto_register(base_url)
     if key:
         save_credentials(key, agent_id, base_url=base_url)
@@ -70,6 +86,45 @@ async def _resolve_credentials() -> tuple[str, str]:
         _error("Auto-registration failed — tools will return errors")
     _credentials = (key, base_url)
     return key, base_url
+
+
+async def _resolve_via_token(token: str, base_url: str, agent_name: str | None) -> str:
+    """Resolve a Master Key to an API key via async token resolution.
+
+    Saves token + all agents to config.toml. Returns the selected agent's API key,
+    or "" on error.
+    """
+    from cosmergon_agent._token import TokenResolutionError, resolve_token_async
+
+    try:
+        result = await resolve_token_async(token, base_url=base_url, agent_name=agent_name)
+    except TokenResolutionError as exc:
+        _error(f"Token resolution failed: {exc}")
+        return ""
+
+    if not result.agents:
+        _error("No agents found for this token.")
+        return ""
+
+    # Select agent
+    if agent_name:
+        matches = [a for a in result.agents if a.agent_name == agent_name]
+        selected = matches[0] if matches else result.agents[0]
+    else:
+        selected = result.agents[0]
+
+    # Save to config
+    save_token(token, base_url=base_url)
+    for agent in result.agents:
+        raw_key = str.__str__(agent.api_key)
+        save_agent(agent.agent_name, raw_key, agent.agent_id, base_url=base_url)
+
+    raw_key = str.__str__(selected.api_key)
+    _error(
+        f"Token resolved: agent={selected.agent_name} "
+        f"tier={result.subscription_tier} ({len(result.agents)} agent(s))"
+    )
+    return raw_key
 
 
 async def _auto_register(base_url: str) -> tuple[str, str | None]:
@@ -104,13 +159,36 @@ async def _auto_register(base_url: str) -> tuple[str, str | None]:
 
 
 async def _force_reregister() -> tuple[str, str]:
-    """Re-register on 401.  Overwrites cached and saved credentials."""
+    """Handle 401 — token-aware re-registration.
+
+    If a token is present (Paid user), do NOT auto-re-register (prevents
+    FIFO cascade). Log an error instead. The LLM client will see the error
+    and can inform the user.
+
+    If no token (Free user), re-register as new anonymous agent.
+    """
     global _credentials
     base_url = (
         _credentials[1]
         if _credentials
         else os.environ.get("COSMERGON_BASE_URL", "https://cosmergon.com")
     )
+
+    # Check for token — Paid users must reconnect manually
+    has_token = bool(
+        os.environ.get("COSMERGON_PLAYER_TOKEN", "")
+        or load_token()
+    )
+    if has_token:
+        _error(
+            "API key was replaced by another session. "
+            "Restart the MCP server or update COSMERGON_API_KEY. "
+            "Your Master Key is still valid."
+        )
+        _credentials = None
+        return "", base_url
+
+    # Free user — auto-re-register
     _error(
         "API key expired — registering as NEW anonymous agent. "
         "Previous agent is no longer accessible. "

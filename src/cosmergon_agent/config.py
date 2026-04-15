@@ -1,18 +1,37 @@
 """Per-instance configuration for Cosmergon agents.
 
 Reads and writes ~/.cosmergon/config.toml with instance-aware credentials.
-Automatically migrates the old [agent] flat format on first write.
+Supports two formats — flat (single agent) and nested (multi-agent):
 
-Config format::
+Flat format (v0.5.x, single agent)::
 
     default_instance = "cosmergon-com"
-    onboarding_modal_dismissed = true
 
     [instances.cosmergon-com]
     base_url = "https://cosmergon.com"
     api_key = "AGENT-xxx:secret"
     agent_id = "abc123"
     activated = true
+
+Multi-agent format (v0.6.0+, with Master Key)::
+
+    default_instance = "cosmergon-com"
+
+    [instances.cosmergon-com]
+    base_url = "https://cosmergon.com"
+    player_token = "CSMR-a1b2c3..."
+    active_agent = "Odin-blade"
+
+    [instances.cosmergon-com.agents.Odin-blade]
+    api_key = "AGENT-ABC:secret"
+    agent_id = "uuid-1"
+
+    [instances.cosmergon-com.agents.Odin-scout]
+    api_key = "AGENT-DEF:secret"
+    agent_id = "uuid-2"
+
+Both formats are read transparently. Migration from flat to nested happens
+when the agent name becomes known (after first get_state from server).
 """
 
 from __future__ import annotations
@@ -42,6 +61,14 @@ _DEFAULT_BASE_URL = "https://cosmergon.com"
 
 
 @dataclass
+class AgentEntry:
+    """Credentials for one agent within an instance."""
+
+    api_key: str = ""
+    agent_id: str | None = None
+
+
+@dataclass
 class InstanceConfig:
     """Credentials and metadata for one Cosmergon server instance."""
 
@@ -49,6 +76,13 @@ class InstanceConfig:
     agent_id: str | None = None
     base_url: str = _DEFAULT_BASE_URL
     activated: bool = False
+    player_token: str = ""
+    active_agent: str = ""
+    agents: dict[str, AgentEntry] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.agents is None:
+            self.agents = {}
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +160,9 @@ def _load_config() -> dict:
 def load_credentials(instance: str | None = None) -> tuple[str, str | None, bool]:
     """Load ``(api_key, agent_id, activated)`` for an instance.
 
+    Reads the nested multi-agent format first (active_agent → agents subtable),
+    then falls back to flat format (api_key directly on instance).
+
     Uses *default_instance* when *instance* is ``None``.
     Returns ``("", None, False)`` when nothing is saved.
     """
@@ -140,6 +177,22 @@ def load_credentials(instance: str | None = None) -> tuple[str, str | None, bool
         # Fall back to the first available instance
         cfg = next(iter(instances.values()), {})
 
+    # Try nested multi-agent format first
+    agents_table = cfg.get("agents", {})
+    active = cfg.get("active_agent", "")
+    if agents_table and active and active in agents_table:
+        agent_cfg = agents_table[active]
+        key = agent_cfg.get("api_key", "")
+        key = key.replace("\r", "").replace("\n", "")
+        return key, agent_cfg.get("agent_id") or None, True
+    if agents_table:
+        # active_agent not set or not found — use first agent
+        first_agent = next(iter(agents_table.values()), {})
+        if first_agent.get("api_key"):
+            key = first_agent["api_key"].replace("\r", "").replace("\n", "")
+            return key, first_agent.get("agent_id") or None, True
+
+    # Fall back to flat format (v0.5.x single-agent)
     key = cfg.get("api_key", "")
     key = key.replace("\r", "").replace("\n", "")  # header-injection guard
     return key, cfg.get("agent_id") or None, cfg.get("activated", False)
@@ -179,6 +232,212 @@ def save_credentials(
         _write_raw(data)
     except Exception as exc:
         logger.warning("Failed to save credentials to %s: %s", CONFIG_PATH, exc)
+
+
+# ---------------------------------------------------------------------------
+# Public API — multi-agent (v0.6.0+)
+# ---------------------------------------------------------------------------
+
+
+def load_token(instance: str | None = None) -> str:
+    """Load the player token (Master Key) for an instance.
+
+    Returns ``""`` if no token is saved.
+    """
+    data = _load_config()
+    instances = data.get("instances", {})
+    if not instances:
+        return ""
+    name = instance or data.get("default_instance", "")
+    cfg = instances.get(name, {})
+    if not cfg:
+        cfg = next(iter(instances.values()), {})
+    return cfg.get("player_token", "")
+
+
+def save_token(
+    token: str,
+    *,
+    base_url: str = _DEFAULT_BASE_URL,
+    instance: str | None = None,
+) -> None:
+    """Persist a player token (Master Key) for an instance."""
+    data = _load_config()
+    name = instance or data.get("default_instance") or _instance_name(base_url)
+
+    if "instances" not in data:
+        data["instances"] = {}
+
+    inst: dict = data["instances"].setdefault(name, {})
+    inst["base_url"] = base_url
+    inst["player_token"] = token
+    data.setdefault("default_instance", name)
+
+    try:
+        _write_raw(data)
+    except Exception as exc:
+        logger.warning("Failed to save token to %s: %s", CONFIG_PATH, exc)
+
+
+def load_all_agents(instance: str | None = None) -> dict[str, AgentEntry]:
+    """Load all agents from the nested multi-agent format.
+
+    Returns a dict mapping agent name → AgentEntry.
+    Returns empty dict if no agents subtable exists.
+    """
+    data = _load_config()
+    instances = data.get("instances", {})
+    if not instances:
+        return {}
+
+    name = instance or data.get("default_instance", "")
+    cfg = instances.get(name, {})
+    if not cfg:
+        cfg = next(iter(instances.values()), {})
+
+    agents_table = cfg.get("agents", {})
+    result: dict[str, AgentEntry] = {}
+    for agent_name, agent_data in agents_table.items():
+        result[agent_name] = AgentEntry(
+            api_key=agent_data.get("api_key", ""),
+            agent_id=agent_data.get("agent_id"),
+        )
+    return result
+
+
+def save_agent(
+    name: str,
+    api_key: str,
+    agent_id: str,
+    *,
+    base_url: str = _DEFAULT_BASE_URL,
+    instance: str | None = None,
+) -> None:
+    """Save an agent's credentials in the nested multi-agent format.
+
+    If an agent with the same name already exists, it is updated (upsert).
+    If there's a name collision with a different agent_id, the second agent
+    is stored under its agent_id as key with a warning.
+    """
+    data = _load_config()
+    inst_name = instance or data.get("default_instance") or _instance_name(base_url)
+
+    if "instances" not in data:
+        data["instances"] = {}
+
+    inst: dict = data["instances"].setdefault(inst_name, {})
+    inst.setdefault("base_url", base_url)
+
+    if "agents" not in inst:
+        inst["agents"] = {}
+
+    agents: dict = inst["agents"]
+
+    # Check for name collision (different agent_id under same name)
+    if name in agents and agents[name].get("agent_id") and agents[name]["agent_id"] != agent_id:
+        logger.warning(
+            "Duplicate agent name '%s'. Storing second agent under ID '%s'.",
+            name,
+            agent_id,
+        )
+        name = agent_id
+
+    agents[name] = {"api_key": api_key, "agent_id": agent_id}
+
+    # Set active_agent to this agent if none set
+    if not inst.get("active_agent"):
+        inst["active_agent"] = name
+
+    data.setdefault("default_instance", inst_name)
+
+    try:
+        _write_raw(data)
+    except Exception as exc:
+        logger.warning("Failed to save agent to %s: %s", CONFIG_PATH, exc)
+
+
+def set_active_agent(
+    name: str,
+    *,
+    instance: str | None = None,
+) -> None:
+    """Set which agent is active (used by Dashboard agent-selector)."""
+    data = _load_config()
+    instances = data.get("instances", {})
+    inst_name = instance or data.get("default_instance", "")
+    if inst_name not in instances:
+        return
+
+    instances[inst_name]["active_agent"] = name
+
+    try:
+        _write_raw(data)
+    except Exception as exc:
+        logger.warning("Failed to set active agent in %s: %s", CONFIG_PATH, exc)
+
+
+def maybe_migrate(
+    agent_name: str,
+    *,
+    instance: str | None = None,
+) -> None:
+    """Migrate flat api_key+agent_id into an agents.{name} subtable.
+
+    Called after the first successful get_state() when the agent name
+    becomes known from the server response. Creates config.toml.bak
+    before modifying the format.
+
+    No-op if the config already uses the nested format or if there's
+    nothing to migrate.
+    """
+    data = _load_config()
+    instances = data.get("instances", {})
+    if not instances:
+        return
+
+    inst_name = instance or data.get("default_instance", "")
+    cfg = instances.get(inst_name, {})
+    if not cfg:
+        return
+
+    # Already nested — nothing to do
+    if cfg.get("agents"):
+        return
+
+    # No flat key — nothing to migrate
+    flat_key = cfg.get("api_key", "")
+    if not flat_key:
+        return
+
+    flat_id = cfg.get("agent_id", "")
+
+    # Create backup before first migration
+    if CONFIG_PATH.exists():
+        bak = CONFIG_PATH.with_suffix(".toml.bak")
+        if not bak.exists():
+            try:
+                import shutil
+                shutil.copy2(CONFIG_PATH, bak)
+                logger.info("Config backup created: %s", bak)
+            except Exception:
+                pass  # non-fatal
+
+    # Move flat credentials into nested subtable
+    cfg["agents"] = {
+        agent_name: {"api_key": flat_key, "agent_id": flat_id} if flat_id else {"api_key": flat_key}
+    }
+    cfg["active_agent"] = agent_name
+
+    # Remove flat keys (now in subtable)
+    cfg.pop("api_key", None)
+    cfg.pop("agent_id", None)
+    # Keep 'activated' — it's a global flag, not per-agent
+
+    try:
+        _write_raw(data)
+        logger.info("Config migrated to multi-agent format (agent: %s)", agent_name)
+    except Exception as exc:
+        logger.warning("Failed to migrate config: %s", exc)
 
 
 # ---------------------------------------------------------------------------

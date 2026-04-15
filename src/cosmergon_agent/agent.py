@@ -16,8 +16,17 @@ from typing import Any
 import httpx
 
 from cosmergon_agent import __version__
+from cosmergon_agent._token import TokenResolutionError, _SensitiveStr, resolve_token_sync
 from cosmergon_agent.action import ActionResult
-from cosmergon_agent.config import CONFIG_PATH, load_credentials, save_credentials
+from cosmergon_agent.config import (
+    CONFIG_PATH,
+    load_all_agents,
+    load_credentials,
+    load_token,
+    save_agent,
+    save_credentials,
+    save_token,
+)
 from cosmergon_agent.exceptions import (
     AuthenticationError,
     CosmergonError,
@@ -36,18 +45,6 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MAX_RETRIES = 3
 _INITIAL_BACKOFF = 0.5
 _MAX_BACKOFF = 30.0
-
-
-class _SensitiveStr(str):
-    """String that masks its value in repr/str to prevent accidental logging."""
-
-    def __repr__(self) -> str:
-        if len(self) <= 8:
-            return "'***'"
-        return f"'{self[:4]}...{self[-4:]}'"
-
-    def __str__(self) -> str:
-        return self.__repr__()
 
 
 class CosmergonAgent:
@@ -73,30 +70,83 @@ class CosmergonAgent:
         poll_interval: float = 10.0,
         max_retries: int = _DEFAULT_MAX_RETRIES,
         auto_reconnect: bool = True,
+        player_token: str | None = None,
+        agent_name: str | None = None,
     ) -> None:
-        # C1: Resolve API key — explicit arg > env var > saved config > auto-register
-        # Track whether credentials came from the user (explicit) or were auto-managed.
-        # Used in _poll_loop to decide whether to re-register on 401 or raise an error.
-        _user_provided = bool(api_key or os.environ.get("COSMERGON_API_KEY", ""))
-        resolved_key = api_key or os.environ.get("COSMERGON_API_KEY", "")
-        if not resolved_key or not resolved_key.strip():
+        """Connect to Cosmergon.
+
+        Credential priority (first match wins):
+          1. ``api_key`` parameter
+          2. ``player_token`` parameter → resolved via Master Key API
+          3. ``COSMERGON_API_KEY`` env var
+          4. ``COSMERGON_PLAYER_TOKEN`` + ``COSMERGON_AGENT_NAME`` env vars
+          5. config.toml (saved credentials)
+          6. auto-register (new anonymous free agent)
+
+        Args:
+            api_key: Agent API key (AGENT-...:secret).
+            base_url: Server URL.
+            agent_id: Agent UUID (resolved automatically if omitted).
+            poll_interval: Seconds between state fetches in run().
+            max_retries: HTTP retry count.
+            auto_reconnect: Retry on transient errors in run().
+            player_token: Master Key (CSMR-...) for multi-agent access.
+            agent_name: Select agent by name when using player_token.
+                If omitted with multiple agents, the oldest is used.
+        """
+        # C1: 6-level credential resolution
+        # Track whether credentials came from the user (explicit) or auto-managed.
+        # Used in _poll_loop: user-provided → error on 401, auto → re-register.
+        _user_provided = False
+        resolved_key = ""
+
+        # Level 1: api_key parameter
+        if api_key:
+            resolved_key = api_key
+            _user_provided = True
+
+        # Level 2: player_token parameter
+        if not resolved_key and player_token:
+            resolved_key, agent_id = self._resolve_via_token(
+                player_token, base_url, agent_name,
+            )
+            _user_provided = True
+
+        # Level 3: COSMERGON_API_KEY env var
+        if not resolved_key:
+            env_key = os.environ.get("COSMERGON_API_KEY", "").strip()
+            if env_key:
+                resolved_key = env_key
+                _user_provided = True
+
+        # Level 4: COSMERGON_PLAYER_TOKEN + COSMERGON_AGENT_NAME env vars
+        if not resolved_key:
+            env_token = os.environ.get("COSMERGON_PLAYER_TOKEN", "").strip()
+            if env_token:
+                env_name = os.environ.get("COSMERGON_AGENT_NAME", "").strip() or None
+                resolved_key, agent_id = self._resolve_via_token(
+                    env_token, base_url, env_name,
+                )
+                _user_provided = True
+
+        # Level 5: config.toml
+        if not resolved_key:
             saved_key, saved_agent_id, saved_activated = load_credentials()
             if saved_key:
                 resolved_key = saved_key
                 if not agent_id:
                     agent_id = saved_agent_id
-                if saved_activated:
-                    # Credentials saved via 'activate' command — treat as user-provided.
-                    # On 401, stop with an error instead of silently re-registering as
-                    # a new anonymous free agent (which would silently drop paid tier).
+                if saved_activated or load_token():
+                    # Activated credentials or token in config → user-provided
                     _user_provided = True
                 logger.info("Loaded credentials from %s", CONFIG_PATH)
-            else:
-                # Auto-register anonymous agent and persist credentials
-                resolved_key, auto_agent_id = self._auto_register_anonymous(base_url)
-                if not agent_id:
-                    agent_id = auto_agent_id
-                save_credentials(resolved_key, agent_id, base_url=base_url)
+
+        # Level 6: auto-register anonymous agent
+        if not resolved_key:
+            resolved_key, auto_agent_id = self._auto_register_anonymous(base_url)
+            if not agent_id:
+                agent_id = auto_agent_id
+            save_credentials(resolved_key, agent_id, base_url=base_url)
         # M1: Input validation
         if not base_url.startswith(("http://", "https://")):
             raise ValueError("base_url must start with http:// or https://")
@@ -620,6 +670,70 @@ class CosmergonAgent:
     async def __aexit__(self, *args: Any) -> None:
         await self.close()
 
+    # --- Token resolution + reconnect ---
+
+    @staticmethod
+    def _resolve_via_token(
+        token: str,
+        base_url: str,
+        agent_name: str | None,
+    ) -> tuple[str, str]:
+        """Resolve a Master Key to (api_key, agent_id).
+
+        Saves token + all agents to config.toml for future use.
+        """
+        try:
+            result = resolve_token_sync(token, base_url=base_url, agent_name=agent_name)
+        except TokenResolutionError as exc:
+            raise AuthenticationError(str(exc)) from exc
+
+        # Select agent: named or oldest
+        if agent_name:
+            matches = [a for a in result.agents if a.agent_name == agent_name]
+            selected = matches[0] if matches else result.agents[0]
+        else:
+            selected = result.agents[0]
+
+        # Save token + all agents to config.toml
+        save_token(token, base_url=base_url)
+        for agent in result.agents:
+            raw_key = str.__str__(agent.api_key)
+            save_agent(agent.agent_name, raw_key, agent.agent_id, base_url=base_url)
+
+        from cosmergon_agent.config import set_active_agent
+
+        set_active_agent(selected.agent_name)
+
+        n = len(result.agents)
+        logger.info(
+            "Token resolved: %s (%s tier, %d agent%s). Active: %s",
+            result.player_id[:8],
+            result.subscription_tier,
+            n,
+            "s" if n != 1 else "",
+            selected.agent_name,
+        )
+
+        return str.__str__(selected.api_key), selected.agent_id
+
+    def reconnect(self, api_key: str, agent_id: str) -> None:
+        """Switch to a different agent without restarting.
+
+        Swaps credentials and clears cached state. The httpx client is
+        reused (same connection pool, just different auth headers).
+        Called by the Dashboard agent-selector [A].
+        """
+        self._api_key = _SensitiveStr(api_key)
+        self.agent_id = agent_id
+        self._state = None
+        self._auto_credentials = False
+
+        # Update auth header on the async client if it exists
+        if self._client is not None:
+            self._client.headers["Authorization"] = f"api-key {api_key}"
+
+        logger.info("Reconnected to agent %s", agent_id[:8] if agent_id else "?")
+
     # --- Auto-registration ---
 
     @staticmethod
@@ -730,11 +844,25 @@ class CosmergonAgent:
     async def _handle_expired_credentials(self) -> None:
         """React to a 401 response in the poll loop.
 
-        Auto-managed credentials (saved config / auto-registration) trigger a
-        silent re-registration so the agent keeps running. Explicitly provided
-        keys stop the loop with a clear error message instead.
+        Decision logic (Panel S110):
+        - Token in config.toml → user-initiated reconnect required (no auto-resolve,
+          prevents FIFO cascade with 4+ devices). Stops the loop with an error.
+        - Auto-managed (no token, no explicit key) → re-register as new agent.
+        - Explicitly provided key → stop with error.
         """
-        if self._auto_credentials:
+        has_token = bool(load_token())
+
+        if has_token:
+            # Paid user with token — FIFO-kick or revoked key.
+            # Do NOT auto-resolve (prevents cascade). User must reconnect.
+            logger.error(
+                "Authentication failed (401) — your key was replaced by a newer session. "
+                "Reconnect with your Master Key: "
+                "cosmergon-dashboard --token CSMR-..."
+            )
+            self._running = False
+        elif self._auto_credentials:
+            # Free user, auto-managed — re-register as new agent
             logger.warning(
                 "API key expired — registering as NEW anonymous agent. "
                 "Your previous agent is no longer accessible from this device."
@@ -750,9 +878,10 @@ class CosmergonAgent:
                 logger.error("Re-registration failed: %s", exc)
                 self._running = False
         else:
+            # Explicitly provided key — stop with error
             logger.error(
                 "Authentication failed (401) — your API key has been revoked or expired. "
-                "Run 'cosmergon-agent activate <code>' to reactivate, "
+                "Reconnect with your Master Key: cosmergon-dashboard --token CSMR-... "
                 "or contact support at contact@cosmergon.de"
             )
             self._running = False

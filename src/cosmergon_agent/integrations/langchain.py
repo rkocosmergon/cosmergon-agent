@@ -7,9 +7,14 @@ Usage::
 
     from cosmergon_agent.integrations.langchain import cosmergon_tools
 
-    tools = cosmergon_tools(api_key="csg_...", base_url="https://cosmergon.com")
+    # With API key (single agent):
+    tools = cosmergon_tools(api_key="AGENT-...:secret")
+
+    # With Master Key (multi-agent, v0.6.0+):
+    tools = cosmergon_tools(player_token="CSMR-...", agent_name="Odin-scout")
 
 Note: Requires `langchain-core` to be installed separately.
+No auto-registration — api_key or player_token is always required.
 """
 
 from __future__ import annotations
@@ -124,16 +129,37 @@ def _make_info_tool(tool_decorator: object, client: httpx.Client) -> object:
 def cosmergon_tools(
     api_key: str | None = None,
     base_url: str = "https://cosmergon.com",
+    player_token: str | None = None,
+    agent_name: str | None = None,
 ) -> list:
     """Create LangChain-compatible tools for Cosmergon.
 
+    Credential priority (first match wins):
+      1. ``api_key`` parameter
+      2. ``player_token`` parameter → resolved via GET /players/me/agents
+      3. ``COSMERGON_API_KEY`` env var
+      4. ``COSMERGON_PLAYER_TOKEN`` + ``COSMERGON_AGENT_NAME`` env vars
+
+    No auto-registration. If nothing is provided, raises ValueError.
+    This is intentional — LangChain users are advanced, and silent
+    auto-registration in a framework/CI context is surprising and risky
+    (Panel decision S106, confirmed S109).
+
     Args:
-        api_key: Cosmergon API key. Falls back to COSMERGON_API_KEY env var.
+        api_key: Agent API key (single agent).
         base_url: API server URL.
+        player_token: Master Key (CSMR-...) for multi-agent access.
+        agent_name: Select a specific agent when using player_token.
+            If omitted and multiple agents exist, the oldest is used
+            with a warning log.
 
     Returns:
         List of LangChain Tool objects.
     """
+    import logging as _logging
+
+    _logger = _logging.getLogger(__name__)
+
     try:
         from langchain_core.tools import tool
     except ImportError:
@@ -142,12 +168,50 @@ def cosmergon_tools(
             "Install it with: pip install langchain-core"
         ) from None
 
+    # Credential resolution — 4 levels, api_key always wins
     resolved_key = api_key or os.environ.get("COSMERGON_API_KEY", "")
+    resolved_agent_id: str | None = None
+
     if not resolved_key:
-        raise ValueError("api_key required or set COSMERGON_API_KEY env var")
+        # Try player_token (param or env)
+        token = player_token or os.environ.get("COSMERGON_PLAYER_TOKEN", "")
+        name = agent_name or os.environ.get("COSMERGON_AGENT_NAME", "")
+        if token:
+            from cosmergon_agent._token import TokenResolutionError, resolve_token_sync
+
+            try:
+                result = resolve_token_sync(
+                    token, base_url=base_url, agent_name=name or None,
+                )
+            except TokenResolutionError as exc:
+                raise ValueError(str(exc)) from exc
+
+            # Select agent: named or oldest
+            if name:
+                match = [a for a in result.agents if a.agent_name == name]
+                agent = match[0] if match else result.agents[0]
+            else:
+                agent = result.agents[0]
+
+            resolved_key = str.__str__(agent.api_key)
+            resolved_agent_id = agent.agent_id
+            _logger.info(
+                "Token resolved: agent=%s tier=%s",
+                agent.agent_name,
+                result.subscription_tier,
+            )
+
+    if not resolved_key:
+        raise ValueError(
+            "api_key or player_token required. Set COSMERGON_API_KEY or "
+            "COSMERGON_PLAYER_TOKEN env var, or pass as parameter."
+        )
+
+    if player_token and api_key:
+        _logger.debug("Both api_key and player_token given — using api_key")
 
     client = _get_client(resolved_key, base_url)
-    agent_id = _resolve_agent_id(client)
+    agent_id = resolved_agent_id or _resolve_agent_id(client)
 
     return [
         _make_observe_tool(tool, client, agent_id),
