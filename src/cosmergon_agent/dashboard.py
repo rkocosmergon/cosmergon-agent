@@ -1859,7 +1859,7 @@ class CosmergonDashboard(App):
 
         url = f"{self.agent.base_url}/api/v1/players/me/agents"
         try:
-            async with _httpx.AsyncClient(timeout=15.0) as client:
+            async with _httpx.AsyncClient(timeout=15.0, verify=True) as client:
                 resp = await client.post(
                     url,
                     headers={"X-Player-Token": token},

@@ -203,6 +203,7 @@ def resolve_token_sync(
             url,
             headers={"X-Player-Token": raw_token},
             timeout=timeout,
+            verify=True,
         )
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         raise TokenResolutionError(
@@ -231,7 +232,7 @@ async def resolve_token_async(
     raw_token = token.raw if isinstance(token, _SensitiveStr) else token
     url = f"{base_url.rstrip('/')}/api/v1/players/me/agents"
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout, verify=True) as client:
             resp = await client.get(
                 url,
                 headers={"X-Player-Token": raw_token},
