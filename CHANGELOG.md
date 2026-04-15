@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.6.0] — 2026-04-15
+
+### Added
+- **Multi-Agent Management (Master Key)**: `CosmergonAgent(player_token="CSMR-...",
+  agent_name="Odin-scout")` — connect to specific agents using your Master Key.
+  Works in all entry points: Python API, Dashboard (`--token`), MCP
+  (`COSMERGON_PLAYER_TOKEN` env), LangChain (`player_token=`).
+- **Dashboard Agent-Selector [A]**: Switch between agents without restarting.
+  Keyboard navigation, "New Agent" option. Only shown for Paid accounts.
+- **FIFO Reconnect Screen [R]**: When your key is replaced by another device,
+  press [R] to reconnect instantly using your saved Master Key.
+- **CLI export/import**: `cosmergon-agent export` (JSON to stdout) and
+  `cosmergon-agent import` (JSON from stdin) for credential backup and
+  transfer between machines.
+- **config.toml Multi-Agent Format**: Nested `[instances.*.agents.*]` TOML
+  tables. Reads both old (flat) and new (nested) formats. Migration
+  happens automatically on first `get_state()` when the agent name is known.
+- **Token Storage Warning**: One-time message after first `--token` login:
+  "Key saved — just run cosmergon-dashboard next time."
+- **`_SensitiveStr.raw` property**: Clean API for extracting unmasked
+  credentials (replaces `str.__str__()` workaround throughout codebase).
+
+### Changed
+- **6-level credential priority**: api_key param > player_token param >
+  COSMERGON_API_KEY env > COSMERGON_PLAYER_TOKEN env > config.toml >
+  auto-register.
+- **401 handling**: Token in config → no auto-re-register (prevents FIFO
+  cascade). Free without token → auto-re-register (unchanged).
+- **Modal keyboard hints (ONB-11)**: All modals now show all available keys
+  in their footer (KeyModal, OnboardingModal, FirstStartApp, ChatScreen).
+- **FirstStartApp text**: "Welcome." + "Create your agent" instead of
+  "No agent found" + "Start a new free agent".
+- **Getting-Started + Onboarding pages**: Updated for Master Key flow,
+  Team Setup section, credential priority docs.
+
+### Fixed
+- ReconnectScreen integration — exception propagates cleanly through
+  `_poll_loop → start() → _run_agent` (no flag-polling workaround).
+- `_resolve_token` in dashboard now saves token + agents to config.toml
+  (previously required `--token` on every start).
+- `_create_agent_via_token` uses POST (agent creation) instead of GET
+  (agent listing).
+- `maybe_migrate()` is now called after first `get_state()` (was defined
+  but never invoked).
+
+## [0.5.1] — 2026-04-14
+
+### Added
+- **Master Key support (Phase 1+2)**: `--token CSMR-...` in dashboard,
+  [K] KeyModal, FirstStartApp with CSMR- prefix detection.
+
+## [0.5.0] — 2026-04-14
+
+### Added
+- **KeyModal [K]**: Shows API key, config path, upgrade tip.
+- **FirstStartApp**: [Enter] new agent / [K] existing key.
+- **Re-Registration Warning**: Visible log when identity changes on 401.
+- **Statuszeile**: Tier + agent name + masked key in fix-bar.
+
+## [0.4.1] — 2026-04-12
+
+### Added
+- **AgentSituation**: Structured situational data replaces imperative tip.
+- **Dashboard [SYSTEM] log**: System messages in agent journal.
+- **SKILL.md**: ClawHub/OpenClaw skill manifest (80+ agents, 16 actions).
+
 ## [0.4.0] — 2026-04-10
 
 ### Added

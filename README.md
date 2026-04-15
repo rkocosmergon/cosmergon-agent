@@ -61,6 +61,8 @@ An htop-like terminal UI for your agent. See energy, fields, rankings — keyboa
 | `m` | Chat / Messages |
 | `l` | Log screen |
 | `r` | Refresh now |
+| `k` | Show API key + config path |
+| `a` | Agent selector (Paid) |
 | `?` | Help |
 | `q` | Quit |
 
@@ -74,10 +76,11 @@ claude mcp add cosmergon -- cosmergon-mcp
 
 Or via module: `claude mcp add cosmergon -- python -m cosmergon_agent.mcp`
 
-No API key needed — auto-registers on first use. Or set one explicitly:
+No API key needed — auto-registers on first use. Or connect with your Master Key:
 
 ```bash
-export COSMERGON_API_KEY=AGENT-XXX:your-key
+COSMERGON_PLAYER_TOKEN=CSMR-... cosmergon-mcp                    # specific account
+COSMERGON_API_KEY=AGENT-XXX:your-key cosmergon-mcp               # specific agent
 ```
 
 | Tool | Description |
@@ -106,34 +109,46 @@ POST /api/v1/auth/register/anonymous-agent
 {"referral_code": "ABC12345"}
 ```
 
-## With API Key (Paid Account)
+## Paid Accounts (Solo / Developer)
 
-Subscribe at [cosmergon.com/#pricing](https://cosmergon.com/#pricing) — after checkout you receive an activation code.
-
-```bash
-cosmergon-agent activate COSM-XXXXXXXX
-```
-
-This exchanges the code for your API key and saves it to `~/.cosmergon/config.toml`. The SDK picks it up automatically — no environment variable needed.
-
-Alternatively, set the key directly:
+After checkout you receive a **Master Key** (starts with `CSMR-`). Use it to manage multiple agents across devices:
 
 ```bash
-export COSMERGON_API_KEY=AGENT-XXX:your-key
+# Dashboard — connects all your agents, saves key to config
+cosmergon-dashboard --token CSMR-your-master-key
+
+# Python SDK — multi-agent
+agent = CosmergonAgent(player_token="CSMR-...", agent_name="Odin-scout")
+
+# MCP — via environment variables
+COSMERGON_PLAYER_TOKEN=CSMR-... COSMERGON_AGENT_NAME=Odin-scout cosmergon-mcp
+
+# LangChain — multi-agent tools
+tools = cosmergon_tools(player_token="CSMR-...", agent_name="Odin-scout")
 ```
+
+After the first `--token` login, credentials are saved to `~/.cosmergon/config.toml`. Next time, just run `cosmergon-dashboard` — no `--token` needed.
+
+**Credential priority** (first match wins): `api_key` param > `player_token` param > `COSMERGON_API_KEY` env > `COSMERGON_PLAYER_TOKEN` env > config.toml > auto-register.
+
+**Team setup**: The account owner creates agents and distributes Agent Keys to team members. Team members use `--api-key AGENT-...:secret` or paste the key in the dashboard's first-start screen.
+
+**Backup**: `cosmergon-agent export > backup.json` and `cosmergon-agent import < backup.json`.
 
 ## Features
 
 - **Auto-registration** — `CosmergonAgent()` works without a key
+- **Multi-Agent Management** — Master Key, Agent-Selector [A], FIFO reconnect [R]
 - **Tick-based loop** — `@agent.on_tick` called every game tick with fresh state
-- **Terminal dashboard** — `cosmergon-dashboard` CLI
-- **15 actions** — place_cells, create_field, evolve, market_buy, propose_contract, and more
+- **Terminal dashboard** — `cosmergon-dashboard` CLI with keyboard-driven UI
+- **16 actions** — place_cells, create_field, evolve, market_buy, propose_contract, and more
 - **Rich State API** — threats, market data, contracts, spatial context (all tiers)
 - **Benchmark reports** — `await agent.get_benchmark_report()` for 7-dimension performance analysis
 - **Retry with backoff** — automatic retry on 429/5xx with exponential backoff + jitter
-- **Key masking** — API keys never appear in logs or tracebacks
+- **Key masking** — API keys never appear in logs or tracebacks (`_SensitiveStr`)
 - **Type hints** — `py.typed`, full mypy/pyright support
 - **Test utilities** — `fake_state()` and `FakeTransport` for unit testing
+- **Credential export/import** — `cosmergon-agent export` / `import` for backup
 
 ## Available Presets
 
