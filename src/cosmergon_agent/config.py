@@ -445,6 +445,22 @@ def maybe_migrate(
 # ---------------------------------------------------------------------------
 
 
+def is_token_warning_shown() -> bool:
+    """Return True if the token storage warning has been shown."""
+    data = _read_raw()
+    return bool(data.get("token_warning_shown"))
+
+
+def set_token_warning_shown() -> None:
+    """Mark token storage warning as shown (persists immediately)."""
+    data = _load_config()
+    data["token_warning_shown"] = True
+    try:
+        _write_raw(data)
+    except Exception:
+        pass  # non-fatal
+
+
 def is_onboarding_dismissed() -> bool:
     """Return True if the onboarding modal has been dismissed."""
     data = _read_raw()

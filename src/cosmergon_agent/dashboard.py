@@ -37,6 +37,7 @@ try:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
     from textual.containers import Horizontal, Vertical, VerticalScroll
+    from textual.events import Key
     from textual.screen import ModalScreen
     from textual.widgets import Input, Label, Select, Static
 except ImportError as _exc:
@@ -49,7 +50,15 @@ except ImportError as _exc:
     ) from _exc
 
 from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError, __version__
-from cosmergon_agent.config import is_onboarding_dismissed, set_onboarding_dismissed
+from cosmergon_agent.config import (
+    is_onboarding_dismissed,
+    load_all_agents,
+    load_token,
+    save_agent,
+    save_token,
+    set_active_agent,
+    set_onboarding_dismissed,
+)
 from cosmergon_agent.exceptions import ConnectionError as CsgConnectionError
 from cosmergon_agent.exceptions import RateLimitError
 from cosmergon_agent.state import AgentSituation, Field, GameState
@@ -668,7 +677,7 @@ class KeyModal(ModalScreen):
             ]
         lines += [
             "",
-            "[dim]Press Esc to close[/dim]",
+            "[dim]Enter · Space · Esc close[/dim]",
         ]
         with Vertical(id="key-wrap"):
             for line in lines:
@@ -679,6 +688,163 @@ class KeyModal(ModalScreen):
 
     def action_close_key(self) -> None:
         self.dismiss(None)
+
+
+# ---------------------------------------------------------------------------
+# Agent Selector Modal [A] — Paket 3.3
+# ---------------------------------------------------------------------------
+
+
+class AgentSelectorModal(ModalScreen):
+    """Select an agent from the account, or create a new one.
+
+    Dismissed with the selected agent dict or None (Esc).
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
+        Binding("escape", "cancel", "Cancel", show=False),
+        Binding("n", "new_agent", "New Agent", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    AgentSelectorModal {
+        align: center middle;
+    }
+    AgentSelectorModal > #as-wrap {
+        width: 58;
+        height: auto;
+        max-height: 20;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    AgentSelectorModal > #as-wrap > .as-agent {
+        height: 1;
+        padding: 0 1;
+    }
+    AgentSelectorModal > #as-wrap > .as-agent-active {
+        height: 1;
+        padding: 0 1;
+        background: #2a2a3a;
+    }
+    """
+
+    def __init__(
+        self,
+        agents: list[dict],
+        active_agent: str,
+        tier: str,
+    ) -> None:
+        super().__init__()
+        self._agents = agents
+        self._active = active_agent
+        self._tier = tier
+        self._cursor = 0
+        # Find current agent index
+        for i, a in enumerate(agents):
+            if a.get("agent_name") == active_agent:
+                self._cursor = i
+                break
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="as-wrap"):
+            yield Label("[bold]Your Agents[/bold]", id="as-title")
+            yield Label("", id="as-list")
+            yield Label("[dim]↑ ↓ select · Enter confirm · N new agent · Esc cancel[/dim]", id="as-footer")
+
+    def on_mount(self) -> None:
+        self._render_list()
+        self.query_one("#as-wrap").focus()
+
+    def _render_list(self) -> None:
+        lines: list[str] = []
+        for i, a in enumerate(self._agents):
+            name = a.get("agent_name", "?")
+            energy = a.get("energy", 0)
+            persona = a.get("persona", "")
+            marker = "[bold cyan]▸[/bold cyan]" if i == self._cursor else " "
+            active_mark = " ★" if name == self._active else ""
+            lines.append(
+                f" {marker} {name}{active_mark}    "
+                f"[dim]{energy:.0f} E  {persona}  {self._tier}[/dim]"
+            )
+        lines.append(f" {'[bold cyan]▸[/bold cyan]' if self._cursor == len(self._agents) else ' '} [cyan]+ New Agent[/cyan]")
+        self.query_one("#as-list", Label).update("\n".join(lines))
+
+    def on_key(self, event: Key) -> None:
+        total = len(self._agents) + 1  # +1 for "New Agent"
+        if event.key == "up":
+            self._cursor = (self._cursor - 1) % total
+            self._render_list()
+            event.stop()
+        elif event.key == "down":
+            self._cursor = (self._cursor + 1) % total
+            self._render_list()
+            event.stop()
+        elif event.key == "enter":
+            if self._cursor == len(self._agents):
+                self.dismiss({"action": "new_agent"})
+            else:
+                self.dismiss({"action": "select", "agent": self._agents[self._cursor]})
+            event.stop()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_new_agent(self) -> None:
+        self.dismiss({"action": "new_agent"})
+
+
+# ---------------------------------------------------------------------------
+# FIFO Reconnect Screen [R] — Paket 3.3
+# ---------------------------------------------------------------------------
+
+
+class ReconnectScreen(ModalScreen):
+    """Shown when a 401 occurs and a Master Key is saved in config.
+
+    User presses [R] to reconnect (token from config) or [Q] to quit.
+    No auto-resolve — breaks FIFO cascade (Panel decision S110).
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
+        Binding("r", "reconnect", "Reconnect", show=False),
+        Binding("q", "quit_app", "Quit", show=False),
+        Binding("escape", "quit_app", "Quit", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    ReconnectScreen {
+        align: center middle;
+    }
+    ReconnectScreen > #rc-wrap {
+        width: 52;
+        height: auto;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="rc-wrap"):
+            yield Label("")
+            yield Label("  Your agent is active on another device.")
+            yield Label("")
+            yield Label("  [cyan]\\[R][/cyan]  Reconnect")
+            yield Label("  [cyan]\\[Q][/cyan]  Quit")
+            yield Label("")
+            yield Label("[dim]Your Master Key is saved. No re-entry needed.[/dim]")
+            yield Label("[dim]R reconnect · Q quit[/dim]")
+
+    def on_mount(self) -> None:
+        self.query_one("#rc-wrap").focus()
+
+    def action_reconnect(self) -> None:
+        self.dismiss("reconnect")
+
+    def action_quit_app(self) -> None:
+        self.dismiss("quit")
 
 
 # ---------------------------------------------------------------------------
@@ -772,6 +938,7 @@ class CosmergonDashboard(App):
         Binding("v", "field_view", "Fields", show=False, priority=True),
         Binding("tab", "cycle_focus", "Focus", show=False, priority=True),
         Binding("k", "show_key", "Key", show=False, priority=True),
+        Binding("a", "agent_selector", "Agents", show=False, priority=True),
         Binding("question_mark", "help", "Help", show=False, priority=True),
         Binding("q", "quit", "Quit", show=False, priority=True),
     ]
@@ -1193,8 +1360,12 @@ class CosmergonDashboard(App):
         keys = [
             k("Tab", "Focus"), k("C", "Compass", c_color), k("P", "Place"), k("F", "Field"),
             k("E", "Evolve"), k("V", "View"), k("M", "Chat"),
-            k("U", "Upgrade"), k("K", "Key"), k("?", "Help"), k("Q", "Quit"),
+            k("U", "Upgrade"), k("K", "Key"),
         ]
+        # [A] Agent selector — only for Paid users with token in config
+        if load_token():
+            keys.append(k("A", "Agents"))
+        keys += [k("?", "Help"), k("Q", "Quit")]
         self._update_panel("fix-bar", "  ".join(keys))
 
     def _get_plain_key(self) -> str:
@@ -1566,6 +1737,83 @@ class CosmergonDashboard(App):
         )
 
     @work
+    async def action_agent_selector(self) -> None:
+        """Open agent selector [A] — only if a token is in config."""
+        token = load_token()
+        if not token:
+            return  # no token = Free user, no selector
+
+        # Load agents from config (cached from last token resolution)
+        agents_dict = load_all_agents()
+        if not agents_dict:
+            self._set_feedback("No agents in config. Use --token to connect.")
+            return
+
+        state = self.agent.state
+        active_name = (state.agent_name if state else None) or ""
+        tier = (state.subscription_tier if state else None) or "?"
+
+        agents_list = [
+            {
+                "agent_name": name,
+                "agent_id": entry.agent_id or "",
+                "energy": 0,  # not cached in config
+                "persona": "",
+            }
+            for name, entry in agents_dict.items()
+        ]
+
+        result = await self.push_screen_wait(
+            AgentSelectorModal(agents_list, active_name, tier)
+        )
+
+        if result is None:
+            return  # Esc pressed
+
+        if result.get("action") == "new_agent":
+            await self._create_agent_via_token(token)
+        elif result.get("action") == "select":
+            agent_data = result["agent"]
+            name = agent_data["agent_name"]
+            if name == active_name:
+                return  # already active
+
+            # Find key in config
+            entry = agents_dict.get(name)
+            if entry and entry.api_key:
+                raw_key = entry.api_key
+                self.agent.reconnect(raw_key, entry.agent_id or "")
+                set_active_agent(name)
+                # Immediate refresh (Panel decision: no 3s delay)
+                self._redraw()
+                self._set_feedback(f"Switched to {name}")
+
+    async def _create_agent_via_token(self, token: str) -> None:
+        """Create a new agent via POST /players/me/agents."""
+        from cosmergon_agent._token import TokenResolutionError, resolve_token_sync
+
+        try:
+            result = resolve_token_sync(token, base_url=self.agent.base_url)
+        except TokenResolutionError as exc:
+            self._set_feedback(f"Error: {exc}")
+            return
+
+        # The API call already created fresh keys for all agents
+        # Save them all to config
+        for a in result.agents:
+            raw_key = str.__str__(a.api_key)
+            save_agent(a.agent_name, raw_key, a.agent_id, base_url=self.agent.base_url)
+
+        # Switch to newest agent (last in list)
+        if result.agents:
+            newest = result.agents[-1]
+            raw_key = str.__str__(newest.api_key)
+            self.agent.reconnect(raw_key, newest.agent_id)
+            set_active_agent(newest.agent_name)
+            self._redraw()
+            self._set_feedback(f"Agent created: {newest.agent_name}")
+
+    @work
     async def action_help(self) -> None:
         await self.push_screen_wait(HelpModal(self._theme.name))
 
@@ -1707,7 +1955,7 @@ class ChatScreen(ModalScreen):
             api_hint = " · Kein Auto-Antwort (API-Modus)"
         else:
             api_hint = " · Antwort ~60s"
-        header_text = f"[dim]Chat: {self._agent_name}{api_hint} · Esc: zurück[/dim]"
+        header_text = f"[dim]Chat: {self._agent_name}{api_hint} · Enter send · Esc close[/dim]"
         with Vertical(id="chat-wrap"):
             yield Label(header_text, id="chat-header")
             with VerticalScroll(id="history-scroll"):
@@ -2215,7 +2463,7 @@ class OnboardingModal(ModalScreen):
                 f"  {_c(self._theme.guide, _hk('V'))}  View field   — watch cells evolve live",
                 id="onboard-body",
             )
-            yield Label(_c("dim", "\\[ Got it ]"), id="onboard-footer")
+            yield Label(_c("dim", "Enter · Space · Esc dismiss"), id="onboard-footer")
 
     def action_dismiss_modal(self) -> None:
         self.dismiss()
@@ -2280,15 +2528,16 @@ class FirstStartApp(App):
     def compose(self) -> ComposeResult:
         with Vertical(id="fs-box"):
             yield Label("[bold cyan]COSMERGON[/bold cyan]", id="fs-title")
-            yield Label("[dim]No agent found on this device.[/dim]", id="fs-subtitle")
+            yield Label("[dim]Welcome.[/dim]", id="fs-subtitle")
             yield Label(
-                "[cyan]\\[Enter][/cyan]  Start a new free agent\n"
+                "[cyan]\\[Enter][/cyan]  Create your agent\n"
                 "[cyan]\\[K][/cyan]      I have a key\n\n"
-                "[dim]Your key is shown in the dashboard anytime. Press \\[K].[/dim]",
+                "[dim]Your key is always visible in the dashboard. Press \\[K].[/dim]",
                 id="fs-options",
             )
-            yield Input(placeholder="Paste your AGENT-... key", id="fs-input")
+            yield Input(placeholder="Paste key (AGENT-... or CSMR-...)", id="fs-input")
             yield Label("", id="fs-error")
+            yield Label("[dim]Enter new · K key · Q quit[/dim]", id="fs-footer")
 
     def action_new_agent(self) -> None:
         inp = self.query_one("#fs-input", Input)
@@ -2395,7 +2644,7 @@ def main() -> None:
         "Config: ~/.cosmergon/dashboard.toml  |  COSMERGON_THEME env var",
     )
     parser.add_argument("--api-key", help="API key (auto-registers if omitted)")
-    parser.add_argument("--token", help="Master Key (CSMR-...) — full support coming soon")
+    parser.add_argument("--token", help="Master Key (CSMR-...) — loads all your agents")
     parser.add_argument("--base-url", default="https://cosmergon.com")
     parser.add_argument("--theme", choices=list(THEMES), default=None)
     args = parser.parse_args()
@@ -2407,6 +2656,13 @@ def main() -> None:
             resolved_via_token = _resolve_token(args.token, args.base_url)
             if resolved_via_token:
                 args.api_key = resolved_via_token
+                # Token storage warning (once)
+                from cosmergon_agent.config import CONFIG_PATH, is_token_warning_shown, set_token_warning_shown
+                if not is_token_warning_shown():
+                    print(f"  Key saved to {CONFIG_PATH}")
+                    print("  Just run 'cosmergon-dashboard' next time — no --token needed.")
+                    print()
+                    set_token_warning_shown()
             else:
                 raise SystemExit(1)
         else:
