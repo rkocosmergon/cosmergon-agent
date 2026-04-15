@@ -24,11 +24,16 @@ logger = logging.getLogger(__name__)
 
 
 class _SensitiveStr(str):
-    """String that masks its value in repr to prevent accidental logging.
+    """String that masks its value in repr/str to prevent accidental logging.
 
-    ``str()`` returns the masked form (safe for logs).
-    Use ``str.__str__(instance)`` to get the raw value for HTTP headers.
+    ``str()`` and ``repr()`` return masked forms (safe for logs).
+    Use ``.raw`` to get the unmasked value for HTTP headers and config writes.
     """
+
+    @property
+    def raw(self) -> str:
+        """Return the unmasked value (for HTTP headers, config writes)."""
+        return str.__str__(self)
 
     def __repr__(self) -> str:
         if len(self) <= 8:
@@ -191,7 +196,7 @@ def resolve_token_sync(
     Raises:
         TokenResolutionError: Server returned an error with a user-facing message.
     """
-    raw_token = str.__str__(token) if isinstance(token, _SensitiveStr) else token
+    raw_token = token.raw if isinstance(token, _SensitiveStr) else token
     url = f"{base_url.rstrip('/')}/api/v1/players/me/agents"
     try:
         resp = httpx.get(
@@ -223,7 +228,7 @@ async def resolve_token_async(
 
     Same semantics as resolve_token_sync but uses httpx.AsyncClient.
     """
-    raw_token = str.__str__(token) if isinstance(token, _SensitiveStr) else token
+    raw_token = token.raw if isinstance(token, _SensitiveStr) else token
     url = f"{base_url.rstrip('/')}/api/v1/players/me/agents"
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:

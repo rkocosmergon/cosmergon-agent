@@ -1028,10 +1028,70 @@ class CosmergonDashboard(App):
         try:
             await self.agent.start()
         except AuthenticationError as exc:
-            self._auth_error = f"✗ Auth failed: {exc}"
-            self._add_log(_c(self._theme.warn, self._auth_error))
+            if load_token():
+                # FIFO-kick: key replaced on another device.
+                # AuthenticationError raised by _poll_loop AFTER the loop exits,
+                # propagated through start() → finally(close) → here.
+                # Client is already closed. Show ReconnectScreen.
+                await self._reconnect_flow()
+            else:
+                self._auth_error = f"✗ Auth failed: {exc}"
+                self._add_log(_c(self._theme.warn, self._auth_error))
         except Exception as exc:
             self._add_log(_c(self._theme.warn, f"Agent error: {exc}"))
+
+    async def _reconnect_flow(self) -> None:
+        """FIFO-kick recovery: ReconnectScreen → resolve token → restart agent.
+
+        Loops until reconnect succeeds or user quits. This is the standard
+        retry pattern (like SSH "Connection refused. Retry?").
+        """
+        while True:
+            result = await self.push_screen_wait(ReconnectScreen())
+            if result != "reconnect":
+                self.exit()
+                return
+            if await self._try_reconnect():
+                return  # agent restarted
+
+    async def _try_reconnect(self) -> bool:
+        """Resolve saved token, reconnect agent, restart poll loop.
+
+        Returns True on success (agent restarted), False on failure
+        (caller shows ReconnectScreen again).
+        """
+        token = load_token()
+        if not token:
+            self._set_feedback("No Master Key found. Use --token to connect.")
+            return False
+
+        from cosmergon_agent._token import TokenResolutionError, resolve_token_sync
+        from cosmergon_agent.config import save_all_agents_and_token
+
+        try:
+            result = resolve_token_sync(token, base_url=self.agent.base_url)
+        except TokenResolutionError as exc:
+            self._set_feedback(f"Reconnect failed: {exc}")
+            return False
+
+        selected = result.selected
+        raw_key = selected.api_key.raw
+
+        # Save updated keys (single write)
+        save_all_agents_and_token(
+            token,
+            [(a.agent_name, a.api_key.raw, a.agent_id) for a in result.agents],
+            selected.agent_name,
+            base_url=self.agent.base_url,
+        )
+
+        # Reconnect agent — resets _session_replaced, updates credentials
+        self.agent.reconnect(raw_key, selected.agent_id)
+        self._add_log(_c(self._theme.pos, f"Reconnected to {selected.agent_name}"))
+
+        # Restart agent (new worker — exclusive=True ensures old one is done)
+        self._run_agent()
+        return True
 
     @work
     async def _show_identity_setup(self) -> None:
@@ -1369,7 +1429,7 @@ class CosmergonDashboard(App):
 
     def _get_plain_key(self) -> str:
         """Return the unmasked API key (for KeyModal display)."""
-        return str.__str__(self.agent._api_key) if self.agent._api_key else ""
+        return self.agent._api_key.raw if self.agent._api_key else ""
 
     def _get_masked_key(self) -> str:
         """Return masked API key for status bar (first 8 chars + dots)."""
@@ -2626,7 +2686,7 @@ def _resolve_token(token: str, base_url: str) -> str | None:
 
     save_all_agents_and_token(
         token,
-        [(a.agent_name, str.__str__(a.api_key), a.agent_id) for a in result.agents],
+        [(a.agent_name, a.api_key.raw, a.agent_id) for a in result.agents],
         selected.agent_name,
         base_url=base_url,
     )
@@ -2637,7 +2697,7 @@ def _resolve_token(token: str, base_url: str) -> str | None:
     if n > 1:
         print(f"     ({n} agents total. Press [A] in the dashboard to switch.)")
     print()
-    return str.__str__(selected.api_key)
+    return selected.api_key.raw
 
 
 def main() -> None:

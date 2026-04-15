@@ -169,6 +169,7 @@ class CosmergonAgent:
         self._running = False
         self._state: GameState | None = None
         self._auto_credentials: bool = not _user_provided
+        self._session_replaced: bool = False  # True when 401 + token (FIFO kick)
         self._memory: dict[str, Any] = {}
 
     def __repr__(self) -> str:
@@ -552,7 +553,7 @@ class CosmergonAgent:
         """
         # Resolve agent_id synchronously if not yet known
         if not self.agent_id:
-            plain_key = str.__str__(self._api_key)
+            plain_key = self._api_key.raw
             with httpx.Client(timeout=10.0) as resolve_client:
                 resp = resolve_client.get(
                     f"{self.base_url}/api/v1/agents/",
@@ -572,7 +573,7 @@ class CosmergonAgent:
 
         while True:
             try:
-                plain_key = str.__str__(self._api_key)
+                plain_key = self._api_key.raw
                 headers: dict[str, str] = {
                     "Authorization": f"api-key {plain_key}",
                     "Accept": "text/event-stream",
@@ -690,7 +691,7 @@ class CosmergonAgent:
         # Save token + all agents to config.toml (single write)
         save_all_agents_and_token(
             token,
-            [(a.agent_name, str.__str__(a.api_key), a.agent_id) for a in result.agents],
+            [(a.agent_name, a.api_key.raw, a.agent_id) for a in result.agents],
             selected.agent_name,
             base_url=base_url,
         )
@@ -705,7 +706,7 @@ class CosmergonAgent:
             selected.agent_name,
         )
 
-        return str.__str__(selected.api_key), selected.agent_id
+        return selected.api_key.raw, selected.agent_id
 
     def reconnect(self, api_key: str, agent_id: str) -> None:
         """Switch to a different agent without restarting.
@@ -718,6 +719,7 @@ class CosmergonAgent:
         self.agent_id = agent_id
         self._state = None
         self._auto_credentials = False
+        self._session_replaced = False
 
         # Update auth header on the async client if it exists
         if self._client is not None:
@@ -762,7 +764,7 @@ class CosmergonAgent:
         """Single point of HTTP client creation (H3: DRY + consistent config)."""
         return httpx.AsyncClient(
             headers={
-                "Authorization": f"api-key {str.__str__(self._api_key)}",
+                "Authorization": f"api-key {self._api_key.raw}",
                 "User-Agent": f"cosmergon-agent-python/{__version__}",
                 "X-Cosmergon-SDK-Version": __version__,
             },
@@ -846,12 +848,14 @@ class CosmergonAgent:
         if has_token:
             # Paid user with token — FIFO-kick or revoked key.
             # Do NOT auto-resolve (prevents cascade). User must reconnect.
+            # Set flag so Dashboard can show ReconnectScreen after loop ends.
             logger.error(
                 "Authentication failed (401) — your key was replaced by a newer session. "
                 "Reconnect with your Master Key: "
                 "cosmergon-dashboard --token CSMR-..."
             )
             self._running = False
+            self._session_replaced = True
         elif self._auto_credentials:
             # Free user, auto-managed — re-register as new agent
             logger.warning(
@@ -923,3 +927,12 @@ class CosmergonAgent:
                 logger.exception("Unexpected error in agent loop")
 
             await asyncio.sleep(self.poll_interval)
+
+        # After loop exits — signal FIFO-kick to caller via exception.
+        # This raise is OUTSIDE the try/except block above, so it
+        # propagates cleanly through start() → finally(close) → caller.
+        if self._session_replaced:
+            raise AuthenticationError(
+                "Your key was replaced by a newer session. "
+                "Press [R] to reconnect with your Master Key.",
+            )

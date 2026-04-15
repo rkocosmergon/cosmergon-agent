@@ -107,12 +107,12 @@ async def _resolve_via_token(token: str, base_url: str, agent_name: str | None) 
     # Save to config (single write)
     save_all_agents_and_token(
         token,
-        [(a.agent_name, str.__str__(a.api_key), a.agent_id) for a in result.agents],
+        [(a.agent_name, a.api_key.raw, a.agent_id) for a in result.agents],
         selected.agent_name,
         base_url=base_url,
     )
 
-    raw_key = str.__str__(selected.api_key)
+    raw_key = selected.api_key.raw
     _error(
         f"Token resolved: agent={selected.agent_name} "
         f"tier={result.subscription_tier} ({len(result.agents)} agent(s))"

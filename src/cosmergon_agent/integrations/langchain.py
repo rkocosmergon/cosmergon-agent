@@ -187,7 +187,7 @@ def cosmergon_tools(
                 raise ValueError(str(exc)) from exc
 
             agent = result.selected  # set by _parse_agents_response
-            resolved_key = str.__str__(agent.api_key)
+            resolved_key = agent.api_key.raw
             resolved_agent_id = agent.agent_id
             _logger.info(
                 "Token resolved: agent=%s tier=%s",
