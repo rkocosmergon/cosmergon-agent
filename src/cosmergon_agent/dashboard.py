@@ -663,10 +663,10 @@ class KeyModal(ModalScreen):
             f"[bold]Agent:[/bold]  {self._agent_name}",
             f"[bold]Tier:[/bold]   {self._tier}",
             "",
-            f"[bold]API Key:[/bold]",
+            "[bold]API Key:[/bold]",
             f"  [cyan]{self._api_key}[/cyan]",
             "",
-            f"[bold]Config:[/bold]",
+            "[bold]Config:[/bold]",
             f"  [dim]{self._config_path}[/dim]",
         ]
         if self._tier == "free":
@@ -749,7 +749,11 @@ class AgentSelectorModal(ModalScreen):
         with Vertical(id="as-wrap"):
             yield Label("[bold]Your Agents[/bold]", id="as-title")
             yield Label("", id="as-list")
-            yield Label("[dim]↑ ↓ select · Enter confirm · N new agent · Esc cancel[/dim]", id="as-footer")
+            yield Label(
+                "[dim]↑ ↓ select · Enter confirm "
+                "· N new agent · Esc cancel[/dim]",
+                id="as-footer",
+            )
 
     def on_mount(self) -> None:
         self._render_list()
@@ -767,7 +771,9 @@ class AgentSelectorModal(ModalScreen):
                 f" {marker} {name}{active_mark}    "
                 f"[dim]{energy:.0f} E  {persona}  {self._tier}[/dim]"
             )
-        lines.append(f" {'[bold cyan]▸[/bold cyan]' if self._cursor == len(self._agents) else ' '} [cyan]+ New Agent[/cyan]")
+        is_new = self._cursor == len(self._agents)
+        marker = "[bold cyan]▸[/bold cyan]" if is_new else " "
+        lines.append(f" {marker} [cyan]+ New Agent[/cyan]")
         self.query_one("#as-list", Label).update("\n".join(lines))
 
     def on_key(self, event: Key) -> None:
@@ -1492,7 +1498,7 @@ class CosmergonDashboard(App):
                 else:
                     suffix = _c("dim", "takes effect at next tick soon")
                 return f"{self._feedback}  ·  {suffix}"
-            elif self._tick_received_at > 0:
+            if self._tick_received_at > 0:
                 elapsed = time.monotonic() - self._tick_received_at
                 remaining = self._tick_interval - elapsed
                 if remaining > 1.0:
@@ -2721,7 +2727,11 @@ def main() -> None:
             if resolved_via_token:
                 args.api_key = resolved_via_token
                 # Token storage warning (once)
-                from cosmergon_agent.config import CONFIG_PATH, is_token_warning_shown, set_token_warning_shown
+                from cosmergon_agent.config import (
+                    CONFIG_PATH,
+                    is_token_warning_shown,
+                    set_token_warning_shown,
+                )
                 if not is_token_warning_shown():
                     print(f"  Key saved to {CONFIG_PATH}")
                     print("  Just run 'cosmergon-dashboard' next time — no --token needed.")

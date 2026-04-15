@@ -391,7 +391,8 @@ def save_all_agents_and_token(
     for name, api_key, agent_id in agents:
         # Duplicate name check (same as save_agent)
         effective_name = name
-        if name in agents_table and agents_table[name].get("agent_id") and agents_table[name]["agent_id"] != agent_id:
+        existing = agents_table.get(name, {})
+        if existing.get("agent_id") and existing["agent_id"] != agent_id:
             logger.warning("Duplicate agent name '%s'. Storing under ID '%s'.", name, agent_id)
             effective_name = agent_id
         agents_table[effective_name] = {"api_key": api_key, "agent_id": agent_id}

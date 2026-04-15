@@ -28,7 +28,12 @@ import uuid
 import httpx
 
 from cosmergon_agent import __version__
-from cosmergon_agent.config import load_credentials, load_token, save_all_agents_and_token, save_credentials
+from cosmergon_agent.config import (
+    load_credentials,
+    load_token,
+    save_all_agents_and_token,
+    save_credentials,
+)
 
 # MCP protocol: communicates via stdin/stdout JSON-RPC
 # https://modelcontextprotocol.io/docs/spec

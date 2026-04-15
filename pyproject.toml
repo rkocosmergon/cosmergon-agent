@@ -71,7 +71,37 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "N", "UP", "B", "RUF"]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "N",     # pep8-naming
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "S",     # flake8-bandit (security)
+    "RUF",   # ruff-specific
+    "SIM",   # flake8-simplify
+    "C4",    # flake8-comprehensions
+    "PIE",   # flake8-pie (misc code smells)
+    "RET",   # flake8-return
+    "PERF",  # perflint (performance anti-patterns)
+    "T20",   # flake8-print (print in library code)
+    "FURB",  # refurb (modernisation)
+]
+ignore = [
+    "S110",    # try-except-pass — intentional for non-fatal ops (config write, message fetch)
+    "S311",    # random.random() — fine for backoff jitter, not crypto
+    "S104",    # 0.0.0.0 binding — intentional for webhook listener
+    "SIM105",  # contextlib.suppress — try-except-pass is explicit enough for our use cases
+    "SIM117",  # nested with — httpx stream() requires it for proper cleanup
+    "PERF203", # try-except in loop — cell parsing, negligible overhead
+    "PERF401", # list.extend vs append — micro-optimisation, readability wins
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/cosmergon_agent/cli.py" = ["T201"]       # CLI: print() is user-facing output
+"src/cosmergon_agent/dashboard.py" = ["T201"]  # Dashboard: print() for terminal output
 
 [tool.mypy]
 python_version = "3.10"
