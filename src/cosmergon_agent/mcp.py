@@ -102,10 +102,6 @@ async def _resolve_via_token(token: str, base_url: str, agent_name: str | None) 
         _error(f"Token resolution failed: {exc}")
         return ""
 
-    if not result.agents:
-        _error("No agents found for this token.")
-        return ""
-
     selected = result.selected  # set by _parse_agents_response
 
     # Save to config (single write)

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
 import httpx
 
@@ -135,7 +134,7 @@ def _parse_agents_response(
         for a in raw_agents
     ]
 
-    # Select specific agent if requested
+    # Select agent: named → match, unnamed → oldest (Panel decision S110 #7+#9)
     if agent_name:
         matches = [a for a in agents if a.agent_name == agent_name]
         if not matches:
@@ -146,11 +145,7 @@ def _parse_agents_response(
                 f"Check spelling or omit agent_name to use the default.",
                 status_code=200,
             )
-
-    # Select agent: named → match, unnamed → oldest (Panel decision S110 #7+#9)
-    if agent_name:
-        matches = [a for a in agents if a.agent_name == agent_name]
-        selected = matches[0]  # guaranteed non-empty (error raised above if no match)
+        selected = matches[0]
     else:
         selected = agents[0]
         if len(agents) > 1:
