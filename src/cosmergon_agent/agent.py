@@ -23,9 +23,8 @@ from cosmergon_agent.config import (
     load_all_agents,
     load_credentials,
     load_token,
-    save_agent,
+    save_all_agents_and_token,
     save_credentials,
-    save_token,
 )
 from cosmergon_agent.exceptions import (
     AuthenticationError,
@@ -687,22 +686,15 @@ class CosmergonAgent:
         except TokenResolutionError as exc:
             raise AuthenticationError(str(exc)) from exc
 
-        # Select agent: named or oldest
-        if agent_name:
-            matches = [a for a in result.agents if a.agent_name == agent_name]
-            selected = matches[0] if matches else result.agents[0]
-        else:
-            selected = result.agents[0]
+        selected = result.selected  # set by _parse_agents_response
 
-        # Save token + all agents to config.toml
-        save_token(token, base_url=base_url)
-        for agent in result.agents:
-            raw_key = str.__str__(agent.api_key)
-            save_agent(agent.agent_name, raw_key, agent.agent_id, base_url=base_url)
-
-        from cosmergon_agent.config import set_active_agent
-
-        set_active_agent(selected.agent_name)
+        # Save token + all agents to config.toml (single write)
+        save_all_agents_and_token(
+            token,
+            [(a.agent_name, str.__str__(a.api_key), a.agent_id) for a in result.agents],
+            selected.agent_name,
+            base_url=base_url,
+        )
 
         n = len(result.agents)
         logger.info(

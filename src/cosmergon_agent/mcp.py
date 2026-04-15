@@ -28,7 +28,7 @@ import uuid
 import httpx
 
 from cosmergon_agent import __version__
-from cosmergon_agent.config import load_credentials, load_token, save_agent, save_credentials, save_token
+from cosmergon_agent.config import load_credentials, load_token, save_all_agents_and_token, save_credentials
 
 # MCP protocol: communicates via stdin/stdout JSON-RPC
 # https://modelcontextprotocol.io/docs/spec
@@ -106,18 +106,15 @@ async def _resolve_via_token(token: str, base_url: str, agent_name: str | None) 
         _error("No agents found for this token.")
         return ""
 
-    # Select agent
-    if agent_name:
-        matches = [a for a in result.agents if a.agent_name == agent_name]
-        selected = matches[0] if matches else result.agents[0]
-    else:
-        selected = result.agents[0]
+    selected = result.selected  # set by _parse_agents_response
 
-    # Save to config
-    save_token(token, base_url=base_url)
-    for agent in result.agents:
-        raw_key = str.__str__(agent.api_key)
-        save_agent(agent.agent_name, raw_key, agent.agent_id, base_url=base_url)
+    # Save to config (single write)
+    save_all_agents_and_token(
+        token,
+        [(a.agent_name, str.__str__(a.api_key), a.agent_id) for a in result.agents],
+        selected.agent_name,
+        base_url=base_url,
+    )
 
     raw_key = str.__str__(selected.api_key)
     _error(

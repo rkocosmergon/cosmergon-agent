@@ -186,13 +186,7 @@ def cosmergon_tools(
             except TokenResolutionError as exc:
                 raise ValueError(str(exc)) from exc
 
-            # Select agent: named or oldest
-            if name:
-                match = [a for a in result.agents if a.agent_name == name]
-                agent = match[0] if match else result.agents[0]
-            else:
-                agent = result.agents[0]
-
+            agent = result.selected  # set by _parse_agents_response
             resolved_key = str.__str__(agent.api_key)
             resolved_agent_id = agent.agent_id
             _logger.info(

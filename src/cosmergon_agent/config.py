@@ -356,6 +356,54 @@ def save_agent(
         logger.warning("Failed to save agent to %s: %s", CONFIG_PATH, exc)
 
 
+def save_all_agents_and_token(
+    token: str,
+    agents: list[tuple[str, str, str]],
+    active_agent: str,
+    *,
+    base_url: str = _DEFAULT_BASE_URL,
+    instance: str | None = None,
+) -> None:
+    """Save token + all agents in a single write operation.
+
+    Args:
+        token: Player token (Master Key).
+        agents: List of (name, api_key, agent_id) tuples.
+        active_agent: Name of the agent to set as active.
+        base_url: Server URL.
+        instance: Instance name override.
+    """
+    data = _load_config()
+    inst_name = instance or data.get("default_instance") or _instance_name(base_url)
+
+    if "instances" not in data:
+        data["instances"] = {}
+
+    inst: dict = data["instances"].setdefault(inst_name, {})
+    inst["base_url"] = base_url
+    inst["player_token"] = token
+    inst["active_agent"] = active_agent
+
+    if "agents" not in inst:
+        inst["agents"] = {}
+
+    agents_table: dict = inst["agents"]
+    for name, api_key, agent_id in agents:
+        # Duplicate name check (same as save_agent)
+        effective_name = name
+        if name in agents_table and agents_table[name].get("agent_id") and agents_table[name]["agent_id"] != agent_id:
+            logger.warning("Duplicate agent name '%s'. Storing under ID '%s'.", name, agent_id)
+            effective_name = agent_id
+        agents_table[effective_name] = {"api_key": api_key, "agent_id": agent_id}
+
+    data.setdefault("default_instance", inst_name)
+
+    try:
+        _write_raw(data)
+    except Exception as exc:
+        logger.warning("Failed to save agents to %s: %s", CONFIG_PATH, exc)
+
+
 def set_active_agent(
     name: str,
     *,

@@ -55,7 +55,6 @@ from cosmergon_agent.config import (
     load_all_agents,
     load_token,
     save_agent,
-    save_token,
     set_active_agent,
     set_onboarding_dismissed,
 )
@@ -1794,12 +1793,12 @@ class CosmergonDashboard(App):
 
         url = f"{self.agent.base_url}/api/v1/players/me/agents"
         try:
-            resp = _httpx.post(
-                url,
-                headers={"X-Player-Token": token},
-                json={},
-                timeout=15.0,
-            )
+            async with _httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    url,
+                    headers={"X-Player-Token": token},
+                    json={},
+                )
         except (_httpx.ConnectError, _httpx.TimeoutException):
             self._set_feedback("Cannot reach server — try again later.")
             return
@@ -2536,9 +2535,10 @@ class FirstStartApp(App):
         Binding("q", "quit", show=False, priority=True),
     ]
 
-    def __init__(self) -> None:
+    def __init__(self, base_url: str = "https://cosmergon.com") -> None:
         super().__init__()
         self.result_key: str = ""  # populated if user enters a key
+        self._base_url = base_url
 
     def compose(self) -> ComposeResult:
         with Vertical(id="fs-box"):
@@ -2576,7 +2576,7 @@ class FirstStartApp(App):
             return
         # Recognize prefix — Master Key gets resolved to agent key
         if key.upper().startswith("CSMR-"):
-            resolved = _resolve_token(key, "https://cosmergon.com")
+            resolved = _resolve_token(key, self._base_url)
             if resolved:
                 self.result_key = resolved
                 self.exit()
@@ -2618,15 +2618,18 @@ def _resolve_token(token: str, base_url: str) -> str | None:
         print(f"\n\u2717  {exc}")
         return None
 
-    selected = result.agents[0]
+    selected = result.selected  # set by _parse_agents_response
     n = len(result.agents)
 
-    # Save token + all agents to config
-    save_token(token, base_url=base_url)
-    for a in result.agents:
-        raw_key = str.__str__(a.api_key)
-        save_agent(a.agent_name, raw_key, a.agent_id, base_url=base_url)
-    set_active_agent(selected.agent_name)
+    # Save token + all agents to config (single write)
+    from cosmergon_agent.config import save_all_agents_and_token
+
+    save_all_agents_and_token(
+        token,
+        [(a.agent_name, str.__str__(a.api_key), a.agent_id) for a in result.agents],
+        selected.agent_name,
+        base_url=base_url,
+    )
 
     # Terminal output (positive framing — CJ-Panel S110)
     print(f"\n  \u2713  Switching to your {result.subscription_tier} account")
@@ -2676,7 +2679,7 @@ def main() -> None:
     # First-start screen: shown when no credentials exist
     if _needs_first_start(resolved_key):
         try:
-            first_start = FirstStartApp()
+            first_start = FirstStartApp(base_url=args.base_url)
             first_start.run()
             if first_start.result_key:
                 resolved_key = first_start.result_key

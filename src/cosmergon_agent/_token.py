@@ -65,6 +65,7 @@ class TokenResolutionResult:
     subscription_tier: str
     max_agents: int
     agents: list[ResolvedAgent] = field(default_factory=list)
+    selected: ResolvedAgent | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -146,24 +147,27 @@ def _parse_agents_response(
                 status_code=200,
             )
 
-    result = TokenResolutionResult(
+    # Select agent: named → match, unnamed → oldest (Panel decision S110 #7+#9)
+    if agent_name:
+        matches = [a for a in agents if a.agent_name == agent_name]
+        selected = matches[0]  # guaranteed non-empty (error raised above if no match)
+    else:
+        selected = agents[0]
+        if len(agents) > 1:
+            logger.warning(
+                "Multiple agents found (%d), using oldest: %s. "
+                "Specify agent_name= to select a different agent.",
+                len(agents),
+                selected.agent_name,
+            )
+
+    return TokenResolutionResult(
         player_id=data.get("player_id", ""),
         subscription_tier=data.get("subscription_tier", ""),
         max_agents=data.get("max_agents", 0),
         agents=agents,
+        selected=selected,
     )
-
-    # Log multi-agent info
-    if len(agents) > 1 and not agent_name:
-        selected = agents[0].agent_name
-        logger.warning(
-            "Multiple agents found (%d), using oldest: %s. "
-            "Specify agent_name= to select a different agent.",
-            len(agents),
-            selected,
-        )
-
-    return result
 
 
 # ---------------------------------------------------------------------------
