@@ -910,6 +910,12 @@ class CosmergonAgent:
 
                 self._state = GameState.from_api(resp.json())
 
+                # Migrate config.toml to nested format on first successful state fetch
+                # (agent_name becomes known from server response — Panel decision S110)
+                if last_tick == -1 and self._state.agent_name:
+                    from cosmergon_agent.config import maybe_migrate
+                    maybe_migrate(self._state.agent_name)
+
                 if self._state.tick != last_tick and self._tick_handler:
                     last_tick = self._state.tick
                     await self._tick_handler(self._state)

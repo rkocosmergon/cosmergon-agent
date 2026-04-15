@@ -1789,29 +1789,44 @@ class CosmergonDashboard(App):
                 self._set_feedback(f"Switched to {name}")
 
     async def _create_agent_via_token(self, token: str) -> None:
-        """Create a new agent via POST /players/me/agents."""
-        from cosmergon_agent._token import TokenResolutionError, resolve_token_sync
+        """Create a new agent via POST /players/me/agents (Token-Auth)."""
+        import httpx as _httpx
 
+        url = f"{self.agent.base_url}/api/v1/players/me/agents"
         try:
-            result = resolve_token_sync(token, base_url=self.agent.base_url)
-        except TokenResolutionError as exc:
-            self._set_feedback(f"Error: {exc}")
+            resp = _httpx.post(
+                url,
+                headers={"X-Player-Token": token},
+                json={},
+                timeout=15.0,
+            )
+        except (_httpx.ConnectError, _httpx.TimeoutException):
+            self._set_feedback("Cannot reach server — try again later.")
             return
 
-        # The API call already created fresh keys for all agents
-        # Save them all to config
-        for a in result.agents:
-            raw_key = str.__str__(a.api_key)
-            save_agent(a.agent_name, raw_key, a.agent_id, base_url=self.agent.base_url)
+        if resp.status_code == 403:
+            self._set_feedback(
+                "Agent limit reached for your plan. cosmergon.com/pricing"
+            )
+            return
+        if resp.status_code == 429:
+            self._set_feedback("Too many requests — try again later.")
+            return
+        if resp.status_code != 200:
+            self._set_feedback(f"Error ({resp.status_code}): {resp.text[:100]}")
+            return
 
-        # Switch to newest agent (last in list)
-        if result.agents:
-            newest = result.agents[-1]
-            raw_key = str.__str__(newest.api_key)
-            self.agent.reconnect(raw_key, newest.agent_id)
-            set_active_agent(newest.agent_name)
+        data = resp.json()
+        new_key = data.get("api_key", "")
+        new_name = data.get("agent_name", "?")
+        new_id = data.get("agent_id", "")
+
+        if new_key:
+            save_agent(new_name, new_key, new_id, base_url=self.agent.base_url)
+            self.agent.reconnect(new_key, new_id)
+            set_active_agent(new_name)
             self._redraw()
-            self._set_feedback(f"Agent created: {newest.agent_name}")
+            self._set_feedback(f"Agent created: {new_name}")
 
     @work
     async def action_help(self) -> None:
@@ -2589,51 +2604,37 @@ def _needs_first_start(api_key: str | None) -> bool:
 
 
 def _resolve_token(token: str, base_url: str) -> str | None:
-    """Exchange a Master Key (CSMR-...) for the first agent's API key.
+    """Exchange a Master Key (CSMR-...) for the oldest agent's API key.
 
-    Calls GET /api/v1/players/me/agents with X-Player-Token header.
-    Returns the API key of the first (oldest) agent, or None on error.
+    Uses resolve_token_sync from _token.py. Saves token + all agents
+    to config.toml so the user doesn't need --token next time.
+    Returns the API key of the oldest agent, or None on error.
     """
-    import httpx
+    from cosmergon_agent._token import TokenResolutionError, resolve_token_sync
 
-    url = f"{base_url.rstrip('/')}/api/v1/players/me/agents"
     try:
-        resp = httpx.get(url, headers={"X-Player-Token": token}, timeout=15.0)
-    except (httpx.ConnectError, httpx.TimeoutException):
-        print(f"\n\u2717  Cannot reach {base_url} — check your internet connection.")
+        result = resolve_token_sync(token, base_url=base_url)
+    except TokenResolutionError as exc:
+        print(f"\n\u2717  {exc}")
         return None
 
-    if resp.status_code == 403:
-        print("\n\u2717  Master keys are available with Solo and Developer plans.")
-        print("   cosmergon.com/pricing")
-        return None
-    if resp.status_code == 401:
-        print("\n\u2717  Invalid Master Key. Check your key and try again.")
-        return None
-    if resp.status_code == 429:
-        print("\n\u2717  Too many requests. Master key endpoints are limited to 3 per hour.")
-        return None
-    if resp.status_code != 200:
-        print(f"\n\u2717  Error ({resp.status_code}): {resp.text[:200]}")
-        return None
+    selected = result.agents[0]
+    n = len(result.agents)
 
-    data = resp.json()
-    agents = data.get("agents", [])
-    if not agents:
-        print("\n\u2717  No agents found for this account.")
-        print("   Create one at cosmergon.com or via the API.")
-        return None
+    # Save token + all agents to config
+    save_token(token, base_url=base_url)
+    for a in result.agents:
+        raw_key = str.__str__(a.api_key)
+        save_agent(a.agent_name, raw_key, a.agent_id, base_url=base_url)
+    set_active_agent(selected.agent_name)
 
-    agent = agents[0]
-    api_key = agent.get("api_key", "")
-    name = agent.get("agent_name", "?")
-    tier = data.get("subscription_tier", "?")
-    print(f"\n  \u2713  Master Key accepted ({tier} tier)")
-    print(f"     Agent: {name}")
-    if len(agents) > 1:
-        print(f"     ({len(agents)} agents total — connected to oldest)")
+    # Terminal output (positive framing — CJ-Panel S110)
+    print(f"\n  \u2713  Switching to your {result.subscription_tier} account")
+    print(f"     Agent: {selected.agent_name}")
+    if n > 1:
+        print(f"     ({n} agents total. Press [A] in the dashboard to switch.)")
     print()
-    return api_key
+    return str.__str__(selected.api_key)
 
 
 def main() -> None:
