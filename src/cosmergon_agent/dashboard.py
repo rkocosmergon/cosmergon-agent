@@ -1804,20 +1804,68 @@ class CosmergonDashboard(App):
             self._set_feedback(_c(self._theme.warn, f"✗ Evolve failed: {exc}"))
 
     async def action_upgrade(self) -> None:
+        state = self.agent._state
+        tier = (state.subscription_tier if state else "free")
+        agent_type = (state.agent_type if state else "")
+
+        # Anonymous free agent → direct Stripe checkout via API (Paket 2.7a SDK)
+        # Panel S112: einstimmig, mit SelectModal + Fallback
+        if agent_type == "anonymous_agent" and tier == "free":
+            await self._upgrade_anonymous_via_api()
+            return
+
+        # All other cases → open website (owner manages billing)
         _upgrade_urls: dict[str, str] = {
             "free": "https://cosmergon.com/solo.html",
             "solo": "https://cosmergon.com/developer-plan.html",
             "developer": "https://cosmergon.com/enterprise.html",
         }
-        tier = (self.agent._state.subscription_tier if self.agent._state else "free")
         url = _upgrade_urls.get(tier)
         if url is None:
-            # enterprise — no higher tier
             self._set_feedback(_c(self._theme.data, "✓ You are on the top tier (Enterprise)"))
             return
         webbrowser.open(url)
         self._add_log(_c(self._theme.pos, f"✓ Upgrade page opened ({tier} → next tier)"))
         self._set_feedback(_c(self._theme.pos, "✓ Browser opened — complete upgrade there"))
+
+    async def _upgrade_anonymous_via_api(self) -> None:
+        """Paket 2.7a SDK: Direct Stripe checkout for anonymous free agents.
+
+        Panel S112: SelectModal for tier choice + robust fallback on any error.
+        """
+        # Tier selection (Panel: Security — user decides, not SDK)
+        choice = await self.push_screen_wait(
+            SelectModal("Upgrade to:", ["Solo — 2 agents, permanent", "Developer — 5 agents, team"])
+        )
+        if choice is None:
+            return  # Esc
+        tier = "solo" if choice == 0 else "developer"
+
+        import httpx as _httpx
+
+        url = f"{self.agent.base_url}/api/v1/billing/create-upgrade-checkout?tier={tier}"
+        try:
+            async with _httpx.AsyncClient(timeout=15.0, verify=True) as client:
+                resp = await client.post(
+                    url,
+                    headers={"Authorization": f"api-key {self.agent._api_key.raw}"},
+                )
+            if resp.status_code == 200:
+                checkout_url = resp.json().get("checkout_url", "")
+                if checkout_url:
+                    webbrowser.open(checkout_url)
+                    self._set_feedback(
+                        _c(self._theme.pos, "✓ Stripe checkout opened — complete payment there")
+                    )
+                    return
+        except Exception:
+            pass  # Fallback below
+
+        # Fallback: open website (Panel: Engineering — robust degradation)
+        webbrowser.open("https://cosmergon.com/solo.html")
+        self._set_feedback(
+            _c(self._theme.pos, "✓ Upgrade page opened — complete upgrade there")
+        )
 
     async def action_pause(self) -> None:
         action = "resume" if self._paused else "pause"
