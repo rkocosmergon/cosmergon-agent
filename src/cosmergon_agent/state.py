@@ -149,6 +149,8 @@ class GameState:
     persona_type: str = ""  # active persona (scientist, warrior, …) — empty if not yet set
     agent_mode: str = "api"  # "api" | "llm" | "vagant" — api agents don't auto-respond to chat
     subscription_tier: str = "free"
+    has_stripe_customer: bool = False  # Owner has Stripe record (ex-paid or active-paid)
+    subscription_downgrade_at: str | None = None  # ISO timestamp: cancel grace period end
     world_briefing: WorldBriefing | None = None
     learned_rules: list[str] = field(default_factory=list)
     next_tick_at: float | None = None  # Unix timestamp when next game tick fires (server truth)
@@ -184,6 +186,8 @@ class GameState:
             tick=data.get("tick", 0),
             agent_mode=data.get("agent_mode", "api"),
             subscription_tier=data.get("subscription_tier", "free"),
+            has_stripe_customer=bool(data.get("has_stripe_customer", False)),
+            subscription_downgrade_at=data.get("subscription_downgrade_at"),
             world_briefing=world_briefing,
             learned_rules=data.get("learned_rules", []),
             next_tick_at=data.get("next_tick_at"),

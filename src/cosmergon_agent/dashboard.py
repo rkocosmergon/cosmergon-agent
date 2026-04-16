@@ -651,12 +651,22 @@ class KeyModal(ModalScreen):
     }
     """
 
-    def __init__(self, api_key: str, config_path: str, tier: str, agent_name: str) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        config_path: str,
+        tier: str,
+        agent_name: str,
+        has_stripe_customer: bool = False,
+        downgrade_at: str | None = None,
+    ) -> None:
         super().__init__()
         self._api_key = api_key
         self._config_path = config_path
         self._tier = tier
         self._agent_name = agent_name
+        self._has_stripe = has_stripe_customer
+        self._downgrade_at = downgrade_at
 
     def compose(self) -> ComposeResult:
         lines: list[str] = [
@@ -669,7 +679,21 @@ class KeyModal(ModalScreen):
             "[bold]Config:[/bold]",
             f"  [dim]{self._config_path}[/dim]",
         ]
-        if self._tier == "free":
+        # Paket 4.6b: Post-Cancel grace period notice
+        if self._downgrade_at:
+            date_part = self._downgrade_at[:10]  # YYYY-MM-DD from ISO
+            lines += [
+                "",
+                f"[yellow]Plan cancelled. Access continues until {date_part}.[/yellow]",
+                "[dim]Reactivate at cosmergon.com/pricing[/dim]",
+            ]
+        elif self._tier == "free" and self._has_stripe:
+            # Paket 4.5b: Ex-subscriber — show reactivate instead of upgrade
+            lines += [
+                "",
+                "[dim]Reactivate your plan at cosmergon.com/pricing[/dim]",
+            ]
+        elif self._tier == "free":
             lines += [
                 "",
                 "[dim]Permanent key? Upgrade at cosmergon.com/upgrade[/dim]",
@@ -840,7 +864,7 @@ class ReconnectScreen(ModalScreen):
             yield Label("  [cyan]\\[Q][/cyan]  Quit")
             yield Label("")
             yield Label("[dim]Your Master Key is saved. No re-entry needed.[/dim]")
-            yield Label("[dim]R reconnect · Q quit[/dim]")
+            yield Label("[dim]R reconnect · Q or Esc quit[/dim]")
 
     def on_mount(self) -> None:
         self.query_one("#rc-wrap").focus()
@@ -1797,8 +1821,17 @@ class CosmergonDashboard(App):
         state = self.agent.state
         name = (state.agent_name if state else None) or (self.agent.agent_id or "?")[:8]
         tier = (state.subscription_tier if state else None) or "free"
+        has_stripe = state.has_stripe_customer if state else False
+        downgrade = state.subscription_downgrade_at if state else None
         await self.push_screen_wait(
-            KeyModal(self._get_plain_key(), str(CONFIG_PATH), tier, name)
+            KeyModal(
+                self._get_plain_key(),
+                str(CONFIG_PATH),
+                tier,
+                name,
+                has_stripe_customer=has_stripe,
+                downgrade_at=downgrade,
+            )
         )
 
     @work
@@ -2599,6 +2632,7 @@ class FirstStartApp(App):
         Binding("enter", "new_agent", show=False, priority=True),
         Binding("k", "enter_key", show=False, priority=True),
         Binding("q", "quit", show=False, priority=True),
+        Binding("escape", "quit", show=False, priority=True),
     ]
 
     def __init__(self, base_url: str = "https://cosmergon.com") -> None:
@@ -2618,7 +2652,7 @@ class FirstStartApp(App):
             )
             yield Input(placeholder="Paste key (AGENT-... or CSMR-...)", id="fs-input")
             yield Label("", id="fs-error")
-            yield Label("[dim]Enter new · K key · Q quit[/dim]", id="fs-footer")
+            yield Label("[dim]Enter new · K key · Q or Esc quit[/dim]", id="fs-footer")
 
     def action_new_agent(self) -> None:
         inp = self.query_one("#fs-input", Input)
