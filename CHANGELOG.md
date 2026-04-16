@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.7.0] — 2026-04-16
+
+### Added
+- **Token-Rotation [K]→[R]**: Rotate your Master Key from the KeyModal.
+  Confirmation dialog, saves new key to config.toml before showing success.
+  Only shown for Paid accounts with a saved token.
+- **Key-Revocation [A]→[D]**: Revoke all API keys for an agent from the
+  Agent-Selector. Token-Auth via POST /players/me/agents/{id}/revoke-keys.
+  Active-agent special case: auto-reconnect after revoke.
+- **Direct Stripe Upgrade [U]**: Anonymous free agents get a direct Stripe
+  checkout from the dashboard (tier selection: Solo/Developer). Falls back
+  to website on any error. Paid/owned agents unchanged.
+- **Portal-Link + Cancel-UX**: KeyModal shows "Reactivate" for ex-subscribers
+  (has_stripe_customer=true) and grace period date for cancelled plans
+  (subscription_downgrade_at).
+- **GameState fields**: `has_stripe_customer` (bool) and
+  `subscription_downgrade_at` (ISO string or None) from server state.
+
+### Fixed
+- **Esc consistency**: ReconnectScreen and FirstStartApp now show "Esc" in
+  footer hint and have Esc keybinding (was Q-only, inconsistent with all
+  other modals).
+
 ## [0.6.0] — 2026-04-15
 
 ### Added
