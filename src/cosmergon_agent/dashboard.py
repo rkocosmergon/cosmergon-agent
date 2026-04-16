@@ -625,12 +625,16 @@ class HelpModal(ModalScreen):
 
 
 class KeyModal(ModalScreen):
-    """Show API key, config path, and upgrade tip. Esc/Enter/Space to close."""
+    """Show API key, config path, and upgrade tip. Esc/Enter/Space to close.
+
+    Dismissed with None (close) or "rotate" (trigger token rotation).
+    """
 
     BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
         Binding("escape", "close_key", "Close", show=False),
         Binding("enter", "close_key", "Close", show=False),
         Binding("space", "close_key", "Close", show=False),
+        Binding("r", "rotate_key", "Rotate", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -659,6 +663,7 @@ class KeyModal(ModalScreen):
         agent_name: str,
         has_stripe_customer: bool = False,
         downgrade_at: str | None = None,
+        has_token: bool = False,
     ) -> None:
         super().__init__()
         self._api_key = api_key
@@ -667,6 +672,7 @@ class KeyModal(ModalScreen):
         self._agent_name = agent_name
         self._has_stripe = has_stripe_customer
         self._downgrade_at = downgrade_at
+        self._has_token = has_token
 
     def compose(self) -> ComposeResult:
         lines: list[str] = [
@@ -698,10 +704,13 @@ class KeyModal(ModalScreen):
                 "",
                 "[dim]Permanent key? Upgrade at cosmergon.com/upgrade[/dim]",
             ]
-        lines += [
-            "",
-            "[dim]Enter · Space · Esc close[/dim]",
-        ]
+        # Paket 4.1: Rotate hint (only for Paid users with a saved Master Key)
+        can_rotate = self._has_token and self._tier not in ("free", "")
+        footer = "[dim]Enter · Space · Esc close"
+        if can_rotate:
+            footer += " · R rotate Master Key"
+        footer += "[/dim]"
+        lines += ["", footer]
         with Vertical(id="key-wrap"):
             for line in lines:
                 yield Label(line)
@@ -712,6 +721,12 @@ class KeyModal(ModalScreen):
     def action_close_key(self) -> None:
         self.dismiss(None)
 
+    def action_rotate_key(self) -> None:
+        """Signal the dashboard to perform token rotation."""
+        if self._has_token and self._tier not in ("free", ""):
+            self.dismiss("rotate")
+        # Free users: R does nothing (no hint shown either)
+
 
 # ---------------------------------------------------------------------------
 # Agent Selector Modal [A] — Paket 3.3
@@ -721,12 +736,17 @@ class KeyModal(ModalScreen):
 class AgentSelectorModal(ModalScreen):
     """Select an agent from the account, or create a new one.
 
-    Dismissed with the selected agent dict or None (Esc).
+    Dismissed with:
+      {"action": "select", "agent": {...}} — switch to selected agent
+      {"action": "new_agent"} — create a new agent
+      {"action": "revoke", "agent": {...}} — revoke key for selected agent
+      None — cancelled (Esc)
     """
 
     BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
         Binding("escape", "cancel", "Cancel", show=False),
         Binding("n", "new_agent", "New Agent", show=False),
+        Binding("d", "revoke_key", "Revoke Key", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -775,7 +795,7 @@ class AgentSelectorModal(ModalScreen):
             yield Label("", id="as-list")
             yield Label(
                 "[dim]↑ ↓ select · Enter confirm "
-                "· N new agent · Esc cancel[/dim]",
+                "· N new · D revoke key · Esc cancel[/dim]",
                 id="as-footer",
             )
 
@@ -822,6 +842,12 @@ class AgentSelectorModal(ModalScreen):
 
     def action_new_agent(self) -> None:
         self.dismiss({"action": "new_agent"})
+
+    def action_revoke_key(self) -> None:
+        """Paket 4.2: Signal dashboard to revoke the selected agent's key."""
+        if self._cursor < len(self._agents):
+            self.dismiss({"action": "revoke", "agent": self._agents[self._cursor]})
+        # Cursor on "+ New Agent" → D does nothing
 
 
 # ---------------------------------------------------------------------------
@@ -1816,14 +1842,15 @@ class CosmergonDashboard(App):
 
     @work
     async def action_show_key(self) -> None:
-        from cosmergon_agent.config import CONFIG_PATH
+        from cosmergon_agent.config import CONFIG_PATH, load_token
 
         state = self.agent.state
         name = (state.agent_name if state else None) or (self.agent.agent_id or "?")[:8]
         tier = (state.subscription_tier if state else None) or "free"
         has_stripe = state.has_stripe_customer if state else False
         downgrade = state.subscription_downgrade_at if state else None
-        await self.push_screen_wait(
+        token = load_token()
+        result = await self.push_screen_wait(
             KeyModal(
                 self._get_plain_key(),
                 str(CONFIG_PATH),
@@ -1831,8 +1858,123 @@ class CosmergonDashboard(App):
                 name,
                 has_stripe_customer=has_stripe,
                 downgrade_at=downgrade,
+                has_token=bool(token),
             )
         )
+        if result == "rotate":
+            await self._rotate_master_key(token)
+
+    async def _rotate_master_key(self, token: str) -> None:
+        """Paket 4.1: Rotate Master Key via POST /billing/regenerate-token.
+
+        Confirmation → API call → save new token to config.toml → feedback.
+        """
+        # Confirmation dialog (Panel SEC-10: PFLICHT)
+        confirm = await self.push_screen_wait(
+            SelectModal(
+                "Rotate Master Key?",
+                [
+                    "Yes — invalidate current key on ALL devices",
+                    "Cancel",
+                ],
+            )
+        )
+        if confirm != 0:  # 0 = "Yes", anything else = cancel/Esc
+            return
+
+        import httpx as _httpx
+
+        url = f"{self.agent.base_url}/api/v1/billing/regenerate-token"
+        try:
+            async with _httpx.AsyncClient(timeout=15.0, verify=True) as client:
+                resp = await client.post(
+                    url,
+                    headers={"X-Player-Token": token},
+                )
+        except (_httpx.ConnectError, _httpx.TimeoutException):
+            self._set_feedback("Cannot reach server — try again later.")
+            return
+
+        if resp.status_code != 200:
+            self._set_feedback(f"Rotation failed ({resp.status_code})")
+            return
+
+        new_token = resp.json().get("player_token", "")
+        if not new_token:
+            self._set_feedback("Rotation failed — no token in response")
+            return
+
+        # Save BEFORE showing success (Konzept: crash between save and display = recoverable)
+        from cosmergon_agent.config import save_token
+
+        save_token(new_token, base_url=self.agent.base_url)
+        self._set_feedback(f"Master Key rotated. New: {new_token[:15]}...")
+
+    async def _revoke_agent_key(
+        self, agent_data: dict, active_name: str, token: str
+    ) -> None:
+        """Paket 4.2: Revoke all active API keys for an agent.
+
+        Uses Token-Auth endpoint POST /players/me/agents/{id}/revoke-keys.
+        Panel S112: Option A (einstimmig — Security 7/7, Engineering 5/5, DX 5/5).
+        Special case: revoking the ACTIVE agent's key disconnects the session.
+        """
+        name = agent_data.get("agent_name", "?")
+        agent_id = agent_data.get("agent_id", "")
+
+        if not agent_id:
+            self._set_feedback("Cannot revoke — missing agent info.")
+            return
+
+        # Confirmation with special warning for active agent
+        is_active = name == active_name
+        if is_active:
+            options = [
+                "Yes — revoke and disconnect this session",
+                "Cancel",
+            ]
+            title = f"Revoke keys for {name} (ACTIVE SESSION)?"
+        else:
+            options = [
+                f"Yes — revoke all keys for {name}",
+                "Cancel",
+            ]
+            title = f"Revoke keys for {name}?"
+
+        confirm = await self.push_screen_wait(SelectModal(title, options))
+        if confirm != 0:
+            return
+
+        import httpx as _httpx
+
+        url = f"{self.agent.base_url}/api/v1/players/me/agents/{agent_id}/revoke-keys"
+        try:
+            async with _httpx.AsyncClient(timeout=15.0, verify=True) as client:
+                resp = await client.post(url, headers={"X-Player-Token": token})
+        except (_httpx.ConnectError, _httpx.TimeoutException):
+            self._set_feedback("Cannot reach server — try again later.")
+            return
+
+        if resp.status_code == 200:
+            count = resp.json().get("revoked_count", 0)
+            self._set_feedback(f"{count} key(s) revoked for {name}")
+            if is_active and count > 0:
+                # Reconnect with a fresh key via token (Panel P4-4)
+                from cosmergon_agent._token import resolve_token_sync
+
+                try:
+                    result = resolve_token_sync(token, base_url=self.agent.base_url)
+                    if result and result.api_key:
+                        self.agent.reconnect(result.api_key.raw, result.agent_id or "")
+                        self._set_feedback(f"Keys revoked + reconnected as {name}")
+                except Exception:
+                    self._set_feedback("Keys revoked. Restart dashboard to reconnect.")
+        elif resp.status_code == 404:
+            self._set_feedback("Agent not found.")
+        elif resp.status_code == 403:
+            self._set_feedback("Not authorized to manage this agent.")
+        else:
+            self._set_feedback(f"Revoke failed ({resp.status_code})")
 
     @work
     async def action_agent_selector(self) -> None:
@@ -1870,6 +2012,9 @@ class CosmergonDashboard(App):
 
         if result.get("action") == "new_agent":
             await self._create_agent_via_token(token)
+        elif result.get("action") == "revoke":
+            agent_data = result["agent"]
+            await self._revoke_agent_key(agent_data, active_name, token)
         elif result.get("action") == "select":
             agent_data = result["agent"]
             name = agent_data["agent_name"]
