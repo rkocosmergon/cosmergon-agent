@@ -63,13 +63,19 @@ class ResolvedAgent:
 
 @dataclass
 class TokenResolutionResult:
-    """Full result of a token resolution call."""
+    """Full result of a token resolution call.
+
+    ``selected`` is non-optional: ``_parse_agents_response`` either picks
+    exactly one agent (by name or oldest) or raises ``TokenResolutionError``
+    — construction with no selected agent is impossible by design. Callers
+    can assume ``result.selected`` is always a valid ``ResolvedAgent``.
+    """
 
     player_id: str
     subscription_tier: str
     max_agents: int
+    selected: ResolvedAgent
     agents: list[ResolvedAgent] = field(default_factory=list)
-    selected: ResolvedAgent | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -165,8 +171,8 @@ def _parse_agents_response(
         player_id=data.get("player_id", ""),
         subscription_tier=data.get("subscription_tier", ""),
         max_agents=data.get("max_agents", 0),
-        agents=agents,
         selected=selected,
+        agents=agents,
     )
 
 

@@ -187,7 +187,7 @@ def load_credentials(instance: str | None = None) -> tuple[str, str | None, bool
         return key, agent_cfg.get("agent_id") or None, True
     if agents_table:
         # active_agent not set or not found — use first agent
-        first_agent = next(iter(agents_table.values()), {})
+        first_agent: dict = next(iter(agents_table.values()), {})
         if first_agent.get("api_key"):
             key = first_agent["api_key"].replace("\r", "").replace("\n", "")
             return key, first_agent.get("agent_id") or None, True
@@ -252,7 +252,7 @@ def load_token(instance: str | None = None) -> str:
     cfg = instances.get(name, {})
     if not cfg:
         cfg = next(iter(instances.values()), {})
-    return cfg.get("player_token", "")
+    return str(cfg.get("player_token", ""))
 
 
 def save_token(

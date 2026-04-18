@@ -2012,8 +2012,11 @@ class CosmergonDashboard(App):
 
                 try:
                     result = resolve_token_sync(token, base_url=self.agent.base_url)
-                    if result and result.api_key:
-                        self.agent.reconnect(result.api_key.raw, result.agent_id or "")
+                    selected = result.selected
+                    if selected.api_key:
+                        self.agent.reconnect(
+                            selected.api_key.raw, selected.agent_id or ""
+                        )
                         self._set_feedback(f"Keys revoked + reconnected as {name}")
                 except Exception:
                     self._set_feedback("Keys revoked. Restart dashboard to reconnect.")
@@ -2860,8 +2863,12 @@ class FirstStartApp(App):
             return  # already open
         inp.display = True
         inp.focus()
-        # Unbind K so typing works
-        self._bindings.keys.pop("k", None)
+        # Unbind K so typing works — Textual 0.46+ renamed .keys to .key_to_bindings
+        bindings_store = getattr(
+            self._bindings, "key_to_bindings", getattr(self._bindings, "keys", None)
+        )
+        if bindings_store is not None:
+            bindings_store.pop("k", None)
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         key = event.value.strip()
