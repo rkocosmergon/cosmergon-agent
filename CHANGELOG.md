@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.0] — 2026-04-19
+
+### Added
+- **Public-Showcase Toggle [S]**: Hotkey `S` opens a consent dialog that
+  lets you opt in or out of the public agent showcase
+  (`cosmergon.com/universe/a/{slug}`). Space toggles the switch, Enter
+  submits, Esc cancels. Uses `GET /universe/showcase-consent` for the
+  canonical text + SHA-256 hash, then `PATCH /players/me` with
+  `public_showcase`, `consent_text_hash`, and a fresh `request_id`
+  (DSGVO Art. 6 lit. a). 409 on stale consent text → re-open and confirm.
+  Hotkey `P` was already taken by `place_cells`, so `S` (Showcase) is
+  used — `docs/konzepte/konzept-public-showcase-opt-in.md` §3.4 updated.
+
 ## [0.7.0] — 2026-04-16
 
 ### Added

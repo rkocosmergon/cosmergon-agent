@@ -11,6 +11,7 @@ Hotkeys:
     P  Place cells       F  Create field     E  Evolve entity
     Space  Pause/Resume  U  Upgrade (next tier, opens browser)
     K  Show API key + config path
+    S  Toggle Public Showcase (opt-in/opt-out, DSGVO Art. 6 lit. a)
     R  Refresh now       Q  Quit             ?  Help
 
 Themes: cosmergon (default), matrix, mono, high-contrast
@@ -195,7 +196,7 @@ def _cost_str(cost: float) -> str:
 # Mirrors backend config.py (TIER_N_ENERGY, TIER_N_FIELDS, TIER_N_ENTITY_TIER)
 # and entity_tiers.py. Update here when backend constants change.
 _PLAYER_TIER_REQS: dict[int, dict[str, Any]] = {
-    1: {"energy": 10_000.0, "fields_alt": 3},        # T0→T1: energy OR 3 fields
+    1: {"energy": 10_000.0, "fields_alt": 3},  # T0→T1: energy OR 3 fields
     2: {"energy": 100_000.0, "fields": 5, "entity_tier": 2},
     3: {"energy": 1_000_000.0, "fields": 10, "entity_tier": 3},
     4: {"energy": 5_000_000.0, "fields": 20, "entity_tier": 4},
@@ -203,8 +204,12 @@ _PLAYER_TIER_REQS: dict[int, dict[str, Any]] = {
 }
 
 _ENTITY_TIER_NAMES: dict[int, str] = {
-    0: "novice", 1: "still life", 2: "oscillator",
-    3: "spaceship", 4: "gun", 5: "breeder",
+    0: "novice",
+    1: "still life",
+    2: "oscillator",
+    3: "spaceship",
+    4: "gun",
+    5: "breeder",
 }
 
 
@@ -324,9 +329,7 @@ def _fv_parse_cells(raw: dict[str, int]) -> set[tuple[int, int]]:
     return cells
 
 
-def _fv_centroid(
-    cells: set[tuple[int, int]], field_w: int, field_h: int
-) -> tuple[int, int]:
+def _fv_centroid(cells: set[tuple[int, int]], field_w: int, field_h: int) -> tuple[int, int]:
     """Return integer center-of-mass of alive cells.
 
     Falls back to field center ``(field_w//2, field_h//2)`` when the field is
@@ -391,9 +394,7 @@ def _fv_render_zoom2(
         parts: list[str] = []
         for ox in range(out_w):
             x0, x1 = int(ox * bw), int((ox + 1) * bw)
-            alive = any(
-                (x, y) in cells for x in range(x0, x1) for y in range(y0, y1)
-            )
+            alive = any((x, y) in cells for x in range(x0, x1) for y in range(y0, y1))
             parts.append(alive_char if alive else dead_char)
         rows.append("".join(parts))
     return rows
@@ -794,8 +795,7 @@ class AgentSelectorModal(ModalScreen):
             yield Label("[bold]Your Agents[/bold]", id="as-title")
             yield Label("", id="as-list")
             yield Label(
-                "[dim]↑ ↓ select · Enter confirm "
-                "· N new · D revoke key · Esc cancel[/dim]",
+                "[dim]↑ ↓ select · Enter confirm · N new · D revoke key · Esc cancel[/dim]",
                 id="as-footer",
             )
 
@@ -903,6 +903,109 @@ class ReconnectScreen(ModalScreen):
 
 
 # ---------------------------------------------------------------------------
+# Public-Showcase Modal [S] — konzept-public-showcase-opt-in.md §3.4
+# ---------------------------------------------------------------------------
+
+
+class ShowcaseModal(ModalScreen):
+    """Public-Showcase Opt-in/Opt-out toggle screen.
+
+    Displays the canonical consent text and lets the user flip the switch.
+    Keyboard-only: Space toggles the state, Enter submits, Esc cancels.
+
+    Dismissed with:
+      {"desired": True|False, "consent_text_hash": "..."} — apply change
+      None — cancelled (Esc or Enter without change)
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
+        Binding("escape", "cancel", "Cancel", show=False),
+        Binding("space", "toggle_switch", "Toggle", show=False),
+        Binding("enter", "submit", "Submit", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    ShowcaseModal {
+        align: center middle;
+    }
+    ShowcaseModal > #sc-wrap {
+        width: 72;
+        height: auto;
+        max-height: 32;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    ShowcaseModal #sc-text {
+        height: auto;
+        max-height: 22;
+        overflow-y: auto;
+        padding: 0 0 1 0;
+    }
+    ShowcaseModal #sc-switch {
+        height: 1;
+        padding: 0 0 1 0;
+    }
+    ShowcaseModal #sc-footer {
+        height: 1;
+        color: $text-muted;
+    }
+    """
+
+    def __init__(
+        self,
+        consent_text: str,
+        consent_text_hash: str,
+        current_state: bool,
+    ) -> None:
+        super().__init__()
+        self._consent_text = consent_text
+        self._consent_text_hash = consent_text_hash
+        self._initial_state = current_state
+        self._desired_state = current_state
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="sc-wrap"):
+            yield Label(self._consent_text, id="sc-text")
+            yield Label(self._switch_line(), id="sc-switch")
+            yield Label(
+                "[dim]Space toggle · Enter submit · Esc cancel[/dim]",
+                id="sc-footer",
+            )
+
+    def on_mount(self) -> None:
+        self.query_one("#sc-wrap").focus()
+
+    def _switch_line(self) -> str:
+        if self._desired_state:
+            state = "[green]\\[x] ja — öffentlich sichtbar[/green]"
+        else:
+            state = "[\\[ ] nein — privat"
+        changed = (
+            " [yellow](geändert)[/yellow]" if self._desired_state != self._initial_state else ""
+        )
+        return f"Agent öffentlich zeigen: {state}{changed}"
+
+    def action_toggle_switch(self) -> None:
+        self._desired_state = not self._desired_state
+        self.query_one("#sc-switch", Label).update(self._switch_line())
+
+    def action_submit(self) -> None:
+        if self._desired_state == self._initial_state:
+            self.dismiss(None)
+            return
+        self.dismiss(
+            {
+                "desired": self._desired_state,
+                "consent_text_hash": self._consent_text_hash,
+            }
+        )
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+# ---------------------------------------------------------------------------
 # Dashboard App
 # ---------------------------------------------------------------------------
 
@@ -994,6 +1097,7 @@ class CosmergonDashboard(App):
         Binding("tab", "cycle_focus", "Focus", show=False, priority=True),
         Binding("k", "show_key", "Key", show=False, priority=True),
         Binding("a", "agent_selector", "Agents", show=False, priority=True),
+        Binding("s", "toggle_showcase", "Showcase", show=False, priority=True),
         Binding("question_mark", "help", "Help", show=False, priority=True),
         Binding("q", "quit", "Quit", show=False, priority=True),
     ]
@@ -1017,7 +1121,7 @@ class CosmergonDashboard(App):
         self._auth_error: str = ""  # set on AuthenticationError — shown in hint-bar
         self._pending_action: _PendingAction | None = None  # queued on 429, fires next tick
         self._messages: list[dict] = []  # chat conversation cache (refreshed each tick)
-        self._focus: str | None = None   # None | "agent" | "fields" | "log"
+        self._focus: str | None = None  # None | "agent" | "fields" | "log"
         self._focus_panel_id: str | None = None  # last panel id with .panel-focused class
         self._identity_prompted: bool = False  # True after identity setup shown once per session
 
@@ -1264,7 +1368,8 @@ class CosmergonDashboard(App):
             self.query_one(f"#{widget_id}", Static).update(content)
 
     _FOCUS_TO_PANEL: ClassVar[dict[str, str]] = {
-        "agent": "agent-panel", "fields": "agent-panel",
+        "agent": "agent-panel",
+        "fields": "agent-panel",
         "log": "log-panel",
     }
 
@@ -1409,8 +1514,8 @@ class CosmergonDashboard(App):
                 _c("dim", "Connecting to cosmergon.com..."),
                 "",
                 _c(t.struct, "  Conway cells evolve every tick (~60s)."),
-                _c("dim",   "  Energy is earned through active patterns."),
-                _c("dim",   "  Your agent lives on the server — always on."),
+                _c("dim", "  Energy is earned through active patterns."),
+                _c("dim", "  Your agent lives on the server — always on."),
                 "",
             ]
             if no_fields:
@@ -1453,8 +1558,7 @@ class CosmergonDashboard(App):
             fields = (state.fields if state else None) or []
             if fields:
                 parts = [
-                    f"{_c(t.cmd, _hk(str(i + 1)))}{f.id[:8]}"
-                    for i, f in enumerate(fields[:5])
+                    f"{_c(t.cmd, _hk(str(i + 1)))}{f.id[:8]}" for i, f in enumerate(fields[:5])
                 ]
                 self._update_panel("context-bar", _c("dim", "  ".join(parts)) + esc)
             else:
@@ -1473,9 +1577,15 @@ class CosmergonDashboard(App):
         # [C] orange until first compass use — onboarding signal
         c_color = t.guide if not self._compass_ever_set else t.cmd
         keys = [
-            k("Tab", "Focus"), k("C", "Compass", c_color), k("P", "Place"), k("F", "Field"),
-            k("E", "Evolve"), k("V", "View"), k("M", "Chat"),
-            k("U", "Upgrade"), k("K", "Key"),
+            k("Tab", "Focus"),
+            k("C", "Compass", c_color),
+            k("P", "Place"),
+            k("F", "Field"),
+            k("E", "Evolve"),
+            k("V", "View"),
+            k("M", "Chat"),
+            k("U", "Upgrade"),
+            k("K", "Key"),
         ]
         # [A] Agent selector — only for Paid users with token in config
         if load_token():
@@ -1615,7 +1725,6 @@ class CosmergonDashboard(App):
     def _draw_hint_bar(self, state: GameState | None) -> None:
         """Render hint bar: single line of active guidance or feedback."""
         self._update_panel("hint-bar", self._compute_hint(state))
-
 
     # --- Actions ---
 
@@ -1805,8 +1914,8 @@ class CosmergonDashboard(App):
 
     async def action_upgrade(self) -> None:
         state = self.agent._state
-        tier = (state.subscription_tier if state else "free")
-        agent_type = (state.agent_type if state else "")
+        tier = state.subscription_tier if state else "free"
+        agent_type = state.agent_type if state else ""
 
         # Anonymous free agent → direct Stripe checkout via API (Paket 2.7a SDK)
         # Panel S112: einstimmig, mit SelectModal + Fallback
@@ -1863,9 +1972,88 @@ class CosmergonDashboard(App):
 
         # Fallback: open website (Panel: Engineering — robust degradation)
         webbrowser.open("https://cosmergon.com/solo.html")
-        self._set_feedback(
-            _c(self._theme.pos, "✓ Upgrade page opened — complete upgrade there")
+        self._set_feedback(_c(self._theme.pos, "✓ Upgrade page opened — complete upgrade there"))
+
+    @work
+    async def action_toggle_showcase(self) -> None:
+        """Public-Showcase opt-in/opt-out toggle (Hotkey S).
+
+        Konzept: docs/konzepte/konzept-public-showcase-opt-in.md §3.4.
+        Lädt aktuellen Zustand + kanonischen Consent-Text, öffnet ShowcaseModal,
+        schickt PATCH /players/me bei bestätigter Änderung.
+        """
+        import uuid as _uuid
+
+        import httpx as _httpx
+
+        base = self.agent.base_url
+        headers = {"Authorization": f"api-key {self.agent._api_key.raw}"}
+
+        try:
+            async with _httpx.AsyncClient(timeout=15.0, verify=True) as client:
+                consent_resp = await client.get(
+                    f"{base}/api/v1/universe/showcase-consent?lang=en",
+                    headers=headers,
+                )
+                me_resp = await client.get(f"{base}/api/v1/players/me", headers=headers)
+        except (_httpx.ConnectError, _httpx.TimeoutException) as exc:
+            self._set_feedback(_c(self._theme.warn, f"✗ Showcase: connect failed: {exc}"))
+            return
+        except Exception as exc:
+            self._set_feedback(_c(self._theme.warn, f"✗ Showcase: {exc}"))
+            return
+
+        if consent_resp.status_code != 200 or me_resp.status_code != 200:
+            msg = f"✗ Showcase: consent {consent_resp.status_code} / me {me_resp.status_code}"
+            self._set_feedback(_c(self._theme.warn, msg))
+            return
+
+        consent = consent_resp.json()
+        me = me_resp.json()
+        current_state = bool(me.get("public_showcase", False))
+
+        result = await self.push_screen_wait(
+            ShowcaseModal(
+                consent_text=consent["text"],
+                consent_text_hash=consent["text_hash"],
+                current_state=current_state,
+            )
         )
+        if not result:
+            return
+
+        payload = {
+            "public_showcase": result["desired"],
+            "consent_text_hash": result["consent_text_hash"],
+            "request_id": str(_uuid.uuid4()),
+        }
+        try:
+            async with _httpx.AsyncClient(timeout=15.0, verify=True) as client:
+                r = await client.patch(f"{base}/api/v1/players/me", json=payload, headers=headers)
+        except Exception as exc:
+            self._set_feedback(_c(self._theme.warn, f"✗ Showcase: PATCH failed: {exc}"))
+            return
+
+        if r.status_code == 200:
+            slug = (r.json() or {}).get("public_slug")
+            if result["desired"] and slug:
+                msg = f"✓ Showcase enabled — cosmergon.com/universe/a/{slug}"
+            elif result["desired"]:
+                msg = "✓ Showcase enabled (slug pending)"
+            else:
+                msg = "✓ Showcase disabled — you are private again"
+            self._set_feedback(_c(self._theme.pos, msg))
+        elif r.status_code == 409:
+            self._set_feedback(
+                _c(self._theme.warn, "✗ Showcase: consent text changed — re-open and confirm")
+            )
+        else:
+            detail = ""
+            try:
+                detail = (r.json() or {}).get("detail", "")
+            except Exception:
+                pass
+            self._set_feedback(_c(self._theme.warn, f"✗ Showcase {r.status_code}: {detail}"))
 
     async def action_pause(self) -> None:
         action = "resume" if self._paused else "pause"
@@ -1958,9 +2146,7 @@ class CosmergonDashboard(App):
         save_token(new_token, base_url=self.agent.base_url)
         self._set_feedback(f"Master Key rotated. New: {new_token[:15]}...")
 
-    async def _revoke_agent_key(
-        self, agent_data: dict, active_name: str, token: str
-    ) -> None:
+    async def _revoke_agent_key(self, agent_data: dict, active_name: str, token: str) -> None:
         """Paket 4.2: Revoke all active API keys for an agent.
 
         Uses Token-Auth endpoint POST /players/me/agents/{id}/revoke-keys.
@@ -2014,9 +2200,7 @@ class CosmergonDashboard(App):
                     result = resolve_token_sync(token, base_url=self.agent.base_url)
                     selected = result.selected
                     if selected.api_key:
-                        self.agent.reconnect(
-                            selected.api_key.raw, selected.agent_id or ""
-                        )
+                        self.agent.reconnect(selected.api_key.raw, selected.agent_id or "")
                         self._set_feedback(f"Keys revoked + reconnected as {name}")
                 except Exception:
                     self._set_feedback("Keys revoked. Restart dashboard to reconnect.")
@@ -2054,9 +2238,7 @@ class CosmergonDashboard(App):
             for name, entry in agents_dict.items()
         ]
 
-        result = await self.push_screen_wait(
-            AgentSelectorModal(agents_list, active_name, tier)
-        )
+        result = await self.push_screen_wait(AgentSelectorModal(agents_list, active_name, tier))
 
         if result is None:
             return  # Esc pressed
@@ -2099,9 +2281,7 @@ class CosmergonDashboard(App):
             return
 
         if resp.status_code == 403:
-            self._set_feedback(
-                "Agent limit reached for your plan. cosmergon.com/pricing"
-            )
+            self._set_feedback("Agent limit reached for your plan. cosmergon.com/pricing")
             return
         if resp.status_code == 429:
             self._set_feedback("Too many requests — try again later.")
@@ -2153,9 +2333,7 @@ class CosmergonDashboard(App):
         if not state or not state.fields:
             self._add_log(_c(self._theme.warn, "No fields — press \\[F] first"))
             return
-        await self.push_screen_wait(
-            FieldScreen(self.agent, list(state.fields), self._theme)
-        )
+        await self.push_screen_wait(FieldScreen(self.agent, list(state.fields), self._theme))
 
 
 # ---------------------------------------------------------------------------
@@ -2360,9 +2538,16 @@ class FieldScreen(ModalScreen):
     ]
 
     _NAV_KEYS: ClassVar[set[str]] = {
-        "up", "down", "left", "right",
-        "ctrl+up", "ctrl+down", "ctrl+left", "ctrl+right",
-        "home", "h",
+        "up",
+        "down",
+        "left",
+        "right",
+        "ctrl+up",
+        "ctrl+down",
+        "ctrl+left",
+        "ctrl+right",
+        "home",
+        "h",
     }
 
     def __init__(
@@ -2455,7 +2640,7 @@ class FieldScreen(ModalScreen):
         else:
             field = self._fields[self._idx]
             tier = f"T{field.entity_tier or 0}"
-            etype = (field.entity_type or "novice")
+            etype = field.entity_type or "novice"
             idx_label = f"[{self._idx + 1}/{n}]"
             zoom_label = "Zoom 2 — full field" if self._zoom == 2 else "Zoom 1 — scrollable"
             h1 = _c(t.struct, "[bold]═ FIELD VIEW[/bold]") + f"  {_c('dim', idx_label)}"
@@ -2480,7 +2665,11 @@ class FieldScreen(ModalScreen):
             out_h = content_h
             out_w = min(max(10, self._content_w - 4), out_h * 2)
             rows = _fv_render_zoom2(
-                self._cells, self._field_w, self._field_h, out_w, out_h,
+                self._cells,
+                self._field_w,
+                self._field_h,
+                out_w,
+                out_h,
                 alive_char=f"[{t.pos}]▓[/{t.pos}]",
                 dead_char="[dim]░[/dim]",
             )
@@ -2488,16 +2677,27 @@ class FieldScreen(ModalScreen):
         else:
             vp_w, vp_h = self._viewport_dims()
             vp_rows = _fv_render_zoom1(
-                self._cells, self._vp_x, self._vp_y, vp_w, vp_h,
-                self._field_w, self._field_h,
+                self._cells,
+                self._vp_x,
+                self._vp_y,
+                vp_w,
+                vp_h,
+                self._field_w,
+                self._field_h,
                 alive_char="█",
                 dead_char="·",
             )
             if self._content_w >= _FV_MINIMAP_THRESHOLD:
                 mm_lines = _fv_render_minimap(
-                    self._cells, self._vp_x, self._vp_y, vp_w, vp_h,
-                    self._field_w, self._field_h,
-                    map_w=_FV_MAP_W, map_h=_FV_MAP_H,
+                    self._cells,
+                    self._vp_x,
+                    self._vp_y,
+                    vp_w,
+                    vp_h,
+                    self._field_w,
+                    self._field_h,
+                    map_w=_FV_MAP_W,
+                    map_h=_FV_MAP_H,
                     alive_char=f"[{t.pos}]▓[/{t.pos}]",
                     dead_char="[dim]·[/dim]",
                     vp_char=f"[{t.guide}]▒[/{t.guide}]",
@@ -2513,13 +2713,14 @@ class FieldScreen(ModalScreen):
         # --- Footer ---
         footer_widget = self.query_one("#fv-footer", Static)
         if self._zoom == 2:
-            footer_widget.update(
-                _c("dim", "Z detail · [ ] field · R refresh · Esc back")
-            )
+            footer_widget.update(_c("dim", "Z detail · [ ] field · R refresh · Esc back"))
         else:
             footer_widget.update(
-                _c("dim", "↑↓←→ scroll · Ctrl+↑↓ fast · H center · Z zoom"
-                   " · [ ] field · R refresh · Esc back")
+                _c(
+                    "dim",
+                    "↑↓←→ scroll · Ctrl+↑↓ fast · H center · Z zoom"
+                    " · [ ] field · R refresh · Esc back",
+                )
             )
 
     def on_key(self, event: Any) -> None:
@@ -2550,7 +2751,7 @@ class FieldScreen(ModalScreen):
         if not self._fields:
             return
         self._idx = (self._idx + direction) % len(self._fields)
-        self._cells = set()             # reset so centroid re-centres
+        self._cells = set()  # reset so centroid re-centres
         self._last_fetched_tick = -1
         self._fetch_cells()
 
@@ -2685,9 +2886,7 @@ class IdentitySetupScreen(ModalScreen):
             return
         persona_select = self.query_one("#persona-select", Select)
         persona = (
-            str(persona_select.value)
-            if persona_select.value is not Select.NULL
-            else "scientist"
+            str(persona_select.value) if persona_select.value is not Select.NULL else "scientist"
         )
         self._save(name, persona)
 
@@ -2966,6 +3165,7 @@ def main() -> None:
                     is_token_warning_shown,
                     set_token_warning_shown,
                 )
+
                 if not is_token_warning_shown():
                     print(f"  Key saved to {CONFIG_PATH}")
                     print("  Just run 'cosmergon-dashboard' next time — no --token needed.")
@@ -2992,9 +3192,7 @@ def main() -> None:
             pass  # graceful degradation: auto-register if FirstStartApp fails
 
     try:
-        agent = CosmergonAgent(
-            api_key=resolved_key, base_url=args.base_url, poll_interval=10.0
-        )
+        agent = CosmergonAgent(api_key=resolved_key, base_url=args.base_url, poll_interval=10.0)
         CosmergonDashboard(agent=agent, theme=theme).run()
     except CosmergonError as exc:
         msg = str(exc)
