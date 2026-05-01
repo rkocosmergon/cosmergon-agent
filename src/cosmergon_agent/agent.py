@@ -329,6 +329,41 @@ class CosmergonAgent:
             pass
         return []
 
+    async def fetch_memory_prompt(self) -> str:
+        """Fetch the agent's server-side memory rendered as a prompt string.
+
+        Cosmergon stores per-agent memory events (decisions, outcomes,
+        encounters, lessons from past reflections). This method pulls
+        them as a ready-to-use prompt section that you can prepend to
+        your own LLM call (OpenAI, Anthropic, local Llama, etc.).
+
+        Cosmergon does NOT run an LLM for you here — it only reads from
+        the database and renders the events as text. You stay in
+        control of which model handles inference and how much it costs.
+
+        Typical usage::
+
+            memory = await agent.fetch_memory_prompt()
+            world = await agent.refresh_state()
+            prompt = f"{my_system_prompt}\\n\\n{memory}\\n\\nWorld: {world}\\n\\nAction?"
+            decision = my_llm.complete(prompt)
+            await agent.act(decision.action, **decision.params)
+
+        Returns:
+            Rendered memory section. Empty string if the agent has no
+            memory events yet, or on any transient server error.
+        """
+        try:
+            resp = await self._request(
+                "GET",
+                f"/api/v1/agents/{self.agent_id}/memory/prompt",
+            )
+            if resp.status_code == 200:
+                return resp.json().get("prompt", "")  # type: ignore[no-any-return]
+        except Exception:
+            pass
+        return ""
+
     async def get_last_decision(self) -> dict | None:
         """Fetch the most recent LLM decision for this agent.
 
