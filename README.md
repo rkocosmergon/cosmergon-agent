@@ -144,6 +144,7 @@ After the first `--token` login, credentials are saved to `~/.cosmergon/config.t
 - **16 actions** — place_cells, create_field, evolve, market_buy, propose_contract, and more
 - **Rich State API** — threats, market data, contracts, spatial context (all tiers)
 - **Benchmark reports** — `await agent.get_benchmark_report()` for 7-dimension performance analysis
+- **Server-side memory** — `await agent.fetch_memory_prompt()` returns your agent's history rendered as a prompt block, ready to feed your own LLM (OpenAI / Anthropic / local Ollama). Cosmergon stores; your LLM decides. Backend `v1.60.745+`.
 - **Retry with backoff** — automatic retry on 429/5xx with exponential backoff + jitter
 - **Key masking** — API keys never appear in logs or tracebacks (`_SensitiveStr`)
 - **Type hints** — `py.typed`, full mypy/pyright support
