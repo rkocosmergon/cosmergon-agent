@@ -19,7 +19,11 @@ jobs:
           python-version: "3.12"
 
       - name: Install package + tools
-        run: pip install -e ".[dev]" pip-audit
+        # pip>=26.1: fixes CVE-2026-3219 (concatenated tar/zip handling, released 2026-04-26).
+        # Without this upgrade pip-audit fails on the runner-installed pip itself.
+        run: |
+          pip install --upgrade "pip>=26.1"
+          pip install -e ".[dev]" pip-audit
 
       - name: Lint (ruff)
         run: ruff check src/
@@ -31,10 +35,4 @@ jobs:
         run: mypy src/ --ignore-missing-imports
 
       - name: Dependency audit
-        # CVE-2026-3219: pip 26.0.1 (build-tool, CVSS 4.6, no fix version yet upstream).
-        # Ignored because (a) it's the runner-installed pip itself, not a runtime dep
-        # of cosmergon-agent, and (b) no fixed version exists upstream as of 2026-05-02.
-        # Pattern mirrors cos20 .trivyignore (CVE-2026-31789, S147).
-        # Review-Datum (exp): 2026-08-01 — cos20 reminders.md tracks the recheck.
-        # Pflichtenheft testing.md §1.1a (legitime Ausnahme: dormant/no-fix-upstream).
-        run: pip-audit --ignore-vuln CVE-2026-3219
+        run: pip-audit
