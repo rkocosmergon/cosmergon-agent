@@ -33,6 +33,8 @@ jobs:
       - name: Dependency audit
         # CVE-2026-3219: pip 26.0.1 (build-tool, CVSS 4.6, no fix version yet upstream).
         # Ignored because (a) it's the runner-installed pip itself, not a runtime dep
-        # of cosmergon-agent, and (b) no fixed version exists. Re-evaluate on each
-        # pip release. Mirrors cos20 .trivyignore pattern (S147).
+        # of cosmergon-agent, and (b) no fixed version exists upstream as of 2026-05-02.
+        # Pattern mirrors cos20 .trivyignore (CVE-2026-31789, S147).
+        # Review-Datum (exp): 2026-08-01 — cos20 reminders.md tracks the recheck.
+        # Pflichtenheft testing.md §1.1a (legitime Ausnahme: dormant/no-fix-upstream).
         run: pip-audit --ignore-vuln CVE-2026-3219
