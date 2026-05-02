@@ -31,4 +31,8 @@ jobs:
         run: mypy src/ --ignore-missing-imports
 
       - name: Dependency audit
-        run: pip-audit
+        # CVE-2026-3219: pip 26.0.1 (build-tool, CVSS 4.6, no fix version yet upstream).
+        # Ignored because (a) it's the runner-installed pip itself, not a runtime dep
+        # of cosmergon-agent, and (b) no fixed version exists. Re-evaluate on each
+        # pip release. Mirrors cos20 .trivyignore pattern (S147).
+        run: pip-audit --ignore-vuln CVE-2026-3219
