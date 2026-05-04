@@ -155,6 +155,13 @@ class GameState:
     learned_rules: list[str] = field(default_factory=list)
     next_tick_at: float | None = None  # Unix timestamp when next game tick fires (server truth)
     compass_preset: str | None = None  # Last explicitly set compass preset; None if never set
+    # api-Agent-Reflexion (Cosmergon backend ≥ v1.60.862, S161 2026-05-04):
+    # backend signals when the agent has accumulated enough decisions for the
+    # external LLM-Decider to run a self-reflection round. Pet/SDK-bot reads
+    # this and calls `await agent.reflect(provider)` when set. Older backends
+    # leave both fields at the defaults below — `reflect()` is then a no-op.
+    reflection_due: bool = False
+    decisions_since_last_reflection: int = 0
 
     @classmethod
     def from_api(cls, data: dict) -> GameState:
@@ -192,4 +199,6 @@ class GameState:
             learned_rules=data.get("learned_rules", []),
             next_tick_at=data.get("next_tick_at"),
             compass_preset=data.get("compass_preset"),
+            reflection_due=bool(data.get("reflection_due", False)),
+            decisions_since_last_reflection=int(data.get("decisions_since_last_reflection", 0)),
         )
