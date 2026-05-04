@@ -99,12 +99,61 @@ class AgentSituation:
 
 
 @dataclass(frozen=True)
+class BuyableListing:
+    """One row from `WorldBriefing.market.buyable` — minimal info needed
+    to call ``agent.act("market_buy", listing_id=...)``.
+
+    The viewer's own listings are filtered out by the backend (would
+    400 anyway). Listings are pre-ordered cheapest-first, so a
+    price-conscious LLM-Decider can pick the lowest entry trivially.
+
+    Backend ≥ v1.60.866. Older backends omit the parent ``market``
+    field entirely and this list stays empty via the dataclass default.
+    """
+
+    listing_id: str
+    item_type: str
+    price_energy: float
+    seller_name: str | None = None
+
+
+@dataclass(frozen=True)
+class MarketBriefing:
+    """Compact market snapshot for LLM-Decider consumption.
+
+    Backend (v1.60.866+) provides this as ``world_briefing.market``.
+    The list is capped at 20 entries — diverse enough for choice,
+    small enough that 3B-LLM-Schemas don't blow up.
+    """
+
+    summary: str = ""
+    buyable: tuple[BuyableListing, ...] = ()
+
+    @classmethod
+    def from_api(cls, data: dict) -> MarketBriefing:
+        raw_buyable = data.get("buyable") or []
+        return cls(
+            summary=data.get("summary", ""),
+            buyable=tuple(
+                BuyableListing(
+                    listing_id=str(b.get("listing_id", "")),
+                    item_type=b.get("item_type", ""),
+                    price_energy=float(b.get("price_energy", 0.0)),
+                    seller_name=b.get("seller_name"),
+                )
+                for b in raw_buyable
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class WorldBriefing:
     """Economy-wide context included in every state response."""
 
     total_agents: int = 0
     your_rank: int = 0
     market_summary: str = ""
+    market: MarketBriefing = field(default_factory=MarketBriefing)
     top_agent: str | None = None
     last_event: str | None = None
     tip: str = ""  # Deprecated: static reference only (OWASP LLM01/LLM06)
@@ -116,10 +165,12 @@ class WorldBriefing:
     def from_api(cls, data: dict) -> WorldBriefing:
         fund = data.get("infrastructure_fund") or {}
         sit = data.get("agent_situation") or {}
+        market_data = data.get("market") or {}
         return cls(
             total_agents=data.get("total_agents", 0),
             your_rank=data.get("your_rank", 0),
             market_summary=data.get("market_summary", ""),
+            market=MarketBriefing.from_api(market_data),
             top_agent=data.get("top_agent"),
             last_event=data.get("last_event"),
             tip=data.get("tip", ""),
