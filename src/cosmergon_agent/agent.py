@@ -106,7 +106,9 @@ class CosmergonAgent:
         # Level 2: player_token parameter
         if not resolved_key and player_token:
             resolved_key, agent_id = self._resolve_via_token(
-                player_token, base_url, agent_name,
+                player_token,
+                base_url,
+                agent_name,
             )
             _user_provided = True
 
@@ -123,7 +125,9 @@ class CosmergonAgent:
             if env_token:
                 env_name = os.environ.get("COSMERGON_AGENT_NAME", "").strip() or None
                 resolved_key, agent_id = self._resolve_via_token(
-                    env_token, base_url, env_name,
+                    env_token,
+                    base_url,
+                    env_name,
                 )
                 _user_provided = True
 
@@ -232,13 +236,57 @@ class CosmergonAgent:
 
     @property
     def state(self) -> GameState | None:
-        """Current game state (refreshed each tick)."""
+        """Current game state (refreshed each tick).
+
+        Filled automatically by the ``run_until``/``on_tick`` driver loop.
+        If you don't use the on_tick driver — for example because you
+        run a custom polling loop alongside other tasks — call
+        :meth:`refresh_state` manually to populate this. Without one of
+        the two, ``state`` stays ``None`` and downstream LLM-Decider /
+        prompt-builder code sees an empty world.
+
+        Background: cosmergon-pet diagnosed 2026-05-04 (Pet v0.1.20 fix)
+        — its custom poll loop populated only its own display state and
+        left ``agent._state`` at None, so the LLM-Decider built a
+        single-choice schema ("wait" only) and the agent waited for ~33h
+        despite the backend returning live state on every poll.
+        """
         return self._state
 
     @property
     def memory(self) -> dict[str, Any]:
         """Persistent key-value store across ticks."""
         return self._memory
+
+    async def refresh_state(self) -> GameState | None:
+        """Fetch ``/state`` once and update ``self.state``.
+
+        Use this when you build a client that does NOT rely on the
+        ``run_until``/``on_tick`` driver loop — for example a Pet running
+        its own polling, an LLM-Decider that wants a fresh snapshot
+        right before a decision, or a one-shot benchmark script.
+
+        Returns the fresh :class:`GameState` (also assigned to
+        ``self._state``) or ``None`` if the request failed in a
+        non-raising way (rate limit, transient 5xx). 4xx auth errors
+        raise the usual :class:`AuthenticationError` /
+        :class:`AuthorizationError` so callers can react explicitly.
+
+        Background — cosmergon-pet 2026-05-04: Pet's custom poll loop
+        had no public API to mirror its fetched state into
+        ``agent._state``. Consumers had to reach into the private slot
+        (``agent._state = ...``) to keep ``agent.state`` in sync, which
+        is brittle and easy to forget. Pet missed it entirely; the
+        LLM-Decider then saw a single-choice schema and the agent waited
+        for ~33h. ``refresh_state()`` is the supported way to do it.
+        """
+        if self._client is None:
+            raise RuntimeError("Agent not connected. Call run() or use async with.")
+        resp = await self._request("GET", f"/api/v1/agents/{self.agent_id}/state")
+        if resp.status_code == 200:
+            self._state = GameState.from_api(resp.json())
+            return self._state
+        return None
 
     # --- Actions (Screeps pattern) ---
 
@@ -944,6 +992,7 @@ class CosmergonAgent:
                 # (agent_name becomes known from server response — Panel decision S110)
                 if last_tick == -1 and self._state.agent_name:
                     from cosmergon_agent.config import maybe_migrate
+
                     maybe_migrate(self._state.agent_name)
 
                 if self._state.tick != last_tick and self._tick_handler:
