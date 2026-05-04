@@ -412,6 +412,111 @@ class CosmergonAgent:
             pass
         return ""
 
+    async def fetch_reflection_signals(self, horizon: str = "short") -> dict | None:
+        """Fetch the data an external LLM needs to synthesize a self_reflection.
+
+        Companion to ``post_reflection``. The two together let api-Agents
+        (Pet, SDK-bots, MCP, Dashboard with LLM) run their own reflection
+        loop using their own LLM/SLM — Cosmergon is only the data store.
+
+        See ``docs/konzepte/konzept-api-agent-reflection.md`` for why this
+        path exists separately from the in-Cosmergon NPC reflection: api-
+        Agents must use their own external LLM (per memory directive
+        ``feedback_non_npc_merken_und_externe_llm``), so Cosmergon exposes
+        the data and the write-back instead of running a second LLM.
+
+        Args:
+            horizon: ``"short"`` (default, ~10-tick window), ``"mid"``,
+                or ``"long"``. Matches NPC reflection horizons.
+
+        Returns:
+            ``{top_5, bottom_5, dominant_actions, decisions_in_window,
+            since_tick, horizon}`` or ``None`` on transient server error /
+            older backend without the endpoint. Empty top/bottom lists are
+            normal for agents with few decisions yet — caller should skip
+            the LLM call in that case and try again next tick.
+
+        Typical usage (Pet/SDK-bot)::
+
+            state = await agent.refresh_state()
+            if state.reflection_due:
+                signals = await agent.fetch_reflection_signals()
+                if signals and (signals["top_5"] or signals["bottom_5"]):
+                    payload = my_llm.synthesize_reflection(signals)
+                    await agent.post_reflection(payload, since_tick=signals["since_tick"])
+        """
+        try:
+            resp = await self._request(
+                "GET",
+                f"/api/v1/agents/{self.agent_id}/reflection/signals",
+                params={"horizon": horizon},
+            )
+            if resp.status_code == 200:
+                return resp.json()  # type: ignore[no-any-return]
+        except Exception:
+            pass
+        return None
+
+    async def post_reflection(
+        self,
+        lessons: str,
+        avoid: str,
+        double_down: str,
+        *,
+        since_tick: int,
+        horizon: str = "short",
+        model_used: str | None = None,
+    ) -> dict | None:
+        """Persist an externally-synthesized self_reflection on the agent.
+
+        Companion to ``fetch_reflection_signals``. The caller has run
+        their own LLM against the signals and produces three structured
+        strings (lessons / avoid / double_down). This method posts them
+        back; the backend validates length-bounds against its
+        ``ReflectionResult`` schema and writes a ``self_reflection`` event
+        with importance_score=1.0 (never evicted until decay).
+
+        Length bounds match the NPC schema for parity:
+            - lessons: 100-500 chars
+            - avoid: 50-200 chars
+            - double_down: 50-200 chars
+
+        Args:
+            lessons: synthesized lesson, 100-500 chars
+            avoid: anti-pattern to avoid, 50-200 chars
+            double_down: confirmed strength to double down on, 50-200 chars
+            since_tick: tick_number returned by ``fetch_reflection_signals``,
+                so the backend can record the reflection's window
+            horizon: ``"short"`` / ``"mid"`` / ``"long"`` — must match the
+                horizon used to fetch signals
+            model_used: free-text identifier of the model that produced the
+                synthesis (e.g. ``"ollama/llama3.2:3b"``). Stored as audit
+                trail and visible in the benchmark service.
+
+        Returns:
+            ``{event_id, tick_number, horizon}`` on success, ``None`` on
+            transient server error. 422 (length validation) raises
+            ``CosmergonError`` so caller can react.
+        """
+        try:
+            resp = await self._request(
+                "POST",
+                f"/api/v1/agents/{self.agent_id}/reflection",
+                json={
+                    "lessons": lessons,
+                    "avoid": avoid,
+                    "double_down": double_down,
+                    "since_tick": since_tick,
+                    "horizon": horizon,
+                    "model_used": model_used,
+                },
+            )
+            if resp.status_code == 200:
+                return resp.json()  # type: ignore[no-any-return]
+        except Exception:
+            pass
+        return None
+
     async def get_last_decision(self) -> dict | None:
         """Fetch the most recent LLM decision for this agent.
 
