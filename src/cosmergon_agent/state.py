@@ -147,6 +147,23 @@ class MarketBriefing:
 
 
 @dataclass(frozen=True)
+class ContractTargetBrief:
+    """One candidate counterpart from `WorldBriefing.contract_targets`.
+
+    Used by external LLM-Deciders to construct a propose_contract
+    `oneOf`-Branch with `to_player_id` pinned via const, so the LLM
+    cannot invent player IDs. Mirrors BuyableListing (S161 Step 4).
+
+    Backend ≥ v1.60.x (S165). Older backends omit the parent
+    ``contract_targets`` list entirely.
+    """
+
+    player_id: str
+    username: str
+    persona: str | None = None
+
+
+@dataclass(frozen=True)
 class WorldBriefing:
     """Economy-wide context included in every state response."""
 
@@ -154,6 +171,7 @@ class WorldBriefing:
     your_rank: int = 0
     market_summary: str = ""
     market: MarketBriefing = field(default_factory=MarketBriefing)
+    contract_targets: tuple[ContractTargetBrief, ...] = ()
     top_agent: str | None = None
     last_event: str | None = None
     tip: str = ""  # Deprecated: static reference only (OWASP LLM01/LLM06)
@@ -166,11 +184,20 @@ class WorldBriefing:
         fund = data.get("infrastructure_fund") or {}
         sit = data.get("agent_situation") or {}
         market_data = data.get("market") or {}
+        raw_targets = data.get("contract_targets") or []
         return cls(
             total_agents=data.get("total_agents", 0),
             your_rank=data.get("your_rank", 0),
             market_summary=data.get("market_summary", ""),
             market=MarketBriefing.from_api(market_data),
+            contract_targets=tuple(
+                ContractTargetBrief(
+                    player_id=str(t.get("player_id", "")),
+                    username=t.get("username", ""),
+                    persona=t.get("persona"),
+                )
+                for t in raw_targets
+            ),
             top_agent=data.get("top_agent"),
             last_event=data.get("last_event"),
             tip=data.get("tip", ""),
