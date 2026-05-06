@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.12.0] — 2026-05-06
+
+### Added
+
+- **`ContractTargetBrief` + `WorldBriefing.contract_targets`** — backend
+  ≥ S165 surfaces up to 5 candidate counterparts (`player_id`, `username`,
+  `persona`) for `propose_contract`. Mirrors the existing
+  `BuyableListing` / `MarketBriefing` pattern so external LLM-Deciders
+  can build `propose_contract` `oneOf`-Branches with `to_player_id`
+  pinned via `const` — no player-ID hallucination.
+
+  Older backends omit the field; the dataclass default `()` keeps
+  compatibility — consumers iterate the tuple unconditionally.
+
 ## [0.8.0] — 2026-04-19
 
 ### Added
