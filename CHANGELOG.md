@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.13.0] — 2026-05-06
+
+### Added
+
+- **`Decider` Protocol** in `cosmergon_agent.decider` — pluggable
+  decision-architecture for api-agents. Generalisation of the Pet's
+  S157 LLMProvider layer. A Decider takes a `GameState` and returns
+  `(action, params)`. Concrete implementations live in separate PyPI
+  packages (`cosmergon-decider-cloud`, `-tree`, `-btrl`, `-local`),
+  registered via entry-point group `cosmergon.deciders` so consumers
+  load them by short name.
+- `DeciderError`, `DeciderProviderError`, `DeciderValidationError`
+  exceptions for fault classification.
+- 7 unit tests in `tests/test_decider.py` (protocol satisfaction,
+  runtime-checkable, exception hierarchy).
+
+### Why
+
+S165 Decider-Cluster-Konzept: Lab und Pet konsumieren reife Decider
+als PyPI-Module. Das SDK exportiert das Protocol als gemeinsame
+Schnittstelle. Konzept: `konzept-decider-cluster-und-pet-module.md`
+in cos20.
+
 ## [0.12.0] — 2026-05-06
 
 ### Added
