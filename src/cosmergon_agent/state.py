@@ -240,6 +240,12 @@ class GameState:
     # leave both fields at the defaults below — `reflect()` is then a no-op.
     reflection_due: bool = False
     decisions_since_last_reflection: int = 0
+    # Per-action affordability + cost (Cosmergon backend `_build_action_availability`,
+    # agent_game.py:2595+). Passed through as a dict so deciders can read e.g.
+    # `state.available_actions["create_field"]["can_afford"]` and `"next_cost"`
+    # without the SDK growing a typed schema for every action. Empty dict on
+    # backends that don't yet emit the field (forward-compatibility, C3).
+    available_actions: dict = field(default_factory=dict)
 
     @classmethod
     def from_api(cls, data: dict) -> GameState:
@@ -279,4 +285,5 @@ class GameState:
             compass_preset=data.get("compass_preset"),
             reflection_due=bool(data.get("reflection_due", False)),
             decisions_since_last_reflection=int(data.get("decisions_since_last_reflection", 0)),
+            available_actions=data.get("available_actions") or {},
         )
