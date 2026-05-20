@@ -317,6 +317,106 @@ class CosmergonAgent:
 
         return result
 
+    # =====================================================================
+    # S204 — Contract methods (Founder-Direktive "ALLE dürfen ALLES vereinbaren")
+    # =====================================================================
+
+    async def propose_contract(
+        self,
+        to_player_id: str,
+        contract_type: str,
+        terms: dict[str, Any],
+        escrow_amount: float = 0.0,
+    ) -> ActionResult:
+        """Propose a contract to another player.
+
+        contract_type: 'non_aggression' | 'tribute' | 'trade_agreement' | 'alliance'.
+        terms: type-specific (e.g. tribute: {amount_per_tick, payer_id, duration}).
+        """
+        return await self.act(
+            "propose_contract",
+            to_player_id=to_player_id,
+            contract_type=contract_type,
+            terms=terms,
+            escrow_amount=escrow_amount,
+        )
+
+    async def propose_from_template(
+        self,
+        template_id: str,
+        slots: dict[str, Any],
+        mode: str = "targeted",
+        escrow: float = 0.0,
+    ) -> ActionResult:
+        """Propose a contract from a Standard-Template (T01_FIELD_DEFENSE..T10_BANDIT_SPLIT).
+
+        See /api/v1/contracts/templates for the slot-schema per template.
+        mode: 'targeted' (need slots.target_player_id) or 'open_call' (apply-pattern).
+        """
+        return await self.act(
+            "propose_from_template",
+            params={"template_id": template_id, "slots": slots, "mode": mode, "escrow": escrow},
+        )
+
+    async def accept_contract(self, contract_id: str, escrow_amount: float = 0.0) -> ActionResult:
+        """Accept a proposed contract addressed to me (party_b)."""
+        return await self.act(
+            "accept_contract", contract_id=contract_id, escrow_amount=escrow_amount
+        )
+
+    async def reject_contract(self, contract_id: str, reason: str | None = None) -> ActionResult:
+        """Reject a proposed contract. Refunds proposer's escrow + sets cooldown."""
+        return await self.act("reject_contract", contract_id=contract_id, params={"reason": reason})
+
+    async def propose_counter(
+        self, contract_id: str, slots: dict[str, Any], escrow: float = 0.0
+    ) -> ActionResult:
+        """Counter-Offer on a proposed contract. Max 3 rounds (Rubinstein-Bargaining)."""
+        return await self.act(
+            "propose_counter",
+            contract_id=contract_id,
+            params={"slots": slots, "escrow": escrow},
+        )
+
+    async def breach_contract(self, contract_id: str) -> ActionResult:
+        """Breach an active contract. Loses your escrow + Reputation-Penalty."""
+        return await self.act("breach_contract", contract_id=contract_id)
+
+    async def apply_to_contract(
+        self, contract_id: str, counter_slots: dict[str, Any] | None = None
+    ) -> ActionResult:
+        """Apply to an open_call contract (you are eligible applicant)."""
+        return await self.act(
+            "apply_to_contract",
+            contract_id=contract_id,
+            params={"counter_slots": counter_slots},
+        )
+
+    async def decide_application(
+        self,
+        contract_id: str,
+        application_id: str,
+        decision: str,  # 'accept' | 'reject'
+        reason: str | None = None,
+    ) -> ActionResult:
+        """Proposer accept/reject an applicant on an open_call contract."""
+        return await self.act(
+            "decide_application",
+            contract_id=contract_id,
+            params={"application_id": application_id, "decision": decision, "reason": reason},
+        )
+
+    async def list_pending_contracts(self) -> list[dict]:
+        """Fetch incoming proposed contracts addressed to me (party_b_id=me)."""
+        resp = await self._request("GET", f"/api/v1/agents/{self.agent_id}/state")
+        data = resp.json()
+        return data.get("contracts", {}).get("pending_inbound", []) or []
+
+    async def list_contract_templates(self) -> list[dict]:
+        """Fetch the 10 Standard-Templates (T01-T10) — public, no auth needed."""
+        resp = await self._request("GET", "/api/v1/contracts/templates")
+        return resp.json().get("templates", [])
+
     async def set_compass(self, preset: str) -> dict:
         """Set the agent's strategic compass direction.
 
