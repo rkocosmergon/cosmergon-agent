@@ -406,6 +406,141 @@ class CosmergonAgent:
             params={"application_id": application_id, "decision": decision, "reason": reason},
         )
 
+    # =====================================================================
+    # S206 — Marauder + Mission-System + Item-Inventar
+    # =====================================================================
+
+    async def start_mission(
+        self,
+        mission_type: str,
+        params: dict[str, Any] | None = None,
+        reward_energy: float = 0.0,
+    ) -> ActionResult:
+        """Start an autonomous Marauder mission.
+
+        mission_type: one of hunt_thief_birds|capture_field|defend_field|
+        heal_holes_field|scout_terminal|patrol_field|cell_reseed|
+        escort_marauder|deliver_resource|recon_owner|gather_spores.
+
+        See list_mission_templates() for params-schema per type.
+        Marauder must be in 'recovery' state (max 1 active mission).
+        """
+        return await self.act(
+            "start_mission",
+            params={
+                "mission_type": mission_type,
+                "params": params or {},
+                "reward_energy": reward_energy,
+            },
+        )
+
+    async def cancel_mission(self) -> ActionResult:
+        """Cancel the agent's currently active mission. Marauder → recovery."""
+        return await self.act("cancel_mission")
+
+    async def list_mission_templates(self) -> list[dict]:
+        """Fetch the 11 Mission-Templates (M01..M11) with params-schema + affinity."""
+        resp = await self._request("GET", "/api/v1/agent-missions/templates")
+        return resp.json().get("templates", [])
+
+    async def collect_spore(self, field_id: str, x: int, y: int) -> dict:
+        """Pick up a dormant spore by touch — loot_type goes directly into inventory.
+
+        Marauder must be near (x, y) within LOOT_PICKUP_RADIUS_M. Planted
+        spores are not collectible.
+        """
+        resp = await self._request(
+            "POST",
+            "/api/v1/marauder/collect-spore",
+            json={"field_id": field_id, "x": x, "y": y},
+        )
+        return resp.json()
+
+    async def shoot_spore(self, field_id: str, x: int, y: int) -> dict:
+        """Shoot a dormant spore (1-hit-kill) — loot drops as FieldDrop at the spore position.
+
+        Pickup later via pickup_drop(drop_id) from the returned drop_id.
+        """
+        resp = await self._request(
+            "POST",
+            "/api/v1/marauder/shoot-spore",
+            json={"field_id": field_id, "x": x, "y": y},
+        )
+        return resp.json()
+
+    async def pickup_drop(self, drop_id: str) -> dict:
+        """Pick up an item from FieldDrop. Marauder must be near the drop position."""
+        resp = await self._request("POST", f"/api/v1/marauder/pickup-drop/{drop_id}")
+        return resp.json()
+
+    async def transfer_inventory(
+        self, recipient_id: str, item_type: str, count: int
+    ) -> dict:
+        """Voluntary inventory transfer to another player. Bilateral, no locality required."""
+        resp = await self._request(
+            "POST",
+            "/api/v1/players/me/inventory/transfer",
+            json={"recipient_id": recipient_id, "item_type": item_type, "count": count},
+        )
+        return resp.json()
+
+    async def place_deployable(
+        self,
+        field_id: str,
+        kind: str,
+        x: float,
+        y: float,
+        z: float = 0.0,
+    ) -> dict:
+        """Drop a bomb/mine/mega_bomb at world position (x, y, z).
+
+        Server drains 1 item from player_inventory atomically (HTTP 409 if
+        count=0). kind: 'bomb' | 'mine' | 'mega_bomb'.
+        """
+        resp = await self._request(
+            "POST",
+            "/api/v1/marauder/place-deployable",
+            json={"field_id": field_id, "kind": kind, "x": x, "y": y, "z": z},
+        )
+        return resp.json()
+
+    async def claim_field(self, field_id: str, deadline_ticks: int = 100) -> dict:
+        """Start a capture-claim on a vulnerable field.
+
+        Field must satisfy: active_cell_count < tier_threshold * 0.10
+        OR hole_count > 50. Counter expires after deadline_ticks unless
+        a defense action resets it (Konzept-Field-Eroberung).
+        """
+        resp = await self._request(
+            "POST",
+            f"/api/v1/game-fields/{field_id}/claim",
+            json={"deadline_ticks": deadline_ticks},
+        )
+        return resp.json()
+
+    async def heal_holes(self, field_id: str) -> dict:
+        """Lump-sum heal of all holes on own field. Cost scales by hole_count^1.5."""
+        resp = await self._request(
+            "POST", f"/api/v1/game-fields/{field_id}/heal-holes"
+        )
+        return resp.json()
+
+    async def terminal_query(
+        self, query_type: str, params: dict[str, Any] | None = None
+    ) -> dict:
+        """Query a Cube-Center-Terminal. Marauder must be touching the column.
+
+        query_type: field_lookup | wealth_estimate | reputation |
+        public_alliances | marketplace_listings | catastrophe_warnings |
+        active_thief_birds. Result is persisted in agent_intelligence.
+        """
+        resp = await self._request(
+            "POST",
+            "/api/v1/marauder/terminal/query",
+            json={"query_type": query_type, "params": params or {}},
+        )
+        return resp.json()
+
     async def list_pending_contracts(self) -> list[dict]:
         """Fetch incoming proposed contracts addressed to me (party_b_id=me)."""
         resp = await self._request("GET", f"/api/v1/agents/{self.agent_id}/state")
