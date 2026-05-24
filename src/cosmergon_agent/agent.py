@@ -441,7 +441,7 @@ class CosmergonAgent:
     async def list_mission_templates(self) -> list[dict]:
         """Fetch the 11 Mission-Templates (M01..M11) with params-schema + affinity."""
         resp = await self._request("GET", "/api/v1/agent-missions/templates")
-        return resp.json().get("templates", [])
+        return resp.json().get("templates", [])  # type: ignore[no-any-return]
 
     async def collect_spore(self, field_id: str, x: int, y: int) -> dict:
         """Pick up a dormant spore by touch — loot_type goes directly into inventory.
@@ -454,7 +454,7 @@ class CosmergonAgent:
             "/api/v1/marauder/collect-spore",
             json={"field_id": field_id, "x": x, "y": y},
         )
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def shoot_spore(self, field_id: str, x: int, y: int) -> dict:
         """Shoot a dormant spore (1-hit-kill) — loot drops as FieldDrop at the spore position.
@@ -466,12 +466,12 @@ class CosmergonAgent:
             "/api/v1/marauder/shoot-spore",
             json={"field_id": field_id, "x": x, "y": y},
         )
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def pickup_drop(self, drop_id: str) -> dict:
         """Pick up an item from FieldDrop. Marauder must be near the drop position."""
         resp = await self._request("POST", f"/api/v1/marauder/pickup-drop/{drop_id}")
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     # ── Cube-Bus ──────────────────────────────────────────────────────────────
 
@@ -480,7 +480,7 @@ class CosmergonAgent:
         resp = await self._request(
             "GET", "/api/v1/marauder/bus/departures", params={"cube_id": cube_id}
         )
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def buy_bus_ticket(self, to_cube_id: str | None = None) -> dict:
         """Buy a destination-specific bus ticket from the energy wallet.
@@ -491,19 +491,19 @@ class CosmergonAgent:
         resp = await self._request(
             "POST", "/api/v1/marauder/bus/buy-ticket", json={"to_cube_id": to_cube_id}
         )
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def bus_passenger_status(self) -> dict | None:
         """Own passenger status while riding (from/to cube, boarded/arrival tick), or None."""
         resp = await self._request("GET", "/api/v1/marauder/bus/passenger")
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     # ── Marketplace ───────────────────────────────────────────────────────────
 
     async def market_listings(self) -> list[dict]:
         """List active marketplace listings (public)."""
         resp = await self._request("GET", "/api/v1/market/listings")
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def list_item(self, item_type: str, price_energy: float) -> dict:
         """List (sell) an item on the marketplace.
@@ -517,7 +517,7 @@ class CosmergonAgent:
             json={"item_type": item_type, "price_energy": price_energy},
             headers={"X-Idempotency-Key": str(uuid.uuid4())},
         )
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def buy_listing(self, listing_id: str) -> dict:
         """Buy an active marketplace listing (energy deducted, item credited)."""
@@ -526,7 +526,7 @@ class CosmergonAgent:
             f"/api/v1/market/listings/{listing_id}/buy",
             headers={"X-Idempotency-Key": str(uuid.uuid4())},
         )
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     # ── Combat ────────────────────────────────────────────────────────────────
 
@@ -541,17 +541,17 @@ class CosmergonAgent:
             "/api/v1/marauder/damage",
             json={"target_id": target_id, "target_type": target_type, "weapon_id": weapon_id},
         )
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def hp_status(self) -> dict:
         """Own marauder HP + dead-flag."""
         resp = await self._request("GET", "/api/v1/marauder/hp")
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def respawn(self) -> dict:
         """Respawn the marauder after death."""
         resp = await self._request("POST", "/api/v1/marauder/respawn")
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def burn_plague(self, field_id: str, x: int, y: int, surface: str = "floor") -> dict:
         """Burn a grey-plague slot at (x, y) on a surface ('floor'|'wall'|'ceiling')."""
@@ -560,7 +560,7 @@ class CosmergonAgent:
             "/api/v1/marauder/burn-plague",
             json={"field_id": field_id, "x": x, "y": y, "surface": surface},
         )
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def transfer_inventory(
         self, recipient_id: str, item_type: str, count: int
@@ -571,7 +571,7 @@ class CosmergonAgent:
             "/api/v1/players/me/inventory/transfer",
             json={"recipient_id": recipient_id, "item_type": item_type, "count": count},
         )
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def place_deployable(
         self,
@@ -591,7 +591,7 @@ class CosmergonAgent:
             "/api/v1/marauder/place-deployable",
             json={"field_id": field_id, "kind": kind, "x": x, "y": y, "z": z},
         )
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def claim_field(self, field_id: str, deadline_ticks: int = 100) -> dict:
         """Start a capture-claim on a vulnerable field.
@@ -605,14 +605,14 @@ class CosmergonAgent:
             f"/api/v1/game-fields/{field_id}/claim",
             json={"deadline_ticks": deadline_ticks},
         )
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def heal_holes(self, field_id: str) -> dict:
         """Lump-sum heal of all holes on own field. Cost scales by hole_count^1.5."""
         resp = await self._request(
             "POST", f"/api/v1/game-fields/{field_id}/heal-holes"
         )
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def terminal_query(
         self, query_type: str, params: dict[str, Any] | None = None
@@ -628,7 +628,7 @@ class CosmergonAgent:
             "/api/v1/marauder/terminal/query",
             json={"query_type": query_type, "params": params or {}},
         )
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def list_pending_contracts(self) -> list[dict]:
         """Fetch incoming proposed contracts addressed to me (party_b_id=me)."""
@@ -639,7 +639,7 @@ class CosmergonAgent:
     async def list_contract_templates(self) -> list[dict]:
         """Fetch the 10 Standard-Templates (T01-T10) — public, no auth needed."""
         resp = await self._request("GET", "/api/v1/contracts/templates")
-        return resp.json().get("templates", [])
+        return resp.json().get("templates", [])  # type: ignore[no-any-return]
 
     async def set_compass(self, preset: str) -> dict:
         """Set the agent's strategic compass direction.
