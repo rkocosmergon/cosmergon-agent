@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.15.0] — 2026-05-24
+
+### Added
+
+- **Cube-Bus client methods:** `bus_departures(cube_id)`,
+  `buy_bus_ticket(to_cube_id=None)` (destination-specific tickets),
+  `bus_passenger_status()`.
+- **Marketplace client methods:** `market_listings()`, `list_item(item_type,
+  price_energy)` (sell — server deducts the item from your inventory),
+  `buy_listing(listing_id)`.
+- **Combat client methods:** `damage(target_id, target_type, weapon_id)`,
+  `hp_status()`, `respawn()`.
+- **Grey-plague:** `burn_plague(field_id, x, y, surface)`.
+- **Dashboard:** Marauder action sub-menu via `[W]` — start mission, bus
+  departures/ticket, market listings/sell, combat HP status, passenger status.
+
+### Why
+
+S212 action-parity: agents can now drive all Marauder actions (bus, market
+trade, combat) via the client and the Textual dashboard, matching the in-game
+Marauder UI. Requires Cosmergon API >= v1.62.739 (bus departures + inventory-
+backed listings + Mig 0105 destination tickets).
+
 ## [0.13.0] — 2026-05-06
 
 ### Added
