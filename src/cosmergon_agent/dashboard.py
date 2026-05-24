@@ -1098,6 +1098,7 @@ class CosmergonDashboard(App):
         Binding("k", "show_key", "Key", show=False, priority=True),
         Binding("a", "agent_selector", "Agents", show=False, priority=True),
         Binding("s", "toggle_showcase", "Showcase", show=False, priority=True),
+        Binding("w", "marauder_menu", "Marauder", show=False, priority=True),
         Binding("question_mark", "help", "Help", show=False, priority=True),
         Binding("q", "quit", "Quit", show=False, priority=True),
     ]
@@ -1139,6 +1140,106 @@ class CosmergonDashboard(App):
         self._register_agent_handlers()
         self._run_agent()
         self.set_interval(0.5, self._redraw)
+
+    # ── Marauder action sub-menu (S212 action parity) ──────────────────────
+    _MARAUDER_SELL_PRICE: ClassVar[dict[str, float]] = {
+        "health": 2000, "shield": 5000, "tempo": 3000, "glider_fuel": 8000,
+        "weapon": 50000, "spore_pack": 4000, "bomb": 20000, "mine": 15000,
+        "mega_bomb": 100000,
+    }
+
+    def _first_cube_id(self) -> str | None:
+        state = getattr(self.agent, "_state", None)
+        fields = getattr(state, "fields", None) or []
+        return getattr(fields[0], "cube_id", None) if fields else None
+
+    @work
+    async def action_marauder_menu(self) -> None:
+        """[W] — Marauder action sub-menu: missions, bus, market, combat."""
+        options = [
+            "Mission starten", "Bus: Abfahrten", "Bus: Ticket kaufen",
+            "Markt: Listings", "Markt: Item verkaufen", "Combat: HP-Status",
+            "Bus: Passagier-Status",
+        ]
+        idx = await self.push_screen_wait(SelectModal("Marauder-Aktionen", options))
+        if idx is None:
+            return
+        handlers = [
+            self._mar_start_mission, self._mar_bus_departures, self._mar_buy_ticket,
+            self._mar_market_listings, self._mar_sell_item, self._mar_hp_status,
+            self._mar_passenger_status,
+        ]
+        try:
+            await handlers[idx]()
+        except Exception as e:
+            self._set_feedback(_c(self._theme.warn, f"✗ {e}"))
+
+    async def _mar_start_mission(self) -> None:
+        templates = await self.agent.list_mission_templates()
+        if not templates:
+            self._set_feedback("Keine Mission-Templates")
+            return
+        names = [t.get("mission_type", t.get("name", "?")) for t in templates]
+        i = await self.push_screen_wait(SelectModal("Mission wählen", names))
+        if i is None:
+            return
+        await self.agent.start_mission(names[i])
+        self._set_feedback(_c(self._theme.pos, f"✓ Mission: {names[i]}"))
+
+    async def _mar_bus_departures(self) -> None:
+        cube = self._first_cube_id()
+        if not cube:
+            self._set_feedback("Kein Cube bekannt")
+            return
+        deps = await self.agent.bus_departures(cube)
+        for d in deps:
+            dest = d.get("dest_cube_name", "?")
+            self._add_log(f"🚌 → {dest} · ETA {d.get('eta_ticks', '?')} Ticks")
+        self._set_feedback(f"{len(deps)} Abfahrt(en)")
+
+    async def _mar_buy_ticket(self) -> None:
+        cube = self._first_cube_id()
+        deps = await self.agent.bus_departures(cube) if cube else []
+        if not deps:
+            self._set_feedback("Keine Linien")
+            return
+        names = [d.get("dest_cube_name", d.get("dest_cube_id", "?")) for d in deps]
+        i = await self.push_screen_wait(SelectModal("Ziel wählen", names))
+        if i is None:
+            return
+        r = await self.agent.buy_bus_ticket(deps[i].get("dest_cube_id"))
+        self._set_feedback(_c(self._theme.pos, f"✓ Ticket → {r.get('to_cube_name', names[i])}"))
+
+    async def _mar_market_listings(self) -> None:
+        listings = await self.agent.market_listings()
+        for ml in listings[:8]:
+            self._add_log(f"🏪 {ml.get('item_type', '?')} · {ml.get('price_energy', '?')} E")
+        self._set_feedback(f"{len(listings)} Listing(s)")
+
+    async def _mar_sell_item(self) -> None:
+        items = list(self._MARAUDER_SELL_PRICE.keys())
+        i = await self.push_screen_wait(SelectModal("Verkaufen — Item", items))
+        if i is None:
+            return
+        item = items[i]
+        r = await self.agent.list_item(item, self._MARAUDER_SELL_PRICE[item])
+        if r.get("error") or r.get("detail"):
+            reason = r.get("detail", "Verkauf fehlgeschlagen")
+            self._set_feedback(_c(self._theme.warn, f"✗ {reason}"))
+        else:
+            self._set_feedback(_c(self._theme.pos, f"✓ {item} gelistet"))
+
+    async def _mar_hp_status(self) -> None:
+        hp = await self.agent.hp_status()
+        alive = "tot" if hp.get("dead") else "lebt"
+        self._set_feedback(f"HP {hp.get('marauder_hp', '?')} · {alive}")
+
+    async def _mar_passenger_status(self) -> None:
+        st = await self.agent.bus_passenger_status()
+        if st:
+            self._set_feedback("Im Bus → " + str(st.get("to_cube_id", "?"))[:8])
+        else:
+            self._set_feedback("Nicht im Bus")
 
     def _register_agent_handlers(self) -> None:
         @self.agent.on_tick
