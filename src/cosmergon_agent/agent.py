@@ -473,6 +473,95 @@ class CosmergonAgent:
         resp = await self._request("POST", f"/api/v1/marauder/pickup-drop/{drop_id}")
         return resp.json()
 
+    # ── Cube-Bus ──────────────────────────────────────────────────────────────
+
+    async def bus_departures(self, cube_id: str) -> list[dict]:
+        """List bus departures from a cube: destination, ETA (ticks), stop position."""
+        resp = await self._request(
+            "GET", "/api/v1/marauder/bus/departures", params={"cube_id": cube_id}
+        )
+        return resp.json()
+
+    async def buy_bus_ticket(self, to_cube_id: str | None = None) -> dict:
+        """Buy a destination-specific bus ticket from the energy wallet.
+
+        With exactly one outbound line the destination is inferred; with several
+        ``to_cube_id`` is required. The ticket item is ``bus_ticket:<to_cube_id>``.
+        """
+        resp = await self._request(
+            "POST", "/api/v1/marauder/bus/buy-ticket", json={"to_cube_id": to_cube_id}
+        )
+        return resp.json()
+
+    async def bus_passenger_status(self) -> dict | None:
+        """Own passenger status while riding (from/to cube, boarded/arrival tick), or None."""
+        resp = await self._request("GET", "/api/v1/marauder/bus/passenger")
+        return resp.json()
+
+    # ── Marketplace ───────────────────────────────────────────────────────────
+
+    async def market_listings(self) -> list[dict]:
+        """List active marketplace listings (public)."""
+        resp = await self._request("GET", "/api/v1/market/listings")
+        return resp.json()
+
+    async def list_item(self, item_type: str, price_energy: float) -> dict:
+        """List (sell) an item on the marketplace.
+
+        For inventory items the server atomically deducts the item from your
+        ``player_inventory`` (you can only sell what you own; HTTP 400 otherwise).
+        """
+        resp = await self._request(
+            "POST",
+            "/api/v1/market/listings",
+            json={"item_type": item_type, "price_energy": price_energy},
+            headers={"X-Idempotency-Key": str(uuid.uuid4())},
+        )
+        return resp.json()
+
+    async def buy_listing(self, listing_id: str) -> dict:
+        """Buy an active marketplace listing (energy deducted, item credited)."""
+        resp = await self._request(
+            "POST",
+            f"/api/v1/market/listings/{listing_id}/buy",
+            headers={"X-Idempotency-Key": str(uuid.uuid4())},
+        )
+        return resp.json()
+
+    # ── Combat ────────────────────────────────────────────────────────────────
+
+    async def damage(self, target_id: str, target_type: str, weapon_id: str) -> dict:
+        """Deal damage to a bird or marauder. target_type: 'bird' | 'marauder'.
+
+        weapon_id: pistol|shotgun|plasma|rocket|super_shotgun|flamethrower|
+        laser_sword|bomb|mine. Server validates cube-match, hitbox range and cooldown.
+        """
+        resp = await self._request(
+            "POST",
+            "/api/v1/marauder/damage",
+            json={"target_id": target_id, "target_type": target_type, "weapon_id": weapon_id},
+        )
+        return resp.json()
+
+    async def hp_status(self) -> dict:
+        """Own marauder HP + dead-flag."""
+        resp = await self._request("GET", "/api/v1/marauder/hp")
+        return resp.json()
+
+    async def respawn(self) -> dict:
+        """Respawn the marauder after death."""
+        resp = await self._request("POST", "/api/v1/marauder/respawn")
+        return resp.json()
+
+    async def burn_plague(self, field_id: str, x: int, y: int, surface: str = "floor") -> dict:
+        """Burn a grey-plague slot at (x, y) on a surface ('floor'|'wall'|'ceiling')."""
+        resp = await self._request(
+            "POST",
+            "/api/v1/marauder/burn-plague",
+            json={"field_id": field_id, "x": x, "y": y, "surface": surface},
+        )
+        return resp.json()
+
     async def transfer_inventory(
         self, recipient_id: str, item_type: str, count: int
     ) -> dict:
