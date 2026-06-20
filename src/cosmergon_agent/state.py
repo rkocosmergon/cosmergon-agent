@@ -161,6 +161,7 @@ class ContractTargetBrief:
     player_id: str
     username: str
     persona: str | None = None
+    coop_score: float = 0.0  # S229: aggregate cooperation_score [-1, +1]
 
 
 @dataclass(frozen=True)
@@ -195,6 +196,7 @@ class WorldBriefing:
                     player_id=str(t.get("player_id", "")),
                     username=t.get("username", ""),
                     persona=t.get("persona"),
+                    coop_score=float(t.get("coop_score", 0.0) or 0.0),
                 )
                 for t in raw_targets
             ),
