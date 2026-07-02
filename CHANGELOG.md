@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.16.0] — 2026-07-02
+
+### Added
+
+- **Registration source label:** auto-registration now sends a `source`
+  field so the backend can attribute where an anonymous agent came from.
+  `CosmergonAgent` sends `"sdk"`, the MCP server sends `"mcp"`. Purely
+  additive and backward-compatible (the backend already accepts and
+  whitelists the field; older backends ignore it).
+
 ## [0.15.0] — 2026-05-24
 
 ### Added

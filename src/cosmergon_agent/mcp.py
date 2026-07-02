@@ -130,7 +130,7 @@ async def _auto_register(base_url: str) -> tuple[str, str | None]:
     url = f"{base_url.rstrip('/')}/api/v1/auth/register/anonymous-agent"
     try:
         async with httpx.AsyncClient(timeout=10, verify=True) as client:
-            resp = await client.post(url, json={})
+            resp = await client.post(url, json={"source": "mcp"})
     except httpx.ConnectError:
         _error(f"Cannot reach {base_url} — check your connection")
         return "", None

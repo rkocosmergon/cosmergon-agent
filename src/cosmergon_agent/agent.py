@@ -1250,7 +1250,7 @@ class CosmergonAgent:
         """
         url = f"{base_url.rstrip('/')}/api/v1/auth/register/anonymous-agent"
         with httpx.Client(timeout=10.0) as client:
-            resp = client.post(url, json={})
+            resp = client.post(url, json={"source": "sdk"})
         if resp.status_code != 200:
             is_json = resp.headers.get(
                 "content-type",
