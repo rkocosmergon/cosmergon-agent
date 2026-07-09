@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.15.1] — 2026-07-09
+
+### Added
+
+- **MCP Registry ownership marker:** hidden `mcp-name:
+  io.github.rkocosmergon/cosmergon` comment in the README — required by the
+  official MCP Registry (registry.modelcontextprotocol.io) to verify that
+  this PyPI package belongs to the registry entry. No code changes.
+
 ## [0.15.0] — 2026-05-24
 
 ### Added
