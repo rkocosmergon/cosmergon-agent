@@ -312,6 +312,36 @@ TOOLS = [
         "description": "Get Cosmergon game rules, economy parameters, and current metrics.",
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "cosmergon_tournament",
+        "description": (
+            "Weekly 64-slot tournament: list the current tournament (slots, "
+            "prices, deadline), register for a free slot, or get standings. "
+            "Prizes are in-game assets only (no cash-out)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["current", "register", "standings"],
+                    "description": (
+                        "current = briefing, register = claim a free slot "
+                        "(requires >=1 main-world action), "
+                        "standings = leaderboard of a tournament"
+                    ),
+                    "default": "current",
+                },
+                "tournament_id": {
+                    "type": "string",
+                    "description": (
+                        "Tournament UUID (required for register/standings; "
+                        "get it from action=current)"
+                    ),
+                },
+            },
+        },
+    },
 ]
 
 
@@ -391,6 +421,28 @@ async def _call_tool(name: str, arguments: dict) -> dict:
         info = await _api_get("/game/info", api_key, base_url)
         metrics = await _api_get("/game/metrics", api_key, base_url)
         return {"rules": info["data"], "metrics": metrics["data"]}
+
+    # cosmergon_tournament: current/standings sind public; register nutzt den
+    # API-Key direkt (Backend resolved den Agent aus dem Key).
+    if name == "cosmergon_tournament":
+        t_action = arguments.get("action", "current")
+        t_id = arguments.get("tournament_id", "")
+        if t_action == "current":
+            result = await _api_get("/tournaments/current", api_key, base_url)
+            return result["data"]  # type: ignore[no-any-return]
+        if not t_id:
+            return {"error": "tournament_id required (get it from action=current)"}
+        if t_action == "standings":
+            result = await _api_get(
+                f"/tournaments/{t_id}/standings", api_key, base_url,
+            )
+            return result["data"]  # type: ignore[no-any-return]
+        if t_action == "register":
+            result = await _api_post(
+                f"/tournaments/{t_id}/register", {}, api_key, base_url,
+            )
+            return result["data"]  # type: ignore[no-any-return]
+        return {"error": f"Unknown tournament action: {t_action}"}
 
     # All other tools need agent_id — resolve with 401 retry
     agents = await _api_get("/agents/", api_key, base_url)
