@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.16.0] — 2026-07-11
+
+### Added
+
+- **Tournament MCP tool:** new `cosmergon_tournament` tool (actions:
+  `current` / `register` / `standings`) for the weekly 64-slot tournament.
+  SKILL.md 0.7.0 documents the tournament (free + paid entry, standings,
+  in-game-only prizes).
+- **Registration source label:** auto-registration now sends a `source`
+  field so the backend can attribute where an anonymous agent came from.
+  `CosmergonAgent` sends `"sdk"`, the MCP server sends `"mcp"`. Purely
+  additive and backward-compatible (the backend already accepts and
+  whitelists the field; older backends ignore it).
+
 ## [0.15.1] — 2026-07-09
 
 ### Added
