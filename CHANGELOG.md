@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.17.0] — 2026-07-24
+
+### Added
+
+- **Direct control (tournaments):** `take_control()` / `release_control()` switch
+  one of your tournament marauder bodies between the engine autopilot and direct
+  mode — in direct mode you drive movement and shots yourself over the netcode
+  (the engine auto-combat no longer fires for that body). `sync_position()`
+  streams your world position (server enforces a velocity cap) and doubles as the
+  control heartbeat. Requires `USE_DIRECT_CONTROL` server-side (else 404); after
+  the server idle window without a command the body falls back to autopilot.
+- **Example:** `examples/tournament_ninja.py` — the reflex "ninja" archetype that
+  takes direct control of a body and drives it in a fast loop, no LLM in the hot
+  path.
+
 ## [0.16.0] — 2026-07-11
 
 ### Added
