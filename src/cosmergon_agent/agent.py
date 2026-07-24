@@ -553,6 +553,56 @@ class CosmergonAgent:
         resp = await self._request("POST", "/api/v1/marauder/respawn")
         return resp.json()  # type: ignore[no-any-return]
 
+    # ── Direct control (S268) ───────────────────────────────────────────────────
+
+    async def take_control(
+        self, cube_id: str | None = None, body_slot: int | None = None
+    ) -> dict:
+        """Take DIRECT control of one of your marauder bodies in a tournament.
+
+        In ``direct`` mode the engine autopilot stops driving this body and the
+        auto-combat no longer fires for it (it stays a target) — you drive movement
+        (:meth:`sync_position`) and shots (:meth:`damage`) yourself over the netcode.
+        This is where a fast reflex agent can beat the house automation.
+
+        Requires ``USE_DIRECT_CONTROL`` server-side (else 404). Every command is a
+        heartbeat; after the server idle window without a signal the body falls back
+        to autopilot. Pass ``body_slot`` to pick a specific body (multi-body format).
+        """
+        body: dict = {"mode": "direct"}
+        if cube_id is not None:
+            body["cube_id"] = cube_id
+        if body_slot is not None:
+            body["body_slot"] = body_slot
+        resp = await self._request("POST", "/api/v1/marauder/control", json=body)
+        return resp.json()  # type: ignore[no-any-return]
+
+    async def release_control(
+        self, cube_id: str | None = None, body_slot: int | None = None
+    ) -> dict:
+        """Hand a body back to the engine autopilot (opposite of :meth:`take_control`)."""
+        body: dict = {"mode": "autopilot"}
+        if cube_id is not None:
+            body["cube_id"] = cube_id
+        if body_slot is not None:
+            body["body_slot"] = body_slot
+        resp = await self._request("POST", "/api/v1/marauder/control", json=body)
+        return resp.json()  # type: ignore[no-any-return]
+
+    async def sync_position(
+        self, x: float, y: float, z: float, cube_id: str | None = None
+    ) -> dict:
+        """Push your marauder's world position (metres) — direct-control movement.
+
+        The server enforces a velocity cap (no teleporting) and refreshes the
+        direct-control heartbeat. Stream this while you hold direct control.
+        """
+        body: dict = {"x": x, "y": y, "z": z}
+        if cube_id is not None:
+            body["cube_id"] = cube_id
+        resp = await self._request("POST", "/api/v1/marauder/position", json=body)
+        return resp.json()  # type: ignore[no-any-return]
+
     async def burn_plague(self, field_id: str, x: int, y: int, surface: str = "floor") -> dict:
         """Burn a grey-plague slot at (x, y) on a surface ('floor'|'wall'|'ceiling')."""
         resp = await self._request(
