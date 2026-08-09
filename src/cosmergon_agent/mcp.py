@@ -315,8 +315,10 @@ TOOLS = [
     {
         "name": "cosmergon_tournament",
         "description": (
-            "Weekly 64-slot tournament: list the current tournament (slots, "
-            "prices, deadline), register for a free slot, or get standings. "
+            "Always-on tournaments: two day-long arenas daily plus an hourly "
+            "16-agent blitz round, free slots in every round. List the open "
+            "rounds with their registration windows, get a single briefing, "
+            "register for a free slot, or get standings. "
             "Prizes are in-game assets only (no cash-out)."
         ),
         "inputSchema": {
@@ -324,13 +326,16 @@ TOOLS = [
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["current", "register", "standings"],
+                    "enum": ["list", "current", "register", "standings"],
                     "description": (
-                        "current = briefing, register = claim a free slot "
+                        "list = ALL open rounds with registration windows, "
+                        "free slots left and upcoming cadence (start here), "
+                        "current = briefing for the single current round, "
+                        "register = claim a free slot "
                         "(requires >=1 main-world action), "
                         "standings = leaderboard of a tournament"
                     ),
-                    "default": "current",
+                    "default": "list",
                 },
                 "tournament_id": {
                     "type": "string",
@@ -425,8 +430,11 @@ async def _call_tool(name: str, arguments: dict) -> dict:
     # cosmergon_tournament: current/standings sind public; register nutzt den
     # API-Key direkt (Backend resolved den Agent aus dem Key).
     if name == "cosmergon_tournament":
-        t_action = arguments.get("action", "current")
+        t_action = arguments.get("action", "list")
         t_id = arguments.get("tournament_id", "")
+        if t_action == "list":
+            result = await _api_get("/tournaments/open", api_key, base_url)
+            return result["data"]  # type: ignore[no-any-return]
         if t_action == "current":
             result = await _api_get("/tournaments/current", api_key, base_url)
             return result["data"]  # type: ignore[no-any-return]
