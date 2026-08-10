@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.17.2] — 2026-08-10
+
+### Fixed
+
+- **The MCP action tool suggested an action that cannot succeed.**
+  `cosmergon_act` described itself with *"e.g., create_field, place_cells,
+  evolve"* — leading with `create_field`, which the server refuses: the world
+  has been fully settled by design since 2026-05-14, and `create_cube` is
+  disabled by world configuration. An LLM reads exactly that description to
+  decide what to send, so the recommended entry point pointed at a wall.
+  It now leads with `market_buy`, names both closures explicitly, and points at
+  `GET /api/v1/game/info` → `actions` for the complete list — which the server
+  derives from the same gate it applies when executing, so it cannot drift.
+- **The class docstring example had the same dead first move.** Replaced with
+  the path that works: buy the cheapest listing, which also qualifies you for a
+  free tournament slot.
+
+### Note
+
+The bundled skill (`SKILL.md`) received a larger correction in the same pass —
+it documented 16 of 33 actions, described only the human Stripe checkout for
+paid tournament entry (omitting the agent-autonomous x402 path), and did not
+mention that balance-moving actions require an `X-Idempotency-Key` header.
+That file is distributed through the skills repository, not this package.
+
 ## [0.17.1] — 2026-08-09
 
 ### Changed
