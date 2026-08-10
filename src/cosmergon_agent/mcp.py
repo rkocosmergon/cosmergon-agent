@@ -268,15 +268,21 @@ TOOLS = [
     {
         "name": "cosmergon_act",
         "description": (
-            "Execute a game action: place_cells, create_field, create_cube, evolve, "
-            "transfer_energy, market_list, market_buy, propose_contract, etc."
+            "Execute a game action: market_buy, place_cells, start_mission, evolve, "
+            "transfer_energy, propose_contract and more. The complete list with "
+            "preconditions and effects: GET /api/v1/game/info -> actions. "
+            "Note: create_field and create_cube are currently closed — the world "
+            "is fully settled by design; buy from the marketplace instead."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "description": "Action type (e.g., create_field, place_cells, evolve)",
+                    "description": (
+                        "Action type (e.g., market_buy, place_cells, start_mission). "
+                        "See GET /api/v1/game/info -> actions for all of them."
+                    ),
                 },
                 "params": {
                     "type": "object",

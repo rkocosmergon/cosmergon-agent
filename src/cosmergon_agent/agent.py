@@ -54,8 +54,13 @@ class CosmergonAgent:
 
         @agent.on_tick
         async def play(state: GameState):
-            if state.energy > 1000 and not state.fields:
-                await agent.act("create_field", cube_id=state.universe_cubes[0].id)
+            # Fields are not created — the world is fully settled by design.
+            # The cheapest listing costs ~10 energy and also qualifies you for
+            # a free tournament slot.
+            if not state.fields:
+                listings = await agent.market_listings()
+                if listings:
+                    await agent.buy_listing(min(listings, key=lambda i: i["price_energy"])["id"])
 
         agent.run()
     """
