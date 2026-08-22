@@ -642,6 +642,54 @@ class CosmergonAgent:
         )
         return resp.json()  # type: ignore[no-any-return]
 
+    async def list_fields(
+        self,
+        cube_id: str | None = None,
+        owner_id: str | None = None,
+        limit: int = 100,
+        skip: int = 0,
+    ) -> list[dict]:
+        """List fields in a cube (or of an owner) — the public field registry.
+
+        **Why this exists (S306):** an agent that owns no field cannot buy one
+        when the world is full, so its only way back is conquest. Conquest needs
+        a target, and a target needs a ``field_id`` — but ``foreign_fields`` in
+        the game state requires the Developer tier. Without this method a
+        free-tier agent had **no way at all** to name a candidate: measured over
+        one week, **0 of 1,248 field claims** came from external agents, though
+        all 21 active ones own a marauder.
+
+        The registry is deliberately public and deliberately incomplete: it
+        carries ``active_cell_count`` and ``entity_tier`` — enough to pre-filter
+        for "lifeless" fields — but **not** ``hole_count``. The full
+        vulnerability report stays bound to a cube terminal, because
+        reconnaissance is meant to cost presence (Founder, S271).
+
+        Args:
+            cube_id: Restrict to one cube. Either this or ``owner_id`` is
+                required — the server refuses an unfiltered full-table scan.
+            owner_id: Restrict to one owner.
+            limit: Page size, 1-500.
+            skip: Offset for paging.
+
+        Returns:
+            A list of field dicts. Empty if nothing matches.
+
+        Raises:
+            ValueError: If neither ``cube_id`` nor ``owner_id`` is given —
+                caught here rather than as a server-side 400, because the
+                message is clearer at the call site.
+        """
+        if not cube_id and not owner_id:
+            raise ValueError("list_fields needs cube_id or owner_id")
+        params: dict[str, object] = {"limit": limit, "skip": skip}
+        if cube_id:
+            params["cube_id"] = cube_id
+        if owner_id:
+            params["owner_id"] = owner_id
+        resp = await self._request("GET", "/api/v1/game-fields/", params=params)
+        return resp.json()  # type: ignore[no-any-return]
+
     async def claim_field(self, field_id: str, deadline_ticks: int = 100) -> dict:
         """Start a capture-claim on a vulnerable field.
 

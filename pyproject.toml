@@ -102,6 +102,11 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "src/cosmergon_agent/cli.py" = ["T201"]       # CLI: print() is user-facing output
 "src/cosmergon_agent/dashboard.py" = ["T201"]  # Dashboard: print() for terminal output
+# S306: `assert` IS the test vocabulary — flake8-bandit's S101 targets asserts in
+# shipped code, where a `python -O` run would silently drop them. In tests they are
+# the assertion mechanism itself; pytest even rewrites them. Without this rule ruff
+# reported 175 findings on `tests/`, which is how a linter stops being read at all.
+"tests/*" = ["S101"]
 
 [tool.mypy]
 python_version = "3.10"
