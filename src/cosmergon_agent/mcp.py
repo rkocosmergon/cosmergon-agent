@@ -173,10 +173,7 @@ async def _force_reregister() -> tuple[str, str]:
     )
 
     # Check for token — Paid users must reconnect manually
-    has_token = bool(
-        os.environ.get("COSMERGON_PLAYER_TOKEN", "")
-        or load_token()
-    )
+    has_token = bool(os.environ.get("COSMERGON_PLAYER_TOKEN", "") or load_token())
     if has_token:
         _error(
             "API key was replaced by another session. "
@@ -257,8 +254,7 @@ TOOLS = [
                     "type": "string",
                     "enum": ["summary", "rich"],
                     "description": (
-                        "summary = basic state, "
-                        "rich = full context (Developer tier required)"
+                        "summary = basic state, rich = full context (Developer tier required)"
                     ),
                     "default": "summary",
                 },
@@ -286,9 +282,7 @@ TOOLS = [
                 },
                 "params": {
                     "type": "object",
-                    "description": (
-                        "Action-specific parameters (e.g., cube_id, preset, field_id)"
-                    ),
+                    "description": ("Action-specific parameters (e.g., cube_id, preset, field_id)"),
                     "default": {},
                 },
             },
@@ -448,12 +442,17 @@ async def _call_tool(name: str, arguments: dict) -> dict:
             return {"error": "tournament_id required (get it from action=current)"}
         if t_action == "standings":
             result = await _api_get(
-                f"/tournaments/{t_id}/standings", api_key, base_url,
+                f"/tournaments/{t_id}/standings",
+                api_key,
+                base_url,
             )
             return result["data"]  # type: ignore[no-any-return]
         if t_action == "register":
             result = await _api_post(
-                f"/tournaments/{t_id}/register", {}, api_key, base_url,
+                f"/tournaments/{t_id}/register",
+                {},
+                api_key,
+                base_url,
             )
             return result["data"]  # type: ignore[no-any-return]
         return {"error": f"Unknown tournament action: {t_action}"}
@@ -473,7 +472,9 @@ async def _call_tool(name: str, arguments: dict) -> dict:
     if name == "cosmergon_observe":
         detail = arguments.get("detail", "summary")
         state = await _api_get(
-            f"/agents/{agent_id}/state?detail={detail}", api_key, base_url,
+            f"/agents/{agent_id}/state?detail={detail}",
+            api_key,
+            base_url,
         )
         return state["data"]  # type: ignore[no-any-return]
 
@@ -482,14 +483,19 @@ async def _call_tool(name: str, arguments: dict) -> dict:
         params = arguments.get("params", {})
         body = {"action": action, **params}
         result = await _api_post(
-            f"/agents/{agent_id}/action", body, api_key, base_url,
+            f"/agents/{agent_id}/action",
+            body,
+            api_key,
+            base_url,
         )
         return result["data"]  # type: ignore[no-any-return]
 
     if name == "cosmergon_benchmark":
         days = arguments.get("days", 7)
         report = await _api_get(
-            f"/benchmark/{agent_id}/report?days={days}", api_key, base_url,
+            f"/benchmark/{agent_id}/report?days={days}",
+            api_key,
+            base_url,
         )
         return report["data"]  # type: ignore[no-any-return]
 

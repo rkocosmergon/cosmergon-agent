@@ -466,6 +466,7 @@ def maybe_migrate(
         if not bak.exists():
             try:
                 import shutil
+
                 shutil.copy2(CONFIG_PATH, bak)
                 logger.info("Config backup created: %s", bak)
             except Exception:

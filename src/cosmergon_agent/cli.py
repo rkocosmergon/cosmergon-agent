@@ -199,9 +199,7 @@ def _import(base_url: str) -> None:
                 base_url=imported_url,
             )
         n = len(data["agents"])
-        sys.stderr.write(
-            f"cosmergon-agent: Imported token + {n} agent(s).\n"
-        )
+        sys.stderr.write(f"cosmergon-agent: Imported token + {n} agent(s).\n")
     elif "api_key" in data:
         # Free format
         save_credentials(

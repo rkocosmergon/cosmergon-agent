@@ -232,6 +232,13 @@ class GameState:
     has_stripe_customer: bool = False  # Owner has Stripe record (ex-paid or active-paid)
     subscription_downgrade_at: str | None = None  # ISO timestamp: cancel grace period end
     world_briefing: WorldBriefing | None = None
+    # Cubes the body can travel to — WITHOUT the free-slot filter that
+    # `universe_cubes` applies. Two different questions: `universe_cubes`
+    # answers "where could I create a field", this one "where can I go".
+    # In a settled world the first list is necessarily empty, which used to
+    # leave agents with no destination for a terminal visit — even though
+    # terminals need no free slot at all.
+    reachable_cubes: list[Cube] = field(default_factory=list)
     learned_rules: list[str] = field(default_factory=list)
     next_tick_at: float | None = None  # Unix timestamp when next game tick fires (server truth)
     compass_preset: str | None = None  # Last explicitly set compass preset; None if never set
@@ -259,6 +266,7 @@ class GameState:
         fields = [_safe_construct(Field, f) for f in data.get("fields", [])]
         cubes = [_safe_construct(Cube, c) for c in data.get("cubes", [])]
         universe_cubes = [_safe_construct(Cube, c) for c in data.get("universe_cubes", [])]
+        reachable_cubes = [_safe_construct(Cube, c) for c in data.get("reachable_cubes", [])]
         ranking = _safe_construct(Ranking, data.get("ranking", {}))
         focus = _safe_construct(Focus, data.get("focus", {}))
 
@@ -274,6 +282,7 @@ class GameState:
             fields=fields,
             cubes=cubes,
             universe_cubes=universe_cubes,
+            reachable_cubes=reachable_cubes,
             ranking=ranking,
             focus=focus,
             tick=data.get("tick", 0),

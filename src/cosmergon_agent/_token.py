@@ -102,14 +102,12 @@ def _parse_agents_response(
     """
     if resp.status_code == 401:
         raise TokenResolutionError(
-            "Invalid master key. Check your key at cosmergon.com "
-            "or press [K] in the dashboard.",
+            "Invalid master key. Check your key at cosmergon.com or press [K] in the dashboard.",
             status_code=401,
         )
     if resp.status_code == 403:
         raise TokenResolutionError(
-            "Master keys are available with Solo and Developer plans. "
-            "cosmergon.com/pricing",
+            "Master keys are available with Solo and Developer plans. cosmergon.com/pricing",
             status_code=403,
         )
     if resp.status_code == 429:
@@ -128,8 +126,7 @@ def _parse_agents_response(
     raw_agents = data.get("agents", [])
     if not raw_agents:
         raise TokenResolutionError(
-            "No agents found for this account. "
-            "Create one at cosmergon.com or via the API.",
+            "No agents found for this account. Create one at cosmergon.com or via the API.",
             status_code=200,
         )
 

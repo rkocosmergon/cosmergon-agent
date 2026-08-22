@@ -1143,8 +1143,14 @@ class CosmergonDashboard(App):
 
     # ── Marauder action sub-menu (S212 action parity) ──────────────────────
     _MARAUDER_SELL_PRICE: ClassVar[dict[str, float]] = {
-        "health": 2000, "shield": 5000, "tempo": 3000, "glider_fuel": 8000,
-        "weapon": 50000, "spore_pack": 4000, "bomb": 20000, "mine": 15000,
+        "health": 2000,
+        "shield": 5000,
+        "tempo": 3000,
+        "glider_fuel": 8000,
+        "weapon": 50000,
+        "spore_pack": 4000,
+        "bomb": 20000,
+        "mine": 15000,
         "mega_bomb": 100000,
     }
 
@@ -1157,16 +1163,24 @@ class CosmergonDashboard(App):
     async def action_marauder_menu(self) -> None:
         """[W] — Marauder action sub-menu: missions, bus, market, combat."""
         options = [
-            "Mission starten", "Bus: Abfahrten", "Bus: Ticket kaufen",
-            "Markt: Listings", "Markt: Item verkaufen", "Combat: HP-Status",
+            "Mission starten",
+            "Bus: Abfahrten",
+            "Bus: Ticket kaufen",
+            "Markt: Listings",
+            "Markt: Item verkaufen",
+            "Combat: HP-Status",
             "Bus: Passagier-Status",
         ]
         idx = await self.push_screen_wait(SelectModal("Marauder-Aktionen", options))
         if idx is None:
             return
         handlers = [
-            self._mar_start_mission, self._mar_bus_departures, self._mar_buy_ticket,
-            self._mar_market_listings, self._mar_sell_item, self._mar_hp_status,
+            self._mar_start_mission,
+            self._mar_bus_departures,
+            self._mar_buy_ticket,
+            self._mar_market_listings,
+            self._mar_sell_item,
+            self._mar_hp_status,
             self._mar_passenger_status,
         ]
         try:

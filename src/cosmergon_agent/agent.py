@@ -560,9 +560,7 @@ class CosmergonAgent:
 
     # ── Direct control (S268) ───────────────────────────────────────────────────
 
-    async def take_control(
-        self, cube_id: str | None = None, body_slot: int | None = None
-    ) -> dict:
+    async def take_control(self, cube_id: str | None = None, body_slot: int | None = None) -> dict:
         """Take DIRECT control of one of your marauder bodies in a tournament.
 
         In ``direct`` mode the engine autopilot stops driving this body and the
@@ -594,9 +592,7 @@ class CosmergonAgent:
         resp = await self._request("POST", "/api/v1/marauder/control", json=body)
         return resp.json()  # type: ignore[no-any-return]
 
-    async def sync_position(
-        self, x: float, y: float, z: float, cube_id: str | None = None
-    ) -> dict:
+    async def sync_position(self, x: float, y: float, z: float, cube_id: str | None = None) -> dict:
         """Push your marauder's world position (metres) — direct-control movement.
 
         The server enforces a velocity cap (no teleporting) and refreshes the
@@ -617,9 +613,7 @@ class CosmergonAgent:
         )
         return resp.json()  # type: ignore[no-any-return]
 
-    async def transfer_inventory(
-        self, recipient_id: str, item_type: str, count: int
-    ) -> dict:
+    async def transfer_inventory(self, recipient_id: str, item_type: str, count: int) -> dict:
         """Voluntary inventory transfer to another player. Bilateral, no locality required."""
         resp = await self._request(
             "POST",
@@ -664,14 +658,10 @@ class CosmergonAgent:
 
     async def heal_holes(self, field_id: str) -> dict:
         """Lump-sum heal of all holes on own field. Cost scales by hole_count^1.5."""
-        resp = await self._request(
-            "POST", f"/api/v1/game-fields/{field_id}/heal-holes"
-        )
+        resp = await self._request("POST", f"/api/v1/game-fields/{field_id}/heal-holes")
         return resp.json()  # type: ignore[no-any-return]
 
-    async def terminal_query(
-        self, query_type: str, params: dict[str, Any] | None = None
-    ) -> dict:
+    async def terminal_query(self, query_type: str, params: dict[str, Any] | None = None) -> dict:
         """Query a Cube-Center-Terminal. Marauder must be touching the column.
 
         query_type: field_lookup | wealth_estimate | reputation |

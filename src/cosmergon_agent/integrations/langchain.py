@@ -153,9 +153,7 @@ def _make_contracts_tool(tool_decorator: object, client: httpx.Client, agent_id:
             return json.dumps(client.get("/api/v1/contracts/templates").json(), indent=2)
         if operation == "list_pending":
             state = client.get(f"/api/v1/agents/{agent_id}/state").json()
-            return json.dumps(
-                state.get("contracts", {}).get("pending_inbound", []) or [], indent=2
-            )
+            return json.dumps(state.get("contracts", {}).get("pending_inbound", []) or [], indent=2)
         action_map = {
             "propose": "propose_contract",
             "propose_from_template": "propose_from_template",
@@ -231,7 +229,9 @@ def cosmergon_tools(
 
             try:
                 result = resolve_token_sync(
-                    token, base_url=base_url, agent_name=name or None,
+                    token,
+                    base_url=base_url,
+                    agent_name=name or None,
                 )
             except TokenResolutionError as exc:
                 raise ValueError(str(exc)) from exc

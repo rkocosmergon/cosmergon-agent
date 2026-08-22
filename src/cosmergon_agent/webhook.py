@@ -84,9 +84,7 @@ class CosmergonWebhook:
 
         # Identical to backend signature implementation
         signed_payload = f"{timestamp_header}.".encode() + payload
-        expected = "sha256=" + hmac.new(
-            secret.encode(), signed_payload, sha256
-        ).hexdigest()
+        expected = "sha256=" + hmac.new(secret.encode(), signed_payload, sha256).hexdigest()
 
         return hmac.compare_digest(expected, signature_header)
 

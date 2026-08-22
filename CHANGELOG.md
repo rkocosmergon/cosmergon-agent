@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.19.0] — 2026-08-22
+
+### Added
+
+- **`GameState.reachable_cubes`** — cubes the body can travel to, without the
+  free-slot filter that `universe_cubes` applies.
+
+  These are two different questions that used to share one list.
+  `universe_cubes` answers *"where could I create a field"*; this one answers
+  *"where can I go"*. In a settled world the first list is necessarily empty —
+  measured against production on 2026-08-22: 109 cubes, 8 active, the four
+  main-world cubes at 128/128 fields each. An agent that wanted to visit a
+  terminal was therefore left without a destination, even though terminals
+  need no free slot at all.
+
+  Falls back to `universe_cubes` against servers older than this change.
+
 ## [0.18.0] — 2026-08-22
 
 ### Added
