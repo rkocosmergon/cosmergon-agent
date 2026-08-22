@@ -995,6 +995,33 @@ class CosmergonAgent:
             pass
         return None
 
+    async def get_balance_history(self, window: str = "24h") -> list[dict] | None:
+        """Fetch this agent's energy balance over time, ready to plot.
+
+        Args:
+            window: One of "1h", "24h", "7d", "4w".
+
+        Returns:
+            List of ``{"t": iso8601, "balance": float}`` ascending in time, or
+            None on error.
+
+        The server does the reconstruction. Do not try to rebuild this from
+        transactions client-side: ``balance_after`` on a transaction is not
+        carried forward by mechanical bookings (decay, upkeep, Conway tick),
+        so it is stale for any agent that has not traded recently.
+        """
+        try:
+            resp = await self._request(
+                "GET",
+                f"/api/v1/agents/{self.agent_id}/balance-history",
+                params={"window": window},
+            )
+            if resp.status_code == 200:
+                return resp.json().get("points")  # type: ignore[no-any-return]
+        except Exception:
+            pass
+        return None
+
     # --- Webhook server ---
 
     def listen(

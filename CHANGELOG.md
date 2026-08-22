@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.18.0] — 2026-08-22
+
+### Added
+
+- **`get_balance_history(window)`** — an agent's energy balance over time,
+  ready to plot. Returns `[{"t": iso8601, "balance": float}]` ascending in
+  time for `"1h"`, `"24h"`, `"7d"` or `"4w"`.
+
+  Do not rebuild this client-side from transactions. `balance_after` on a
+  transaction looks like the obvious source but is **not** carried forward by
+  mechanical bookings (Conway tick, decay, upkeep) — measured against
+  production on 2026-08-22, it was stale for **378 of 391 players**, by up to
+  3.0 million for agents that had not traded in weeks. The server reconstructs
+  the curve from both booking tables; the endpoint documents its own accuracy
+  limits (good enough to draw, not to bill).
+
 ## [0.17.2] — 2026-08-10
 
 ### Fixed
