@@ -48,12 +48,61 @@ class Cube:
 
 
 @dataclass(frozen=True)
+class FacettenStand:
+    """Where this agent stands on ONE champion facet.
+
+    ``naechster_rang_wert`` is the value of the rank directly above yours —
+    the actionable target. ``None`` means you already hold the top rank.
+    Ranks are dense (a tie shares a rank) and anonymous: values only, never
+    identities.
+    """
+
+    wert: float = 0.0
+    rang: int = 0
+    pool: int = 0
+    spitzen_wert: float = 0.0
+    naechster_rang_wert: float | None = None
+
+
+@dataclass(frozen=True)
 class Ranking:
-    """Agent's current ranking."""
+    """Agent's current ranking — including WHAT the game measures.
+
+    The goal of Cosmergon is "I am the best agent". ``ziel`` states the win
+    condition in words, ``champion_rang`` is your place in it (1 = best,
+    0 = unrated), and ``facetten`` shows where you stand on each of the five
+    quality facets — diplomat, trader, warrior, scientist, farmer.
+
+    ``player_score``/``player_tier`` are the legacy composite, kept for
+    comparison; they are NOT the win condition.
+
+    Field names follow the wire format deliberately — one vocabulary between
+    server and client cannot drift apart.
+    """
 
     player_tier: int = 0
     tier_name: str = "Novice"
     player_score: float = 0.0
+    # The server has sent these since v1.65.0; the SDK dropped them silently,
+    # so an external agent could not read the measure it is judged by.
+    meine_art: str = ""
+    facetten: dict[str, FacettenStand] = field(default_factory=dict)
+    champion_rang: int = 0
+    champion_score: float = 0.0
+    ziel: str = ""
+
+    @classmethod
+    def from_api(cls, data: dict) -> Ranking:
+        """Parse the ranking block, typing the per-facet standings."""
+        roh = data.get("facetten") or {}
+        facetten = {
+            str(name): _safe_construct(FacettenStand, stand)
+            for name, stand in roh.items()
+            if isinstance(stand, dict)
+        }
+        known = {f.name for f in dc_fields(cls)} - {"facetten"}
+        gefiltert = {k: v for k, v in data.items() if k in known}
+        return cls(**gefiltert, facetten=facetten)
 
 
 @dataclass(frozen=True)
@@ -255,6 +304,12 @@ class GameState:
     # without the SDK growing a typed schema for every action. Empty dict on
     # backends that don't yet emit the field (forward-compatibility, C3).
     available_actions: dict = field(default_factory=dict)
+    # Owned items by type, e.g. {"mega_bomb": 3, "preset:block": 1}. The server
+    # has carried this since v1.65.4 (`inventory.items`); the SDK parsed no
+    # `inventory` at all, so a client could not see its own stock — the reason
+    # one pet bought 203 house presets in 24 h while already holding plenty.
+    # Empty dict on older backends (forward-compatibility, C3).
+    inventory_items: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def from_api(cls, data: dict) -> GameState:
@@ -267,7 +322,7 @@ class GameState:
         cubes = [_safe_construct(Cube, c) for c in data.get("cubes", [])]
         universe_cubes = [_safe_construct(Cube, c) for c in data.get("universe_cubes", [])]
         reachable_cubes = [_safe_construct(Cube, c) for c in data.get("reachable_cubes", [])]
-        ranking = _safe_construct(Ranking, data.get("ranking", {}))
+        ranking = Ranking.from_api(data.get("ranking") or {})
         focus = _safe_construct(Focus, data.get("focus", {}))
 
         wb_data = data.get("world_briefing")
@@ -297,4 +352,9 @@ class GameState:
             reflection_due=bool(data.get("reflection_due", False)),
             decisions_since_last_reflection=int(data.get("decisions_since_last_reflection", 0)),
             available_actions=data.get("available_actions") or {},
+            inventory_items={
+                str(k): int(v)
+                for k, v in ((data.get("inventory") or {}).get("items") or {}).items()
+                if isinstance(v, int | float)
+            },
         )

@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.20.0] — 2026-08-25
+
+### Added
+
+- **The agent can now read what it is measured by.** Cosmergon's goal is
+  "I am the best agent", scored on five quality facets — diplomat, trader,
+  warrior, scientist, farmer. The server has sent that scoring in the
+  `ranking` block since backend v1.65.0, but the SDK dropped it silently:
+  `Ranking` knew only `player_tier`, `tier_name` and `player_score`.
+  An external agent was therefore left with `world_briefing.your_rank` as
+  its only rank — and that one counts **energy balance**, the very measure
+  the win condition explicitly is not.
+
+  `Ranking` now carries `ziel` (the win condition in words),
+  `champion_rang` (1 = best, 0 = unrated), `champion_score`, `meine_art`
+  (your persona's facet) and `facetten` — per facet your value, your dense
+  rank, the pool size, the leader's value, and `naechster_rang_wert`, the
+  value of the rank directly above you. That last one is the actionable
+  number: it says what to beat next, not just how far the top is.
+
+- **`GameState.inventory_items`** — what you own, by item type
+  (e.g. `{"mega_bomb": 3, "preset:block": 1}`). The server has carried
+  this since v1.65.4; the SDK parsed no `inventory` at all, so a client
+  could not see its own stock. One pet bought 203 house presets in 24 hours
+  while already holding plenty.
+
+Both are additive and default to empty against older backends.
+
+
 ## [0.19.0] — 2026-08-22
 
 ### Added
