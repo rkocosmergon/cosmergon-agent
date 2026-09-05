@@ -11,8 +11,44 @@ on:
         required: true
 
 jobs:
+  gate:
+    # U5 K3 (cosmergon#232, Founder-Go 2026-09-05): the private test suite in
+    # rkocosmergon/cosmergon (sdk-tests/) must be green for EXACTLY this SHA before
+    # anything is built. Fail-closed: no token, no run, or a red run — no release.
+    # The trigger above stays workflow_dispatch; this job only adds an order.
+    name: Private SDK tests must be green for this SHA
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch private sdk-tests for this SHA and wait for it
+        env:
+          GH_TOKEN: ${{ secrets.COS20_ACTIONS_TOKEN }}
+          SHA: ${{ github.sha }}
+          REPO: rkocosmergon/cosmergon
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::Secret COS20_ACTIONS_TOKEN is missing — no private test run, no release (cosmergon#232 K3)."
+            exit 1
+          fi
+          gh workflow run sdk-tests.yml -R "$REPO" -f sdk_ref="$SHA"
+          RUN_ID=""
+          for _ in $(seq 1 24); do
+            sleep 5
+            RUN_ID=$(gh run list -R "$REPO" --workflow sdk-tests.yml --limit 10 \
+              --json databaseId,displayTitle \
+              -q ".[] | select(.displayTitle | contains(\"$SHA\")) | .databaseId" | head -1)
+            [ -n "$RUN_ID" ] && break
+          done
+          if [ -z "$RUN_ID" ]; then
+            echo "::error::No sdk-tests run found for $SHA within 2 minutes."
+            exit 1
+          fi
+          echo "waiting for private run $RUN_ID ($SHA)"
+          gh run watch "$RUN_ID" -R "$REPO" --exit-status
+
   build-and-publish:
     name: Build and publish to PyPI
+    needs: gate
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
