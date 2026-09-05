@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.20.1] — 2026-09-05
+
+### Changed
+
+- **Extras for everything beyond the client.** `pip install cosmergon-agent`
+  installs the client and the MCP server with `httpx` alone. The TUI
+  dashboard was already `cosmergon-agent[dashboard]`; LangChain is now
+  `cosmergon-agent[langchain]` (pulls `langchain-core`), and
+  `cosmergon-agent[mcp]` is a valid, empty extra — the MCP server speaks
+  JSON-RPC over stdio by hand and needs nothing extra.
+- **CI proves the bare install.** A new job installs the package without
+  extras and checks that `cosmergon_agent`, `.agent`, `.mcp` and `.cli`
+  import while `textual` and `langchain_core` are absent, and that
+  `cosmergon_agent.dashboard` fails with the install hint instead of a
+  bare `ModuleNotFoundError`.
+
 ## [0.20.0] — 2026-08-25
 
 ### Added

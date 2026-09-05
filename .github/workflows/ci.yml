@@ -36,3 +36,42 @@ jobs:
 
       - name: Dependency audit
         run: pip-audit
+
+  bare-import:
+    name: Bare install imports (no extras)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install package WITHOUT extras
+        run: |
+          pip install --upgrade "pip>=26.1"
+          pip install .
+
+      - name: Client, MCP and CLI import with httpx alone
+        run: python -c "import cosmergon_agent, cosmergon_agent.agent, cosmergon_agent.mcp, cosmergon_agent.cli; print(cosmergon_agent.__version__)"
+
+      - name: Optional stacks are really absent
+        run: |
+          python - <<'PY'
+          import importlib.util, sys
+          present = [m for m in ("textual", "langchain_core") if importlib.util.find_spec(m)]
+          sys.exit(f"bare install carries optional deps: {present}" if present else 0)
+          PY
+
+      - name: Dashboard fails with the install hint, not a bare ModuleNotFoundError
+        run: |
+          python - <<'PY'
+          import sys
+          try:
+              import cosmergon_agent.dashboard  # noqa: F401
+          except ImportError as exc:
+              assert "cosmergon-agent[dashboard]" in str(exc), str(exc)
+              sys.exit(0)
+          sys.exit("dashboard imported without textual — the extra is not a boundary")
+          PY

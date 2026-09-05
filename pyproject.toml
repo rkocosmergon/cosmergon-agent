@@ -43,6 +43,14 @@ cosmergon-mcp = "cosmergon_agent.mcp:run"
 dashboard = [
     "textual>=0.70.0",
 ]
+# U5 (#232 K4, 2026-09-05): every product beyond the client is an extra.
+# `pip install cosmergon-agent` imports client + MCP server with httpx alone.
+langchain = [
+    "langchain-core>=0.1",
+]
+# The MCP server speaks JSON-RPC over stdio by hand — no extra dependency.
+# The extra exists so `cosmergon-agent[mcp]` is a valid, documented surface.
+mcp = []
 dev = [
     "pytest>=7.4",
     "pytest-asyncio>=0.23",
