@@ -35,6 +35,35 @@ jobs:
       - name: Check distribution
         run: twine check dist/*
 
+      # S329 (#232 K3, Founder-Entscheid 09.09.2026): das Artefakt wird INSTALLIERT,
+      # bevor es hochgeladen wird. `twine check` prueft die Metadaten, nicht die
+      # Aufloesbarkeit der Pins — genau daran hingen langchain-cosmergon 0.2.0
+      # (langchain-core<0.4) und cosmergon-agent<0.16 monatelang uninstallierbar auf
+      # PyPI, und der taegliche Waechter (check-public-pakete.py, S328) sah es erst
+      # am Tag DANACH. Ein Bare-Install aus dem Wheel loest die Pins so auf, wie ein
+      # Nutzer es tut; `pip install -e .` in der CI tut das nicht.
+      #
+      # Verworfen wurde ein Gate auf die privaten Tests: die liegen im privaten Repo,
+      # ein Lese-Token dafuer waere ein Dauer-Secret im oeffentlichen Repo — und die
+      # Suite haette die real eingetretene Klasse nicht gefangen. Die Kopplung an den
+      # privaten Testlauf bleibt die Reihenfolge (Heft-SDK 7.1), kein Automatismus.
+      - name: Artefakt installierbar (bare, ohne Extras)
+        run: |
+          python -m venv /tmp/probe
+          /tmp/probe/bin/pip install --quiet --upgrade pip
+          /tmp/probe/bin/pip install "$(ls dist/*.whl)"
+          /tmp/probe/bin/python -c "
+          import importlib.metadata as md
+          import cosmergon_agent as m
+          paket = md.version('cosmergon-agent')
+          modul_version = getattr(m, '__version__', None)
+          if modul_version is None:
+              print('OK ' + paket + ' - Modul fuehrt kein __version__, Abgleich entfaellt')
+          else:
+              assert modul_version == paket, '__init__.py sagt ' + repr(modul_version) + ', das Paket ' + repr(paket) + ' - die beiden Versionsangaben sind auseinandergelaufen'
+              print('OK ' + paket + ' - Import und Version decken sich')
+          "
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         # No api_token needed — Trusted Publisher via OIDC
