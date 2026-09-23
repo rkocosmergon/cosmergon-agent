@@ -470,7 +470,7 @@ def maybe_migrate(
                 shutil.copy2(CONFIG_PATH, bak)
                 logger.info("Config backup created: %s", bak)
             except Exception:
-                pass  # non-fatal
+                logger.debug("maybe_migrate: failed, falling back (non-fatal)", exc_info=True)
 
     # Move flat credentials into nested subtable
     cfg["agents"] = {
@@ -508,7 +508,7 @@ def set_token_warning_shown() -> None:
     try:
         _write_raw(data)
     except Exception:
-        pass  # non-fatal
+        logger.debug("set_token_warning_shown: failed, falling back (non-fatal)", exc_info=True)
 
 
 def is_onboarding_dismissed() -> bool:
@@ -529,4 +529,4 @@ def set_onboarding_dismissed() -> None:
     try:
         _write_raw(data)
     except Exception:
-        pass  # non-fatal
+        logger.debug("set_onboarding_dismissed: failed, falling back (non-fatal)", exc_info=True)

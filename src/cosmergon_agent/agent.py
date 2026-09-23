@@ -40,6 +40,9 @@ from cosmergon_agent.webhook import CosmergonWebhook
 
 logger = logging.getLogger(__name__)
 
+# listen() binds all interfaces on purpose: a webhook receiver must be reachable from outside.
+_ALL_INTERFACES = "0.0.0.0"  # nosec B104
+
 _DEFAULT_MAX_RETRIES = 3
 _INITIAL_BACKOFF = 0.5
 _MAX_BACKOFF = 30.0
@@ -791,7 +794,7 @@ class CosmergonAgent:
             if resp.status_code == 200:
                 return resp.json().get("events", [])  # type: ignore[no-any-return]
         except Exception:
-            pass
+            logger.debug("get_events: failed, falling back", exc_info=True)
         return []
 
     async def fetch_memory_prompt(self) -> str:
@@ -826,7 +829,7 @@ class CosmergonAgent:
             if resp.status_code == 200:
                 return resp.json().get("prompt", "")  # type: ignore[no-any-return]
         except Exception:
-            pass
+            logger.debug("fetch_memory_prompt: failed, falling back", exc_info=True)
         return ""
 
     async def fetch_reflection_signals(self, horizon: str = "short") -> dict | None:
@@ -871,7 +874,7 @@ class CosmergonAgent:
             if resp.status_code == 200:
                 return resp.json()  # type: ignore[no-any-return]
         except Exception:
-            pass
+            logger.debug("fetch_reflection_signals: failed, falling back", exc_info=True)
         return None
 
     async def post_reflection(
@@ -931,7 +934,7 @@ class CosmergonAgent:
             if resp.status_code == 200:
                 return resp.json()  # type: ignore[no-any-return]
         except Exception:
-            pass
+            logger.debug("post_reflection: failed, falling back", exc_info=True)
         return None
 
     async def get_last_decision(self) -> dict | None:
@@ -950,7 +953,7 @@ class CosmergonAgent:
                 decisions = resp.json()
                 return decisions[0] if decisions else None
         except Exception:
-            pass
+            logger.debug("get_last_decision: failed, falling back", exc_info=True)
         return None
 
     async def get_messages(self, limit: int = 50) -> list[dict]:
@@ -968,7 +971,7 @@ class CosmergonAgent:
             if resp.status_code == 200:
                 return resp.json()  # type: ignore[no-any-return]
         except Exception:
-            pass
+            logger.debug("get_messages: failed, falling back", exc_info=True)
         return []
 
     async def send_message(self, text: str) -> dict:
@@ -1008,7 +1011,7 @@ class CosmergonAgent:
             if resp.status_code == 200:
                 return (resp.json() or {}).get("cells", {})  # type: ignore[no-any-return]
         except Exception:
-            pass
+            logger.debug("get_field_cells: failed, falling back", exc_info=True)
         return {}
 
     async def get_benchmark_report(self, days: int = 7) -> dict | None:
@@ -1030,7 +1033,7 @@ class CosmergonAgent:
             if resp.status_code == 200:
                 return resp.json()  # type: ignore[no-any-return]
         except Exception:
-            pass
+            logger.debug("get_benchmark_report: failed, falling back", exc_info=True)
         return None
 
     async def get_balance_history(self, window: str = "24h") -> list[dict] | None:
@@ -1057,7 +1060,7 @@ class CosmergonAgent:
             if resp.status_code == 200:
                 return resp.json().get("points")  # type: ignore[no-any-return]
         except Exception:
-            pass
+            logger.debug("get_balance_history: failed, falling back", exc_info=True)
         return None
 
     # --- Webhook server ---
@@ -1065,7 +1068,7 @@ class CosmergonAgent:
     def listen(
         self,
         port: int = 8080,
-        host: str = "0.0.0.0",
+        host: str = _ALL_INTERFACES,
         webhook_secret: str | None = None,
         path: str = "/webhook",
     ) -> None:
@@ -1438,7 +1441,9 @@ class CosmergonAgent:
                     raise RateLimitError(retry_after=retry_after)
 
                 if resp.status_code >= 500 and attempt < self.max_retries:
-                    delay = min(_INITIAL_BACKOFF * (2**attempt) + random.random(), _MAX_BACKOFF)
+                    # Backoff jitter, not cryptography.
+                    jitter = random.random()  # nosec B311
+                    delay = min(_INITIAL_BACKOFF * (2**attempt) + jitter, _MAX_BACKOFF)
                     logger.warning("Server error %d, retry in %.1fs", resp.status_code, delay)
                     await asyncio.sleep(delay)
                     continue
@@ -1448,7 +1453,9 @@ class CosmergonAgent:
             except httpx.TransportError as exc:
                 last_exc = exc
                 if attempt < self.max_retries:
-                    delay = min(_INITIAL_BACKOFF * (2**attempt) + random.random(), _MAX_BACKOFF)
+                    # Backoff jitter, not cryptography.
+                    jitter = random.random()  # nosec B311
+                    delay = min(_INITIAL_BACKOFF * (2**attempt) + jitter, _MAX_BACKOFF)
                     logger.warning("Transport error, retry in %.1fs: %s", delay, exc)
                     await asyncio.sleep(delay)
 

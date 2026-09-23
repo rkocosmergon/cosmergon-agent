@@ -23,10 +23,19 @@ jobs:
         # Without this upgrade pip-audit fails on the runner-installed pip itself.
         run: |
           pip install --upgrade "pip>=26.1"
-          pip install -e ".[dev]" pip-audit
+          pip install -e ".[dev]" pip-audit bandit
 
       - name: Lint (ruff)
         run: ruff check src/
+
+      - name: Format (ruff)
+        # `ruff check` alone does not catch formatting drift.
+        run: ruff format --check src/
+
+      - name: Security scan (bandit)
+        # Takes over from the local pre-commit hooks removed in March. Intentional
+        # exceptions carry an inline `# nosec <id>` with the reason.
+        run: bandit -q -r src/
 
       - name: Import check
         run: python -c "import cosmergon_agent; print(cosmergon_agent.__version__)"

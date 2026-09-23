@@ -140,7 +140,7 @@ def _load_theme(cli_theme: str | None = None) -> Theme:
             if name and name in THEMES:
                 return THEMES[name]
         except Exception:
-            pass
+            logger.debug("_load_theme: failed, falling back", exc_info=True)
     return THEMES["cosmergon"]
 
 
@@ -1292,7 +1292,7 @@ class CosmergonDashboard(App):
             try:
                 self._messages = await self.agent.get_messages(limit=20)
             except Exception:
-                pass
+                logger.debug("_tick: failed, falling back", exc_info=True)
 
         @self.agent.on_error
         async def _error(result: Any) -> None:
@@ -2087,7 +2087,8 @@ class CosmergonDashboard(App):
                     )
                     return
         except Exception:
-            pass  # Fallback below
+            # Fallback below
+            logger.debug("_upgrade_anonymous_via_api: failed, falling back", exc_info=True)
 
         # Fallback: open website (Panel: Engineering — robust degradation)
         webbrowser.open("https://cosmergon.com/solo.html")
@@ -2171,7 +2172,7 @@ class CosmergonDashboard(App):
             try:
                 detail = (r.json() or {}).get("detail", "")
             except Exception:
-                pass
+                logger.debug("action_toggle_showcase: failed, falling back", exc_info=True)
             self._set_feedback(_c(self._theme.warn, f"✗ Showcase {r.status_code}: {detail}"))
 
     async def action_pause(self) -> None:
@@ -2443,7 +2444,7 @@ class CosmergonDashboard(App):
         try:
             self._messages = await self.agent.get_messages(limit=20)
         except Exception:
-            pass
+            logger.debug("action_chat_screen: failed, falling back", exc_info=True)
 
     @work
     async def action_field_view(self) -> None:
@@ -3308,7 +3309,8 @@ def main() -> None:
                 resolved_key = first_start.result_key
             # else: result_key is "" → auto-register (default behavior)
         except Exception:
-            pass  # graceful degradation: auto-register if FirstStartApp fails
+            # graceful degradation: auto-register if FirstStartApp fails
+            logger.debug("main: FirstStartApp failed, auto-registering", exc_info=True)
 
     try:
         agent = CosmergonAgent(api_key=resolved_key, base_url=args.base_url, poll_interval=10.0)

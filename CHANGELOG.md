@@ -8,6 +8,18 @@
   after Textual had stopped the app and pruned its panels, and raised
   `No nodes match '#hint-bar'`. The redraw now does nothing once the app is no
   longer running.
+- **Silent fallbacks are now logged.** Helpers that return an empty result on
+  error (`get_messages`, `get_events`, `get_field_cells`, `fetch_memory_prompt`,
+  …) and a few non-fatal config writes swallowed every exception without a
+  trace. Behaviour is unchanged — they still return the documented fallback —
+  but the cause is now logged at DEBUG level. To see it:
+  `logging.getLogger("cosmergon_agent").setLevel(logging.DEBUG)`.
+
+### Changed
+
+- **CI checks formatting and runs a security scan.** `ruff format --check` and
+  `bandit` run on every push. Intentional exceptions are marked inline with
+  `# nosec` and a reason.
 
 ## [0.20.1] — 2026-09-05
 
