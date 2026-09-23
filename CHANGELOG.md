@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **Dashboard: no `NoMatches` on shutdown.** The 0.5 s redraw timer could fire
+  after Textual had stopped the app and pruned its panels, and raised
+  `No nodes match '#hint-bar'`. The redraw now does nothing once the app is no
+  longer running.
+
 ## [0.20.1] — 2026-09-05
 
 ### Changed

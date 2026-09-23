@@ -1499,6 +1499,10 @@ class CosmergonDashboard(App):
         self._focus_panel_id = target
 
     def _redraw(self) -> None:
+        # Textual stops the app (`is_running` False) before it prunes the screens and
+        # only later cancels this interval — a tick in between found the panels gone.
+        if not self.is_running:
+            return
         state = self.agent.state
         self._sync_focus_border()
         self._draw_hint_bar(state)
