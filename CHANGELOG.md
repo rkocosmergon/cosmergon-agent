@@ -1,6 +1,9 @@
 # Changelog
 
-## [Unreleased]
+## [0.20.1] — 2026-09-23
+
+First published on 2026-09-23. The changes under *Changed* further down were
+prepared on 2026-09-05 and ship in this same release.
 
 ### Fixed
 
@@ -23,13 +26,12 @@
 
 ### Changed
 
+- **MCP Registry listing is published with each release.** The workflow writes
+  `server.json` from the uploaded wheel's version and publishes it via GitHub
+  OIDC right after PyPI, so the registry no longer lags behind. (cos20 #369)
 - **CI checks formatting and runs a security scan.** `ruff format --check` and
   `bandit` run on every push. Intentional exceptions are marked inline with
   `# nosec` and a reason.
-
-## [0.20.1] — 2026-09-05
-
-### Changed
 
 - **Extras for everything beyond the client.** `pip install cosmergon-agent`
   installs the client and the MCP server with `httpx` alone. The TUI
