@@ -45,6 +45,8 @@ _ALL_INTERFACES = "0.0.0.0"  # nosec B104
 
 _DEFAULT_MAX_RETRIES = 3
 _INITIAL_BACKOFF = 0.5
+# Writes that carry an idempotency key, so a retry never books twice (cos20 #342).
+_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _MAX_BACKOFF = 30.0
 
 
@@ -1423,6 +1425,14 @@ class CosmergonAgent:
         """
         if self._client is None:
             raise RuntimeError("Agent not connected. Call run() or use async with.")
+
+        # One key per logical call, created BEFORE the retry loop: a retry after a
+        # timeout reuses it, and the server returns the stored result instead of
+        # booking a second time. Callers that pass their own key keep it.
+        if method.upper() in _WRITE_METHODS:
+            headers = dict(kwargs.get("headers") or {})
+            headers.setdefault("X-Idempotency-Key", str(uuid.uuid4()))
+            kwargs["headers"] = headers
 
         last_exc: Exception | None = None
         for attempt in range(self.max_retries + 1):

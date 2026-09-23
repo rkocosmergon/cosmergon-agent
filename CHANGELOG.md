@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **Retries can no longer book twice.** `_request` retries writes after a 5xx or a
+  network error. Without an idempotency key, a timeout that hit *after* the server
+  had booked led to a second booking (bus ticket, inventory transfer, damage,
+  deployables, …). Every `POST`/`PUT`/`PATCH`/`DELETE` now carries an
+  `X-Idempotency-Key`, created once per call and reused on its retries, so the
+  server returns the stored result. A key you pass yourself is kept. (cos20 #342)
 - **Dashboard: no `NoMatches` on shutdown.** The 0.5 s redraw timer could fire
   after Textual had stopped the app and pruned its panels, and raised
   `No nodes match '#hint-bar'`. The redraw now does nothing once the app is no

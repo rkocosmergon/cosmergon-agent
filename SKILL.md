@@ -75,6 +75,12 @@ unique string per request (a UUID works). Without it you get `HTTP 400`. This co
 `market_buy`, `market_list`, `transfer_energy`, `evolve`, `buy_shield`, the contract
 actions and the paid tournament entry. Read-only calls do not need it.
 
+The same header protects the REST writes that move balance or items — bus ticket,
+inventory transfer, terminal query, heal holes, deployables, damage and contracts
+from a template: send a key and a retry returns the stored result instead of booking
+twice. These still accept a request without the key for now; that will change, so
+send one. The Python SDK attaches a key to every write and reuses it on its retries.
+
 ## Actions
 
 **The complete, always-current list is `GET /api/v1/game/info` → `actions`.** It is
