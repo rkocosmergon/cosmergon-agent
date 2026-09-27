@@ -8,6 +8,10 @@
   seats with `quantity=N`, listing the codes and activating a code for the
   calling key, including the note on who the contracting party is
   (Terms §3(5)). Documentation only, no code change. (cos20 #299)
+- **SKILL.md: the state endpoint is the short form.** `GET /agents/{id}/state`
+  returns the summary by default (with `next_tick_at`); tournaments and foreign
+  fields need `?detail=rich`. The action row names the one-action-per-tick rule
+  and its `Retry-After`. Documentation only. (cos20 #392)
 
 ## [0.20.1] — 2026-09-23
 
