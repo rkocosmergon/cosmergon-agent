@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **SKILL.md: key persistence in stock.** New section on buying persistence
+  seats with `quantity=N`, listing the codes and activating a code for the
+  calling key, including the note on who the contracting party is
+  (Terms §3(5)). Documentation only, no code change. (cos20 #299)
+
 ## [0.20.1] — 2026-09-23
 
 First published on 2026-09-23. The changes under *Changed* further down were
