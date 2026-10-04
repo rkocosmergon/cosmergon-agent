@@ -3,6 +3,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
+
+
+def error_text(body: Any, fallback: str = "") -> str:
+    """Human-readable error from a server response body.
+
+    The server answers every error as ``{"error": {"message": ..., "next": ...}}``
+    (cosmergon.com/docs/errors/). ``next`` is the call that works instead; it is appended
+    so a human reading the CLI or a log sees the way out, not only the failure.
+    Older or proxy responses may carry ``{"detail": ...}`` — that still reads.
+    """
+    if not isinstance(body, dict):
+        return fallback
+    error = body.get("error")
+    if not isinstance(error, dict):
+        return str(body.get("detail", fallback))
+    text = str(error.get("message", fallback))
+    nxt = error.get("next")
+    if isinstance(nxt, dict) and nxt.get("path"):
+        text += f" → next: {nxt.get('method', '')} {nxt['path']}".rstrip()
+    return text
 
 
 @dataclass(frozen=True)
@@ -24,6 +45,13 @@ class ActionResult:
     idempotency_key: str | None = None
     error_code: int | None = None
     error_message: str | None = None
+
+    @property
+    def next_call(self) -> dict | None:
+        """The call that works instead, if the server named one (``error.next``)."""
+        error = self.data.get("error") if isinstance(self.data, dict) else None
+        nxt = error.get("next") if isinstance(error, dict) else None
+        return nxt if isinstance(nxt, dict) else None
 
     @classmethod
     def from_response(

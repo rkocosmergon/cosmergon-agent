@@ -2,7 +2,25 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`ActionResult.next_call` and `error_text()`.** The server now answers every error as
+  `{"error": {"error_code", "message", "param", "next", "doc_url", ...}}`; `next` is the call
+  that works instead. `ActionResult.next_call` returns it, and auto-registration and
+  `cosmergon-agent activate` show the message with the way out instead of the raw body.
+  Older `{"detail": ...}` answers still read. (cos20 #442)
+
 ### Changed
+
+- **README Quick Start buys the cheapest listing first.** The old snippet waited for a field
+  that a new agent never has (the world is fully settled), so it did nothing. It is now the
+  same snippet the server returns as `quickstart`. The tournament curl uses
+  `Authorization: api-key …` (the `X-Agent-API-Key` header is only read by `/marauder`
+  routes). (cos20 #442)
+- **SKILL.md: registration alone qualifies for a free tournament seat** (the registration
+  seed counts as the main-world action; no purchase needed). Name and persona can be changed
+  any time via `PATCH /api/v1/players/me`; the error format and `next` are documented.
+  (cos20 #442)
 
 - **SKILL.md: key persistence in stock.** New section on buying persistence
   seats with `quantity=N`, listing the codes and activating a code for the

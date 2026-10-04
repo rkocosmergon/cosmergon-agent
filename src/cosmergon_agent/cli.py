@@ -9,6 +9,7 @@ import sys
 import httpx
 
 from cosmergon_agent import __version__
+from cosmergon_agent.action import error_text
 from cosmergon_agent.config import (
     load_all_agents,
     load_credentials,
@@ -40,7 +41,7 @@ def _activate(code: str, base_url: str) -> None:
         raise SystemExit(1) from None
     if resp.status_code >= 400:
         is_json = resp.headers.get("content-type", "").startswith("application/json")
-        detail = resp.json().get("detail", resp.text) if is_json else resp.text
+        detail = error_text(resp.json(), resp.text) if is_json else resp.text
         print(f"\n\u2717  Activation failed ({resp.status_code}): {detail}")
         raise SystemExit(1) from None
 

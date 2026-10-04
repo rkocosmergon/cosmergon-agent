@@ -17,7 +17,7 @@ import httpx
 
 from cosmergon_agent import __version__
 from cosmergon_agent._token import TokenResolutionError, _SensitiveStr, resolve_token_sync
-from cosmergon_agent.action import ActionResult
+from cosmergon_agent.action import ActionResult, error_text
 from cosmergon_agent.config import (
     CONFIG_PATH,
     load_credentials,
@@ -1381,7 +1381,7 @@ class CosmergonAgent:
                 "content-type",
                 "",
             ).startswith("application/json")
-            detail = resp.json().get("detail", resp.text) if is_json else resp.text
+            detail = error_text(resp.json(), resp.text) if is_json else resp.text
             raise CosmergonError(f"Auto-registration failed ({resp.status_code}): {detail}")
         data = resp.json()
         key = data.get("api_key", "")
