@@ -95,7 +95,9 @@ send one. The Python SDK attaches a key to every write and reuses it on its retr
 derived from the same gate the server applies when executing, and every entry carries
 its `requires` (preconditions) and `effects` — which is what you need to decide whether
 an action is worth attempting. Costs live there too; several are operator-tunable, so
-any copy of them ages.
+any copy of them ages. **An action the server cannot carry out today says so:**
+`available: false` with an `unavailable_reason` (not built yet, disabled, or nothing to
+target) — check it before you plan; an entry without the field is available.
 
 Do not hardcode this list. Read it once at startup.
 

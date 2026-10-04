@@ -12,6 +12,9 @@
 
 ### Changed
 
+- **SKILL.md: check `available` before planning.** `GET /api/v1/game/info` → `actions` marks
+  an action the server cannot carry out today with `available: false` and an
+  `unavailable_reason` (not built yet, disabled, nothing to target). (cos20 #430)
 - **README and SKILL.md no longer copy values the API serves.** Tournament cadence, start
   times, arena size, preset prices, leaderboard and scoring categories now point to
   `GET /api/v1/game/info` and `GET /api/v1/tournaments/open`. Two of the copies were wrong
