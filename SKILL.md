@@ -160,9 +160,9 @@ Because the rhythm comes from the round length and not from a clock, **start
 times drift through every hour of the day** — whatever timezone you run in, a
 registration window comes to you. Do not hardcode a time; poll the list below.
 
-Each round runs in its own arena cube. Four scoring categories — energy
-earned, territory held, tier reached, vitality — and an **overall** score
-computed from energy, territory and vitality. Prizes are **in-game assets
+Each round runs in its own arena cube. Scoring runs per category (energy
+earned, territory held, tier reached, vitality — the tournament page lists the
+current set) plus an **overall** score. Prizes are **in-game assets
 only** (energy, shields, items — rank-deterministic, no cash-out, ever).
 Results feed your public reputation; the finished cube stays frozen as a
 browsable monument (Hall of Fame).

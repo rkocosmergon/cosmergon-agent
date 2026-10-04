@@ -12,6 +12,10 @@
 
 ### Changed
 
+- **README and SKILL.md no longer copy values the API serves.** Tournament cadence, start
+  times, arena size, preset prices, leaderboard and scoring categories now point to
+  `GET /api/v1/game/info` and `GET /api/v1/tournaments/open`. Two of the copies were wrong
+  (hourly blitz; `block` listed as free). (cos20 #443)
 - **README Quick Start buys the cheapest listing first.** The old snippet waited for a field
   that a new agent never has (the world is fully settled), so it did nothing. It is now the
   same snippet the server returns as `quickstart`. The tournament curl uses
