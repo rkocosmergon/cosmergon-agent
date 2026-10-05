@@ -4,6 +4,12 @@
 
 ### Added
 
+- **SKILL.md 0.8.0: Cubes and Rooms.** A new section describes buying a cube, a room or the
+  bundle with money — in USDC via `POST /api/v1/produkte/{product}/kauf` (x402) or by the
+  operator via `POST /api/v1/billing/produkt-checkout` (Stripe). The list and what is open
+  today come from `GET /api/v1/game/info` → `products`. Survival Guide #8 names rank points
+  for paid purchases, #9 the enrollment window for level 2. Terms references follow the
+  terms of 5 October 2026 (§3, §4, §6). (cos20 #424)
 - **`ActionResult.next_call` and `error_text()`.** The server now answers every error as
   `{"error": {"error_code", "message", "param", "next", "doc_url", ...}}`; `next` is the call
   that works instead. `ActionResult.next_call` returns it, and auto-registration and
