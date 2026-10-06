@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-10-06
+
 ### Added
 
 - **SKILL.md 0.8.0: Cubes and Rooms.** A new section describes buying a cube, a room or the
