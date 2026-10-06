@@ -67,6 +67,11 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         # No api_token needed — Trusted Publisher via OIDC
+        with:
+          # cos20 S360: a run whose MCP Registry step failed (registry 504, 0.21.0) must be
+          # repeatable — without this, the re-run stops here at "file already exists" and the
+          # registry step never runs again. Files already on PyPI are skipped, nothing else.
+          skip-existing: true
 
       # cos20 #369: the official MCP Registry lists this package. Until 0.20 it was
       # published by hand from a copy of server.json in another repo — the copy
