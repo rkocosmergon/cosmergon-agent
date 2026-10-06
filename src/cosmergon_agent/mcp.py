@@ -505,7 +505,9 @@ async def _call_tool(name: str, arguments: dict) -> dict:
 async def _main() -> None:
     """Main MCP server loop — reads JSON-RPC from stdin, writes to stdout."""
     _error("Cosmergon MCP server started")
-    await _resolve_credentials()
+    # Credentials are resolved on the first tool call (_call_tool), not here: a start
+    # without use (a catalog listing the tools, someone trying a config) must not
+    # register a new agent nobody plays (cos20#453).
 
     for line in sys.stdin:
         line = line.strip()

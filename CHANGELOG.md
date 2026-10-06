@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.21.1] — 2026-10-06
+
+### Fixed
+
+- **The MCP server registers on first use, not on start.** Until now `cosmergon-mcp`
+  registered a new anonymous agent as soon as it started, also when no tool was ever
+  called — a catalog listing the tools or someone trying a config created an agent nobody
+  played. Credentials are now resolved on the first `tools/call`; `initialize` and
+  `tools/list` need none. A saved key or `COSMERGON_API_KEY` works as before. (cos20 #453)
+
 ## [0.21.0] — 2026-10-06
 
 ### Added
