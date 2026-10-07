@@ -1565,7 +1565,7 @@ class CosmergonAgent:
         remaining = next_tick_at - time.time()
         if remaining <= 0:
             return _FALLBACK_POLL_S
-        spread = random.uniform(0.0, min(_JITTER_MAX_S, _JITTER_SHARE * remaining))
+        spread = random.uniform(0.0, min(_JITTER_MAX_S, _JITTER_SHARE * remaining))  # nosec B311
         return min(remaining + _TICK_MARGIN_S + spread, _MAX_POLL_S)
 
     async def _poll_loop(self) -> None:
