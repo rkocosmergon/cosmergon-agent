@@ -48,6 +48,13 @@ _INITIAL_BACKOFF = 0.5
 # Writes that carry an idempotency key, so a retry never books twice (cos20 #342).
 _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _MAX_BACKOFF = 30.0
+# Poll pacing when no fixed poll_interval is given: the state changes once per
+# game tick, so the loop waits until the server's next_tick_at plus a small margin. If the
+# server gives no usable next_tick_at (missing or already in the past), it falls back to the
+# old fixed 10 s — never more often than before.
+_FALLBACK_POLL_S = 10.0
+_TICK_MARGIN_S = 2.0
+_MAX_POLL_S = 300.0
 
 
 class CosmergonAgent:
@@ -75,7 +82,7 @@ class CosmergonAgent:
         api_key: str | None = None,
         base_url: str = "https://cosmergon.com",
         agent_id: str | None = None,
-        poll_interval: float = 10.0,
+        poll_interval: float | None = None,
         max_retries: int = _DEFAULT_MAX_RETRIES,
         auto_reconnect: bool = True,
         player_token: str | None = None,
@@ -95,7 +102,9 @@ class CosmergonAgent:
             api_key: Agent API key (AGENT-...:secret).
             base_url: Server URL.
             agent_id: Agent UUID (resolved automatically if omitted).
-            poll_interval: Seconds between state fetches in run().
+            poll_interval: Seconds between state fetches in run(). ``None`` (default) waits
+                for the next game tick (``next_tick_at`` from the server, plus a small margin);
+                a number keeps a fixed interval.
             max_retries: HTTP retry count.
             auto_reconnect: Retry on transient errors in run().
             player_token: Master Key (CSMR-...) for multi-agent access.
@@ -1530,6 +1539,28 @@ class CosmergonAgent:
             )
             self._running = False
 
+    def _retry_pause(self) -> float:
+        """Pause after a failed fetch: the fixed interval, or the old 10 s default."""
+        return self.poll_interval if self.poll_interval is not None else _FALLBACK_POLL_S
+
+    def _next_poll_pause(self) -> float:
+        """Seconds until the next state fetch.
+
+        A fixed ``poll_interval`` wins. Otherwise wait until the server's ``next_tick_at``
+        plus a margin, capped at ``_MAX_POLL_S``. Without a usable ``next_tick_at`` (missing or
+        already past — the estimate is off) fall back to 10 s, so pacing is never tighter
+        than the old fixed interval.
+        """
+        if self.poll_interval is not None:
+            return self.poll_interval
+        next_tick_at = self._state.next_tick_at if self._state else None
+        if not next_tick_at:
+            return _FALLBACK_POLL_S
+        remaining = next_tick_at - time.time()
+        if remaining <= 0:
+            return _FALLBACK_POLL_S
+        return min(remaining + _TICK_MARGIN_S, _MAX_POLL_S)
+
     async def _poll_loop(self) -> None:
         """Main loop: fetch state, call handler, sleep."""
         if self._client is None:
@@ -1545,11 +1576,11 @@ class CosmergonAgent:
                 if resp.status_code == 401:
                     await self._handle_expired_credentials()
                     last_tick = -1
-                    await asyncio.sleep(self.poll_interval)
+                    await asyncio.sleep(self._retry_pause())
                     continue
                 if resp.status_code != 200:
                     logger.warning("State fetch failed: %d", resp.status_code)
-                    await asyncio.sleep(self.poll_interval)
+                    await asyncio.sleep(self._retry_pause())
                     continue
 
                 self._state = GameState.from_api(resp.json())
@@ -1570,13 +1601,13 @@ class CosmergonAgent:
                 await asyncio.sleep(exc.retry_after)
                 continue
             except CsgConnectionError:
-                logger.warning("Connection lost, retrying in %.0fs", self.poll_interval)
+                logger.warning("Connection lost, retrying in %.0fs", self._retry_pause())
             except CosmergonError as exc:
                 logger.error("API error in poll loop: %s", exc.message)
             except Exception:
                 logger.exception("Unexpected error in agent loop")
 
-            await asyncio.sleep(self.poll_interval)
+            await asyncio.sleep(self._next_poll_pause())
 
         # After loop exits — signal FIFO-kick to caller via exception.
         # This raise is OUTSIDE the try/except block above, so it

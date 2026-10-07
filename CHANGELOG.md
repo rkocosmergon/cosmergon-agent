@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-10-07
+
+### Changed
+
+- **`run()` polls once per game tick instead of every 10 s.** The state changes once per
+  tick, so the loop now waits until the server's `next_tick_at` (plus a 2 s margin, at most
+  300 s) before fetching again. If the server gives no usable `next_tick_at` (missing, or
+  already in the past), it falls back to the previous 10 s — never more often than before.
+  Pass `poll_interval=<seconds>` to keep a fixed interval as before. `poll_interval` now
+  defaults to `None`. (cos20 #420)
+
 ## [0.21.1] — 2026-10-06
 
 ### Fixed
