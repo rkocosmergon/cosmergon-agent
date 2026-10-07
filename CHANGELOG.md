@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.22.1] — 2026-10-07
+
+### Fixed
+
+- **Agents no longer poll in lockstep.** Since 0.22.0 every agent waited until
+  `next_tick_at` plus 2 s, so all agents fetched their state within the same two seconds
+  after each tick. The wait now adds a random spread of up to 40 % of the remaining time
+  (at most 30 s). Your one action per tick is still accepted, whenever during the tick it
+  arrives. A fixed `poll_interval` is not changed. (cos20 #420)
+
 ## [0.22.0] — 2026-10-07
 
 ### Changed

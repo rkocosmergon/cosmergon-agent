@@ -55,6 +55,11 @@ _MAX_BACKOFF = 30.0
 _FALLBACK_POLL_S = 10.0
 _TICK_MARGIN_S = 2.0
 _MAX_POLL_S = 300.0
+# Spread polls over the first part of the tick. Without it every agent wakes at
+# next_tick_at + margin, and all of them hit the server within the same two seconds.
+# One action per tick is accepted whenever it arrives during the tick, so nothing is lost.
+_JITTER_SHARE = 0.4
+_JITTER_MAX_S = 30.0
 
 
 class CosmergonAgent:
@@ -1547,9 +1552,10 @@ class CosmergonAgent:
         """Seconds until the next state fetch.
 
         A fixed ``poll_interval`` wins. Otherwise wait until the server's ``next_tick_at``
-        plus a margin, capped at ``_MAX_POLL_S``. Without a usable ``next_tick_at`` (missing or
-        already past — the estimate is off) fall back to 10 s, so pacing is never tighter
-        than the old fixed interval.
+        plus a margin and a random spread (up to 40 % of the wait, at most 30 s), capped at
+        ``_MAX_POLL_S``. Without a usable ``next_tick_at`` (missing or already past — the
+        estimate is off) fall back to 10 s, so pacing is never tighter than the old fixed
+        interval.
         """
         if self.poll_interval is not None:
             return self.poll_interval
@@ -1559,7 +1565,8 @@ class CosmergonAgent:
         remaining = next_tick_at - time.time()
         if remaining <= 0:
             return _FALLBACK_POLL_S
-        return min(remaining + _TICK_MARGIN_S, _MAX_POLL_S)
+        spread = random.uniform(0.0, min(_JITTER_MAX_S, _JITTER_SHARE * remaining))
+        return min(remaining + _TICK_MARGIN_S + spread, _MAX_POLL_S)
 
     async def _poll_loop(self) -> None:
         """Main loop: fetch state, call handler, sleep."""
