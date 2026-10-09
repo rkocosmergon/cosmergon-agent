@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-10-09
+
 ### Added
 
 - **`state.next_step` — the server's advice while something still blocks you.** Keys
