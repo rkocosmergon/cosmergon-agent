@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.22.2] — 2026-10-09
+
 ### Fixed
 
 - **Space no longer pauses your agent.** The dashboard bound Space to Pause for the whole
