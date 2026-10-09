@@ -2207,14 +2207,15 @@ class CosmergonDashboard(App):
         """The server's waiting time before a paused agent can resume, in words (#468).
 
         Read from ``GET /api/v1/game/info`` → ``actions.pause.resume_cooldown.seconds``;
-        a server without that field gets the stated rule instead of a guess.
+        a server without that field gets a neutral phrase, never an invented number (the rule
+        is in ticks, so its length in minutes depends on the tick rate).
         """
         try:
             resp = await self.agent._request("GET", "/api/v1/game/info")
             seconds = int(resp.json()["actions"]["pause"]["resume_cooldown"]["seconds"])
         except Exception:
             logger.debug("_pause_waiting: no resume_cooldown from server", exc_info=True)
-            return "at least 60 minutes"
+            return "a waiting time the server sets"
         return f"about {max(1, round(seconds / 60))} minutes"
 
     async def action_refresh_now(self) -> None:

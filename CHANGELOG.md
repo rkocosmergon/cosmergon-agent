@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **No invented waiting time.** Against a server that does not publish
+  `actions.pause.resume_cooldown`, the pause dialog said "at least 60 minutes". The rule is
+  in ticks, so that number could be wrong; it now says "a waiting time the server sets".
+  (cos20 #468)
+
 ## [0.22.2] — 2026-10-09
 
 ### Fixed
