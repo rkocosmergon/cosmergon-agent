@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Space no longer pauses your agent.** The dashboard bound Space to Pause for the whole
+  app, so it also fired under dialogs — including the welcome hint, which offered Space to
+  close it. A paused agent leaves the game (its body becomes a ghost) and can only be
+  resumed after the server's waiting time. Pausing is now **X**, and it asks twice: first
+  it names the consequence and the waiting time (read from `GET /api/v1/game/info` →
+  `actions.pause.resume_cooldown`; older servers: "at least 60 minutes"), then you type
+  the agent's name. Esc cancels at every step. Resume is **X** as well. (cos20 #468)
+- **A refused resume no longer shows the agent as active.** The dashboard flipped its
+  paused flag even when the server refused the call. (cos20 #468)
+
 ## [0.22.1] — 2026-10-07
 
 ### Fixed

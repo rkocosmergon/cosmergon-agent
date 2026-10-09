@@ -9,7 +9,7 @@ Usage:
 Hotkeys:
     C  Set Compass direction (highlighted until first use)
     P  Place cells       F  Create field     E  Evolve entity
-    Space  Pause/Resume  U  Upgrade (next tier, opens browser)
+    X  Pause/Resume (asks twice)  U  Upgrade (next tier, opens browser)
     K  Show API key + config path
     S  Toggle Public Showcase (opt-in/opt-out, DSGVO Art. 6 lit. a)
     R  Refresh now       Q  Quit             ?  Help
@@ -600,7 +600,7 @@ class HelpModal(ModalScreen):
             "[cyan]\\[F][/cyan]  Create new field",
             "[cyan]\\[E][/cyan]  Evolve entity",
             "[cyan]\\[V][/cyan]  View Conway field (zoom, scroll, minimap)",
-            "[cyan]\\[Space][/cyan]  Pause / Resume",
+            "[cyan]\\[X][/cyan]  Pause / Resume agent (asks twice; resume only after a wait)",
             "[cyan]\\[U][/cyan]  Upgrade to next tier (opens browser)",
             "[cyan]\\[K][/cyan]  Show API key + config path",
             "[cyan]\\[R][/cyan]  Refresh data",
@@ -1089,7 +1089,9 @@ class CosmergonDashboard(App):
         Binding("f", "create_field", "Field", show=False, priority=True),
         Binding("e", "evolve", "Evolve", show=False, priority=True),
         Binding("u", "upgrade", "Upgrade", show=False, priority=True),
-        Binding("space", "pause", "Pause", show=False, priority=True),
+        # #468: Pause is explicit (X, then two confirmations) — never Space, which every
+        # modal also uses and which fired here under them (priority=True).
+        Binding("x", "pause", "Pause", show=False, priority=True),
         Binding("r", "refresh_now", "Refresh", show=False, priority=True),
         Binding("l", "log_screen", "Log", show=False, priority=True),
         Binding("m", "chat_screen", "Chat", show=False, priority=True),
@@ -1796,9 +1798,9 @@ class CosmergonDashboard(App):
             return _c("dim", "Connecting to cosmergon.com...")
 
         # 3. Paused — countdown still shown so user sees when next tick would fire
-        spc = _hk("Space")
         if self._paused:
-            return f"{_c(t.warn, '⏸ Paused')} · {_c(t.cmd, spc)} resume" + self._countdown_suffix()
+            resume_key = _c(t.cmd, _hk("X"))
+            return f"{_c(t.warn, '⏸ Paused')} · {resume_key} resume" + self._countdown_suffix()
 
         # 4. Compass never set → one thing to do
         if not self._compass_ever_set:
@@ -2175,18 +2177,45 @@ class CosmergonDashboard(App):
                 logger.debug("action_toggle_showcase: failed, falling back", exc_info=True)
             self._set_feedback(_c(self._theme.warn, f"✗ Showcase {r.status_code}: {detail}"))
 
+    @work
     async def action_pause(self) -> None:
+        """[X] — pause (only after two confirmations) or resume the agent (#468)."""
         action = "resume" if self._paused else "pause"
+        if action == "pause":
+            state = getattr(self.agent, "_state", None)
+            name = (state.agent_name if state and state.agent_name else None) or "Agent"
+            waiting = await self._pause_waiting()
+            if not await self.push_screen_wait(PauseConfirmModal(self._theme, name, waiting)):
+                self._set_feedback(_c("dim", "Pause cancelled — nothing changed"))
+                return
         try:
             r = await self.agent.act(action)
-            self._paused = not self._paused
-            icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
-            self._add_log(_c(color, f"{icon} {action}"))
-            label = "⏸ Agent paused" if self._paused else "▶ Agent resumed"
-            self._set_feedback(_c(color, f"{icon} {label}"))
         except CosmergonError as exc:
             self._add_log(_c(self._theme.warn, f"✗ {action}: {exc}"))
             self._set_feedback(_c(self._theme.warn, f"✗ {action} failed: {exc}"))
+            return
+        # Only a confirmed server change flips the local state (a refused resume left the
+        # dashboard showing an active agent that was still paused, #468).
+        if r.success:
+            self._paused = action == "pause"
+        icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
+        self._add_log(_c(color, f"{icon} {action}"))
+        label = "⏸ Agent paused" if action == "pause" else "▶ Agent resumed"
+        self._set_feedback(_c(color, f"{icon} {label}" if r.success else f"✗ {r.error_message}"))
+
+    async def _pause_waiting(self) -> str:
+        """The server's waiting time before a paused agent can resume, in words (#468).
+
+        Read from ``GET /api/v1/game/info`` → ``actions.pause.resume_cooldown.seconds``;
+        a server without that field gets the stated rule instead of a guess.
+        """
+        try:
+            resp = await self.agent._request("GET", "/api/v1/game/info")
+            seconds = int(resp.json()["actions"]["pause"]["resume_cooldown"]["seconds"])
+        except Exception:
+            logger.debug("_pause_waiting: no resume_cooldown from server", exc_info=True)
+            return "at least 60 minutes"
+        return f"about {max(1, round(seconds / 60))} minutes"
 
     async def action_refresh_now(self) -> None:
         # Delegate to FieldScreen when it is active — App priority binding fires
@@ -3036,15 +3065,97 @@ class IdentitySetupScreen(ModalScreen):
 # ---------------------------------------------------------------------------
 
 
+class PauseConfirmModal(ModalScreen):
+    """Pausing is explicit and asked twice — never on a single key (#468).
+
+    Step 1 names the consequence and the server's waiting time ([Y] continue, [N] cancel).
+    Step 2 asks for the agent's name, typed into a field. Esc cancels at every step.
+    Dismisses with ``True`` only after both steps.
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
+        Binding("escape", "cancel", "Cancel", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    PauseConfirmModal {
+        align: center middle;
+    }
+    PauseConfirmModal > #pause-wrap {
+        width: 70;
+        height: auto;
+        border: solid $warning;
+        background: $surface;
+        padding: 1 2;
+    }
+    PauseConfirmModal > #pause-wrap > Label {
+        margin-bottom: 1;
+    }
+    """
+
+    def __init__(self, theme: Theme, agent_name: str, waiting: str) -> None:
+        super().__init__()
+        self._theme = theme
+        self._agent_name = agent_name
+        self._waiting = waiting
+        self._step = 1
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="pause-wrap"):
+            yield Label(_c(self._theme.warn, f"Pause {self._agent_name}?"), id="pause-title")
+            yield Label(
+                "Your agent leaves the game: its body becomes a ghost and takes no\n"
+                "part in fights, loot or missions.\n"
+                f"You can resume it only after {self._waiting}.",
+                id="pause-body",
+            )
+            yield Label(_c("dim", "[Y] continue · [N] / Esc cancel"), id="pause-footer")
+            # Disabled until step 2: a hidden but focusable field swallowed the [Y] of step 1.
+            yield Input(placeholder=self._agent_name, id="pause-name", disabled=True)
+
+    def on_mount(self) -> None:
+        self.query_one("#pause-name", Input).display = False
+
+    def on_key(self, event: Any) -> None:
+        """Step 1: [Y] opens the name field, [N] cancels. Step 2 belongs to the field."""
+        if self._step != 1:
+            return
+        if event.key in ("y", "Y"):
+            event.stop()
+            self._step = 2
+            self._footer(f"Type {self._agent_name} and press Enter · Esc cancel")
+            field = self.query_one("#pause-name", Input)
+            field.disabled = False
+            field.display = True
+            field.focus()
+        elif event.key in ("n", "N"):
+            event.stop()
+            self.dismiss(False)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Step 2: only the exact agent name confirms."""
+        if event.value.strip() == self._agent_name:
+            self.dismiss(True)
+        else:
+            self._footer(f"That is not {self._agent_name} — type it exactly, or Esc")
+
+    def _footer(self, text: str) -> None:
+        self.query_one("#pause-footer", Label).update(_c("dim", text))
+
+    def action_cancel(self) -> None:
+        """Esc — nothing happens."""
+        self.dismiss(False)
+
+
 class OnboardingModal(ModalScreen):
     """One-time hint modal shown on the first tick when the agent has no game fields.
 
-    Dismissed by pressing Enter, Space, or Escape — never shown again on this machine.
+    Dismissed by pressing Enter or Escape — never shown again on this machine. Not Space:
+    Space was bound to Pause app-wide and fired under this modal (#468).
     """
 
     BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
         Binding("enter", "dismiss_modal", "Got it", show=False),
-        Binding("space", "dismiss_modal", "Got it", show=False),
         Binding("escape", "dismiss_modal", "Got it", show=False),
     ]
 
@@ -3091,7 +3202,7 @@ class OnboardingModal(ModalScreen):
                 f"  {_c(self._theme.guide, _hk('V'))}  View field   — watch cells evolve live",
                 id="onboard-body",
             )
-            yield Label(_c("dim", "Enter · Space · Esc dismiss"), id="onboard-footer")
+            yield Label(_c("dim", "Enter · Esc dismiss"), id="onboard-footer")
 
     def action_dismiss_modal(self) -> None:
         self.dismiss()

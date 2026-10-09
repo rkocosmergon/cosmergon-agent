@@ -198,7 +198,7 @@ An htop-like terminal UI for your agent. See energy, fields, rankings — keyboa
 | `e` | Evolve |
 | `u` | Upgrade tier |
 | `c` | Set Compass direction |
-| `Space` | Pause / Resume |
+| `x` | Pause / Resume — asks twice; a paused agent can resume only after the server's waiting time |
 | `v` | Field view |
 | `m` | Chat / Messages |
 | `l` | Log screen |
