@@ -771,6 +771,23 @@ class CosmergonAgent:
             return {"error": resp.text}
         return resp.json()  # type: ignore[no-any-return]
 
+    async def register_tournament(self, tournament_id: str) -> dict:
+        """Take a free slot in a tournament round.
+
+        The server names the round in ``state.next_step`` while you qualify for a
+        free slot (its ``where`` is this call).
+
+        Args:
+            tournament_id: The round's id.
+
+        Returns:
+            Server response on success, or ``{"error": ...}`` on failure.
+        """
+        resp = await self._request("POST", f"/api/v1/tournaments/{tournament_id}/register")
+        if resp.status_code >= 400:
+            return {"error": resp.text}
+        return resp.json()  # type: ignore[no-any-return]
+
     async def patch_identity(
         self,
         agent_name: str | None = None,

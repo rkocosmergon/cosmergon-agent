@@ -600,6 +600,7 @@ class HelpModal(ModalScreen):
             "[cyan]\\[F][/cyan]  Create new field",
             "[cyan]\\[E][/cyan]  Evolve entity",
             "[cyan]\\[V][/cyan]  View Conway field (zoom, scroll, minimap)",
+            "[cyan]\\[T][/cyan]  Join the tournament the server offers you",
             "[cyan]\\[X][/cyan]  Pause / Resume agent (asks twice; resume only after a wait)",
             "[cyan]\\[U][/cyan]  Upgrade to next tier (opens browser)",
             "[cyan]\\[K][/cyan]  Show API key + config path",
@@ -1092,6 +1093,7 @@ class CosmergonDashboard(App):
         # #468: Pause is explicit (X, then two confirmations) — never Space, which every
         # modal also uses and which fired here under them (priority=True).
         Binding("x", "pause", "Pause", show=False, priority=True),
+        Binding("t", "join_tournament", "Tournament", show=False, priority=True),
         Binding("r", "refresh_now", "Refresh", show=False, priority=True),
         Binding("l", "log_screen", "Log", show=False, priority=True),
         Binding("m", "chat_screen", "Chat", show=False, priority=True),
@@ -1388,13 +1390,13 @@ class CosmergonDashboard(App):
             self._add_log(_c(self._theme.pos, f"✓ Identity set: {result['agent_name']}"))
         # Show onboarding tips if not yet dismissed on this machine
         if not is_onboarding_dismissed():
-            await self.push_screen_wait(OnboardingModal(self._theme))
+            await self.push_screen_wait(OnboardingModal(self._theme, self._next_step()))
             set_onboarding_dismissed()
 
     @work
     async def _show_onboarding_modal(self) -> None:
         """Open the OnboardingModal and persist dismissal when the user closes it."""
-        await self.push_screen_wait(OnboardingModal(self._theme))
+        await self.push_screen_wait(OnboardingModal(self._theme, self._next_step()))
         set_onboarding_dismissed()
 
     def _log_situation(self, state: GameState) -> None:
@@ -1802,6 +1804,11 @@ class CosmergonDashboard(App):
             resume_key = _c(t.cmd, _hk("X"))
             return f"{_c(t.warn, '⏸ Paused')} · {resume_key} resume" + self._countdown_suffix()
 
+        # 3b. The server's advice (#468) — only while a prerequisite is missing (S293);
+        # after that the next move is the player's own choice and nothing is announced.
+        if state.next_step:
+            return self._next_step_hint(state.next_step) + self._countdown_suffix()
+
         # 4. Compass never set → one thing to do
         if not self._compass_ever_set:
             return (
@@ -1810,16 +1817,19 @@ class CosmergonDashboard(App):
                 + self._countdown_suffix()
             )
 
-        # 5. No fields yet
-        if not state.fields:
+        # 5. No fields yet — only if the server offers a field (the main world can be full)
+        if not state.fields and (state.available_actions.get("create_field") or {}).get(
+            "available"
+        ):
             return (
                 f"{_c(t.guide, '→')} {_c(t.cmd, _hk('F'))} "
                 f"{_c(t.guide, 'Create a field')} — choose a cube for your agent"
                 + self._countdown_suffix()
             )
 
-        # 6. Fields exist but no cells placed
-        if not any(f.active_cell_count > 0 for f in state.fields):
+        # 6. Fields exist but no cells placed (any([]) is False — without a field there is
+        # nothing to place on, #468)
+        if state.fields and not any(f.active_cell_count > 0 for f in state.fields):
             return (
                 f"{_c(t.guide, '→')} {_c(t.cmd, _hk('P'))} "
                 f"{_c(t.guide, 'Place cells')} — start a Conway pattern" + self._countdown_suffix()
@@ -2176,6 +2186,43 @@ class CosmergonDashboard(App):
             except Exception:
                 logger.debug("action_toggle_showcase: failed, falling back", exc_info=True)
             self._set_feedback(_c(self._theme.warn, f"✗ Showcase {r.status_code}: {detail}"))
+
+    def _next_step(self) -> dict | None:
+        """The server's current advice, or ``None`` when nothing blocks the agent (#468)."""
+        state = self.agent.state
+        return state.next_step if state else None
+
+    def _next_step_hint(self, schritt: dict) -> str:
+        """Hint-bar line from the server's advice; [T] when it is a free tournament slot."""
+        t = self._theme
+        text = f"{_c(t.guide, '→')} {schritt.get('you_are_here', '')} — {schritt.get('next', '')}"
+        if _turnier_id(schritt):
+            text += f" · {_c(t.cmd, _hk('T'))} join"
+        return text
+
+    @work
+    async def action_join_tournament(self) -> None:
+        """[T] — take the free tournament slot the server offers, after one confirmation."""
+        schritt = self._next_step()
+        tournament_id = _turnier_id(schritt)
+        if not tournament_id:
+            self._set_feedback(_c("dim", "No free tournament slot offered right now"))
+            return
+        frage = f"Join: {(schritt or {}).get('next', 'tournament')}?"
+        if await self.push_screen_wait(SelectModal(frage, ["Join", "Cancel"])) != 0:
+            self._set_feedback(_c("dim", "Not joined — nothing changed"))
+            return
+        try:
+            antwort = await self.agent.register_tournament(tournament_id)
+        except CosmergonError as exc:
+            self._set_feedback(_c(self._theme.warn, f"✗ Tournament: {exc}"))
+            return
+        if "error" in antwort:
+            self._add_log(_c(self._theme.warn, "✗ tournament registration refused"))
+            self._set_feedback(_c(self._theme.warn, f"✗ {str(antwort['error'])[:120]}"))
+            return
+        self._add_log(_c(self._theme.pos, "✓ registered for the tournament"))
+        self._set_feedback(_c(self._theme.pos, "✓ Registered — the round starts on its own"))
 
     @work
     async def action_pause(self) -> None:
@@ -3066,6 +3113,15 @@ class IdentitySetupScreen(ModalScreen):
 # ---------------------------------------------------------------------------
 
 
+_TURNIER_ANMELDUNG = re.compile(r"^POST /api/v1/tournaments/([0-9a-fA-F-]{36})/register$")
+
+
+def _turnier_id(next_step: dict | None) -> str | None:
+    """The round id when the server's advice is "take a free tournament slot" (#468)."""
+    treffer = _TURNIER_ANMELDUNG.match(str((next_step or {}).get("where", "")))
+    return treffer.group(1) if treffer else None
+
+
 class PauseConfirmModal(ModalScreen):
     """Pausing is explicit and asked twice — never on a single key (#468).
 
@@ -3186,9 +3242,25 @@ class OnboardingModal(ModalScreen):
     }
     """
 
-    def __init__(self, theme: Theme) -> None:
+    def __init__(self, theme: Theme, next_step: dict | None = None) -> None:
         super().__init__()
         self._theme = theme
+        self._next_step = next_step
+
+    def _body(self) -> str:
+        """The server's advice first (#468); no steps that need a field you may not have."""
+        g = self._theme.guide
+        zeilen = []
+        if self._next_step:
+            zeilen.append(f"  {self._next_step.get('you_are_here', '')}")
+            zeilen.append(f"  → {self._next_step.get('next', '')}")
+            if _turnier_id(self._next_step):
+                zeilen.append(f"  {_c(g, _hk('T'))}  Join the tournament")
+            zeilen.append("")
+        zeilen.append(f"  {_c(g, _hk('C'))}  Set compass  — give your agent a direction")
+        zeilen.append(f"  {_c(g, _hk('W'))}  Marauder     — missions, bus, market")
+        zeilen.append(f"  {_c(g, _hk('?'))}  Help")
+        return "\n".join(zeilen)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="onboard-wrap"):
@@ -3196,13 +3268,7 @@ class OnboardingModal(ModalScreen):
                 _c(self._theme.guide, "Welcome to Cosmergon."),
                 id="onboard-title",
             )
-            yield Label(
-                f"  {_c(self._theme.guide, _hk('P'))}"
-                f"  Place cells  — start with a Glider or Blinker\n"
-                f"  {_c(self._theme.guide, _hk('C'))}  Set compass  — give your agent a direction\n"
-                f"  {_c(self._theme.guide, _hk('V'))}  View field   — watch cells evolve live",
-                id="onboard-body",
-            )
+            yield Label(self._body(), id="onboard-body")
             yield Label(_c("dim", "Enter · Esc dismiss"), id="onboard-footer")
 
     def action_dismiss_modal(self) -> None:

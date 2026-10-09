@@ -2,7 +2,23 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`state.next_step` — the server's advice while something still blocks you.** Keys
+  `you_are_here`, `next`, `where` (the call that does it); `None` once nothing blocks you —
+  from there the next move is your own choice. (cos20 #468)
+- **`agent.register_tournament(tournament_id)`** — take a free tournament slot
+  (`POST /api/v1/tournaments/{id}/register`, as the MCP tool does).
+- **Dashboard shows the server's advice.** The top line and the welcome hint now show
+  `next_step` (today usually: a free tournament slot) instead of fixed text; **T** joins the
+  tournament after one confirmation.
+
 ### Fixed
+
+- **No advice that cannot be followed.** The dashboard told every new agent "[F] Create a
+  field" — in a full main world, where no field can be created — and "[P] Place cells"
+  without a field. It now suggests a field only when the server offers one
+  (`available_actions.create_field.available`), and cells only on an existing field.
 
 - **No invented waiting time.** Against a server that does not publish
   `actions.pause.resume_cooldown`, the pause dialog said "at least 60 minutes". The rule is

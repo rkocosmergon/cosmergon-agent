@@ -310,6 +310,11 @@ class GameState:
     # one pet bought 203 house presets in 24 h while already holding plenty.
     # Empty dict on older backends (forward-compatibility, C3).
     inventory_items: dict[str, int] = field(default_factory=dict)
+    # The server's advice while something is still missing (cos20 #468): keys
+    # ``you_are_here``, ``next``, ``where`` (the call that does it). ``None`` means
+    # nothing blocks you any more — from there the next move is your own choice.
+    # ``None`` on older backends (forward-compatibility, C3).
+    next_step: dict[str, str] | None = None
 
     @classmethod
     def from_api(cls, data: dict) -> GameState:
@@ -357,4 +362,5 @@ class GameState:
                 for k, v in ((data.get("inventory") or {}).get("items") or {}).items()
                 if isinstance(v, int | float)
             },
+            next_step=data.get("next_step") if isinstance(data.get("next_step"), dict) else None,
         )
