@@ -2096,7 +2096,14 @@ class CosmergonDashboard(App):
         Once this dashboard is closed, nothing of ours renews the key. The warning names the
         time, what happens then and how to avoid it: [1] quit · [2] keep this agent · Esc stay.
         A second Q under the warning quits — the player has read it.
+
+        Under any other open window Q closes that window, as its footer says ("Esc or Q to
+        close"): Q is an App key with priority and fires before the window — until 0.24.0 it
+        quit the whole dashboard from the log, the help or the field view (found on the device).
         """
+        if isinstance(self.screen, ModalScreen) and not self._quit_warning_open:
+            self.screen.dismiss(None)
+            return
         ends = _key_ends(self.agent._state)
         if ends is None or not ends[1] or self._quit_warning_open:
             self.exit()

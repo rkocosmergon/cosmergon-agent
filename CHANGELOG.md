@@ -9,6 +9,10 @@
   agent, e.g. Shikigon's brain — the tick is often taken. The tournament compass is now
   queued for the next tick, like the main compass. Found by the founder on the device.
   (cos20 #468)
+- **`[Q]` in the log, help or field view opened the quit dialog** (until 0.24.0 it quit the
+  dashboard) although the window says "Esc or Q to close". Q is an app key with priority and
+  fired before the window; under an open window it now closes that window. Typing `q` into the
+  chat field is unaffected. Found by the founder on the device. (cos20 #468)
 
 ## [0.25.0] — 2026-10-10
 
