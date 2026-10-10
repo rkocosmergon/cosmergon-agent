@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Added
+
+- **The log shows what a program does with your agent.** Until now the dashboard log listed
+  only what you did in the dashboard: with Shikigon's brain or your own code playing the agent,
+  it stayed empty and the agent looked idle. Each tick the dashboard now reads the agent's
+  actions from the server and lists the ones it did not send itself, as
+  `program: place_cells (-10 E)`. New: `agent.get_events(event_type="action")`. Found by the
+  founder on the device. (cos20 #468)
+- **`[T]` during a tournament shows your exact score and each Marauder** — arena energy,
+  fields and vitality against the best value in the arena, and for every Marauder whether it
+  is on a mission, between missions or dead, with its HP. (cos20 #468)
+
+### Changed
+
+- **The tournament line names vitality and fits the terminal.** It now reads
+  `you/best: arena energy 63k/659k · fields 1/9 · vitality 98/1,310` — "arena energy" instead
+  of "E" (which is also the balance in the agent panel), and "best" instead of "leader" (the
+  server sends the best value per category, each may belong to a different agent). With real
+  scores the 0.25.0 line was wider than a 120-column terminal; a narrow terminal now drops the
+  key hint first, then the end time, then the compass — `[T]` shows all of it. (cos20 #468)
+
 ### Fixed
 
 - **Joining a tournament reported "Compass not set: Rate limited".** The server allows one

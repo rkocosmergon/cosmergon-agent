@@ -26,6 +26,7 @@ import os
 import re
 import time
 import webbrowser
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -179,10 +180,17 @@ def _truncate_words(text: str, max_len: int) -> str:
     return truncated + "…"
 
 
+def _cost_of(body: dict) -> float:
+    """Energy cost in an action's answer or in its event (same shape). 0.0 if free or unknown."""
+    result_data = body.get("result") or {}
+    if not isinstance(result_data, dict):
+        return 0.0
+    return float(result_data.get("energy_cost", result_data.get("cost", 0)) or 0)
+
+
 def _action_cost(r: ActionResult) -> float:
     """Extract energy cost from action result. Returns 0.0 if free or unknown."""
-    result_data = (r.data or {}).get("result") or {}
-    return float(result_data.get("energy_cost", result_data.get("cost", 0)) or 0)
+    return _cost_of(r.data or {})
 
 
 def _cost_str(cost: float) -> str:
@@ -568,7 +576,9 @@ class HelpModal(ModalScreen):
             "",
             "Your agent acts when you act here, or when a program of",
             "yours plays it with this key. In the main world the server",
-            "does not play your agent for you.",
+            "does not play your agent for you. The log shows both:",
+            "what you do here, and as 'program: …' what a program",
+            "did with this key.",
             "",
             # ── FAQ ───────────────────────────────────────────────────────
             "[bold]═ FAQ[/bold]",
@@ -622,7 +632,8 @@ class HelpModal(ModalScreen):
             "it runs, what you can win and how many Marauders you get.",
             "You join with a compass; the server then plays your",
             "Marauders, also while this terminal is closed. During",
-            "the tournament \\[T] shows your score and changes the",
+            "the tournament \\[T] shows your score against the best,",
+            "what each of your Marauders does, and changes the",
             "compass. Joining counts for one tournament only.",
             "",
             "[bold]What is a Compass?[/bold]",
@@ -1175,6 +1186,8 @@ class CosmergonDashboard(App):
         self._tick_received_at: float = 0.0
         self._tick_interval: float = 60.0  # self-calibrating from observed tick gaps
         self._last_tick: int = -1
+        self._moves_from_tick: int = -1  # tick at connect — older actions are not news (#468)
+        self._moves_seen: deque[str] = deque(maxlen=200)  # event ids already in the log
         self._last_situation_log: str = ""  # dedup system messages
         self._panel_cache: dict[str, str] = {}  # widget-id → last rendered content
         self._auth_error: str = ""  # set on AuthenticationError — shown in hint-bar
@@ -1324,6 +1337,7 @@ class CosmergonDashboard(App):
                     self._compass_preset = state.compass_preset
                     self._compass_ever_set = True
                 self._add_log(_c(self._theme.pos, f"● Connected  {state.energy:,.0f} E"))
+                self._moves_from_tick = state.tick
                 if not self._identity_prompted and _is_auto_name(state.agent_name):
                     self._identity_prompted = True
                     self._show_identity_setup()
@@ -1339,6 +1353,7 @@ class CosmergonDashboard(App):
             )
             self._log_situation(state)
             await self._fire_pending()
+            await self._log_program_moves()
             # Refresh chat messages each tick (1 extra HTTP call / ~60s — non-fatal)
             try:
                 self._messages = await self.agent.get_messages(limit=20)
@@ -1470,6 +1485,51 @@ class CosmergonDashboard(App):
             self._last_situation_log = key
             for m in msgs:
                 self._add_log(_c("dim", f"[SYSTEM] {m}"))
+
+    async def _log_program_moves(self) -> None:
+        """Log the actions a program sent with this agent's key since the last tick (#468).
+
+        The log used to show only what the dashboard did itself: with Shikigon's brain or
+        the player's own code playing the agent, it stayed empty and the agent looked idle.
+        The server records every action sent with the key (``GET /events``). The dashboard's
+        own are left out — they are in the log already. One extra HTTP call per tick;
+        non-fatal: the line is a courtesy, the tick must not stop on it.
+        """
+        try:
+            events = await self.agent.get_events(limit=20, event_type="action")
+            for event in reversed(events):  # the server sends the newest first
+                self._log_program_move(event)
+        except Exception:
+            logger.debug("program moves unavailable", exc_info=True)
+
+    def _log_program_move(self, event: dict) -> None:
+        """One action event: into the log unless it is old, known, or the dashboard's own."""
+        kennung, tick = str(event.get("id")), int(event.get("tick") or 0)
+        if tick < self._moves_from_tick or kennung in self._moves_seen:
+            return
+        self._moves_seen.append(kennung)
+        data = event.get("data")
+        if not isinstance(data, dict):
+            data = {}
+        action = str(data.get("action") or "?")
+        if self._own_move(action, tick):
+            return
+        kosten = _cost_str(_cost_of(data))
+        self._add_log(_c(self._theme.data, f"[tick {tick}] program: {action}{kosten}"))
+
+    def _own_move(self, action: str, tick: int) -> bool:
+        """True, once, for an action this dashboard sent itself.
+
+        The action's answer names neither tick nor event, so name and tick must fit: the
+        agent remembers the tick it knew when sending, and the server allows one action per
+        tick and agent.
+        """
+        eigene = self.agent._own_actions
+        for eintrag in eigene:
+            if eintrag[0] == action and 0 <= tick - eintrag[1] <= 2:
+                eigene.remove(eintrag)
+                return True
+        return False
 
     def _add_log(self, msg: str) -> None:
         self._log.append(msg)
@@ -2436,9 +2496,15 @@ class CosmergonDashboard(App):
     async def _turnier_kompass_waehlen(self, brief: dict) -> None:
         """[T] while registered: show the tournament and choose its compass."""
         jetzt = brief.get("compass")
+        # Running: exact scores and each Marauder, then when it ends — the title names the
+        # tournament, so the text is short enough to show all of it at 120x30.
+        bild = _turnier_bild(brief)
+        if bild:
+            kopf = f"{bild}\n\nEnds {_wann(brief.get('ends_at'))}. "
+        else:
+            kopf = _turnier_zeile(brief) + "\n\n"
         body = (
-            _turnier_zeile(brief)
-            + "\n\n"
+            kopf
             + (
                 f"Your Marauders play by the compass {jetzt}, also while this terminal is closed."
                 if jetzt
@@ -2461,7 +2527,10 @@ class CosmergonDashboard(App):
         taste = _c(t.cmd, _hk("T"))
         if not brief.get("compass"):
             return f"{_c(t.guide, '→')} {_turnier_zeile(brief)} — press {taste} to choose one"
-        return f"{_c(t.guide, '⚑')} {_turnier_zeile(brief)} · {taste} compass"
+        # Columns left for the line: the bar's padding (2), the flag (2) and the tick
+        # countdown behind it (up to 15, "  ·  next ~120s").
+        zeile = _turnier_zeile(brief, breite=self.size.width - 19, schluss="[T] compass")
+        return f"{_c(t.guide, '⚑')} " + zeile.replace("[T]", taste)
 
     @work
     async def action_pause(self) -> None:
@@ -3529,31 +3598,100 @@ def _turnier_erklaerung(eintrag: dict) -> str:
     return "\n\n".join([was, warum, hier])
 
 
-def _turnier_zeile(brief: dict) -> str:
+# What a tournament scores, in the words of the dashboard: "arena energy" is the energy of
+# the arena field, not the balance in the agent panel (both were "E", #468).
+_TURNIER_WERTUNG: tuple[tuple[str, str], ...] = (
+    ("arena energy", "energy"),
+    ("fields", "territory"),
+    ("vitality", "vitality"),
+)
+
+
+def _kurz(wert: float) -> str:
+    """A score short enough for the top line: 1,200 · 63k · 1.2M."""
+    if wert >= 999_500:
+        return f"{wert / 1_000_000:.1f}M"
+    if wert >= 10_000:
+        return f"{wert / 1000:.0f}k"
+    return f"{wert:,.0f}"
+
+
+def _turnier_stand(brief: dict) -> str:
+    """Your score against the best value of each category, as one part of the top line.
+
+    "best", not "leader": the server sends the highest value per category, and each may
+    belong to a different agent.
+    """
+    ich, beste = brief.get("my_score") or {}, brief.get("leader") or {}
+    paare = [
+        f"{name} {_kurz(float(ich.get(kat) or 0))}/{_kurz(float(beste.get(kat) or 0))}"
+        for name, kat in _TURNIER_WERTUNG
+    ]
+    return "you/best: " + " · ".join(paare)
+
+
+def _wann(iso: object) -> str:
+    """Weekday and time in the player's local time: ``Sun 06:30`` — ``?`` when unreadable."""
+    try:
+        return datetime.fromisoformat(str(iso)).astimezone().strftime("%a %H:%M")
+    except ValueError:
+        return "?"
+
+
+def _turnier_zeile(brief: dict, breite: int | None = None, schluss: str = "") -> str:
     """One line about the player's tournament: compass, when, and the score while it runs.
 
-    Short on purpose — it is the top line of the dashboard and must fit 120 columns.
+    It is the top line of the dashboard. With ``breite`` (the columns it has) it drops what
+    a narrow terminal can lose — ``schluss`` first (the key hint; the key bar names the key
+    too), then the end time, then the compass; \\[T] shows all of it. Without a compass the
+    score is left out: the one thing to say then is that a compass is missing.
     """
-
-    def _wann(iso: object) -> str:
-        try:
-            return datetime.fromisoformat(str(iso)).astimezone().strftime("%a %H:%M")
-        except ValueError:
-            return "?"
-
-    teile = [f"Tournament #{brief.get('number', '?')}"]
-    teile.append(f"compass {brief['compass']}" if brief.get("compass") else "no compass yet")
-    if brief.get("status") == "running":
-        teile.append(f"ends {_wann(brief.get('ends_at'))}")
-        for wer, stand in (("you", brief.get("my_score")), ("leader", brief.get("leader"))):
-            if stand:
-                teile.append(
-                    f"{wer} {float(stand.get('energy') or 0):,.0f} E, "
-                    f"{int(stand.get('territory') or 0)} fields"
-                )
-    else:
-        teile.append(f"starts {_wann(brief.get('starts_at'))}")
+    laeuft = brief.get("status") == "running"
+    kompass = f"compass {brief['compass']}" if brief.get("compass") else "no compass yet"
+    wann = (
+        "ends " + _wann(brief.get("ends_at"))
+        if laeuft
+        else "starts " + _wann(brief.get("starts_at"))
+    )
+    teile = [f"Tournament #{brief.get('number', '?')}", kompass]
+    entbehrlich = [schluss] if schluss else []
+    if laeuft and brief.get("compass") and brief.get("my_score"):
+        teile.append(_turnier_stand(brief))
+        entbehrlich = [*entbehrlich, wann, kompass]
+    teile.append(wann)
+    if schluss:
+        teile.append(schluss)
+    while breite is not None and entbehrlich and len(" · ".join(teile)) > breite:
+        teile.remove(entbehrlich.pop(0))
     return " · ".join(teile)
+
+
+def _marauder_zeile(koerper: dict) -> str:
+    """One Marauder of the player in the running tournament: what it does, and its HP."""
+    nummer = int(koerper.get("body_slot") or 0) + 1
+    if koerper.get("dead"):
+        return f"Marauder {nummer}: dead"
+    was = "on a mission" if koerper.get("on_mission") else "between missions"
+    return f"Marauder {nummer}: {was} · HP {int(koerper.get('hp') or 0)}"
+
+
+def _turnier_bild(brief: dict) -> str:
+    """The running tournament for the \\[T] dialog: exact scores and each Marauder (#468).
+
+    Empty before the tournament runs — the server sends scores and Marauders only then.
+    """
+    ich, beste = brief.get("my_score") or {}, brief.get("leader") or {}
+    zeilen: list[str] = []
+    if ich or beste:
+        zeilen.append(f"{'':<14}{'you':>10}{'best in the arena':>20}")
+        zeilen += [
+            f"{name:<14}{float(ich.get(kat) or 0):>10,.0f}{float(beste.get(kat) or 0):>20,.0f}"
+            for name, kat in _TURNIER_WERTUNG
+        ]
+    koerper = [k for k in brief.get("bodies") or [] if isinstance(k, dict)]
+    if koerper:
+        zeilen += ["", *(_marauder_zeile(k) for k in koerper)]
+    return "\n".join(zeilen)
 
 
 _QUIT_TITLE = "Before you go: your agent's key ends {when} (local time)"

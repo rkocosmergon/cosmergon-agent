@@ -10,6 +10,7 @@ import os
 import random
 import time
 import uuid
+from collections import deque
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
 
@@ -196,6 +197,10 @@ class CosmergonAgent:
         self._client: httpx.AsyncClient | None = None
         self._running = False
         self._state: GameState | None = None
+        # Actions THIS client sent successfully, with the tick it knew then — lets the
+        # dashboard tell its own moves from those another program made with the same key
+        # (the action's response names neither tick nor event id; cos20 #468).
+        self._own_actions: deque[tuple[str, int]] = deque(maxlen=20)
         self._auto_credentials: bool = not _user_provided
         self._session_replaced: bool = False  # True when 401 + token (FIFO kick)
         self._memory: dict[str, Any] = {}
@@ -336,7 +341,9 @@ class CosmergonAgent:
             idempotency_key=idem_key,
         )
 
-        if not result.success and self._error_handler:
+        if result.success:
+            self._own_actions.append((action, self._state.tick if self._state else -1))
+        elif self._error_handler:
             await self._error_handler(result)
 
         return result
@@ -856,17 +863,21 @@ class CosmergonAgent:
             return {"error": resp.text, "status_code": resp.status_code}
         return resp.json()  # type: ignore[no-any-return]
 
-    async def get_events(self, limit: int = 20) -> list[dict]:
+    async def get_events(self, limit: int = 20, event_type: str | None = None) -> list[dict]:
         """Fetch recent game events for this agent (actions, compass changes, etc.).
 
-        Returns a list of event dicts with keys: tick, event_type, data, created_at.
+        Args:
+            limit: How many, newest first (at most 100).
+            event_type: Only this kind, e.g. ``"action"`` — every action sent with this
+                agent's key, by whichever program.
+
+        Returns a list of event dicts with keys: id, tick, event_type, data, created_at.
         """
+        params: dict[str, Any] = {"agent_id": str(self.agent_id), "limit": min(limit, 100)}
+        if event_type:
+            params["event_type"] = event_type
         try:
-            resp = await self._request(
-                "GET",
-                "/api/v1/events/",
-                params={"agent_id": str(self.agent_id), "limit": min(limit, 100)},
-            )
+            resp = await self._request("GET", "/api/v1/events/", params=params)
             if resp.status_code == 200:
                 return resp.json().get("events", [])  # type: ignore[no-any-return]
         except Exception:
