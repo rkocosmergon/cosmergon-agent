@@ -315,6 +315,11 @@ class GameState:
     # nothing blocks you any more — from there the next move is your own choice.
     # ``None`` on older backends (forward-compatibility, C3).
     next_step: dict[str, str] | None = None
+    # When the agent is lost to its player (cos20 #468): ``at`` (ISO time) is when its key
+    # ends — the agent then becomes a Vagant, played by the server; ``renews_on_use`` is True
+    # while every call with the key moves that time out again (a paid key stays further out).
+    # ``None``: nothing ends (permanent key), or an older backend (forward-compatibility, C3).
+    key_expiry: dict | None = None
 
     @classmethod
     def from_api(cls, data: dict) -> GameState:
@@ -363,4 +368,7 @@ class GameState:
                 if isinstance(v, int | float)
             },
             next_step=data.get("next_step") if isinstance(data.get("next_step"), dict) else None,
+            key_expiry=(
+                data.get("key_expiry") if isinstance(data.get("key_expiry"), dict) else None
+            ),
         )

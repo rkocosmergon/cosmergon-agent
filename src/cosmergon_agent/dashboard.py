@@ -27,6 +27,7 @@ import re
 import time
 import webbrowser
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -462,6 +463,9 @@ class SelectModal(ModalScreen):
         max-width: 95%;
         max-height: 95%;
     }
+    SelectModal.-tall #body {
+        max-height: 14;
+    }
     SelectModal #body {
         height: auto;
         max-height: 8;
@@ -471,13 +475,15 @@ class SelectModal(ModalScreen):
     }
     """
 
-    def __init__(self, title: str, options: list[str], body: str = "") -> None:
+    def __init__(self, title: str, options: list[str], body: str = "", tall: bool = False) -> None:
         super().__init__()
         self._title = title
         self._options = options[:9]
         self._body = body
         if body:
             self.add_class("-wide")
+        if tall:  # a text that must be read before choosing (#468: the quit warning)
+            self.add_class("-tall")
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
@@ -560,37 +566,45 @@ class HelpModal(ModalScreen):
             "  T4  gun            (shoots gliders)",
             "  T5  breeder        (exponential growth)",
             "",
-            "Set a [bold]Compass[/bold] to give your agent strategic direction",
-            "(grow, trade, attack, defend…). The agent interprets it",
-            "through its own personality and acts autonomously.",
+            "Your agent acts when you act here, or when a program of",
+            "yours plays it with this key. In the main world the server",
+            "does not play your agent for you.",
             "",
             # ── FAQ ───────────────────────────────────────────────────────
             "[bold]═ FAQ[/bold]",
             "",
             "[bold]Where is my agent?[/bold]",
-            "On cosmergon.com — running 24/7, not on your machine.",
-            "Closing this dashboard does not affect it.",
+            "On cosmergon.com, not on your machine. Closing this",
+            "dashboard does not delete it — but read 'When does my",
+            "agent's key end?' below.",
             "",
             "[bold]Dashboard crashed — is my agent dead?[/bold]",
-            "No. Your agent lives on the server and keeps acting",
-            "autonomously. Restart the dashboard to reconnect.",
+            "No. Your agent lives on the server. Restart the",
+            "dashboard to reconnect — before its key ends.",
+            "",
+            "[bold]When does my agent's key end?[/bold]",
+            "The status bar shows the time. Every call with the key",
+            "renews it — this dashboard does that while it is open.",
+            "If nothing uses the key until then, it ends and your",
+            "agent becomes a Vagant. To keep your agent: come back in",
+            "time, keep a program of yours running with this key, or",
+            "keep it for good with key persistence ([U], paid).",
+            "[Q] warns you with the time before you leave.",
             "",
             "[bold]How do I reconnect to my agent?[/bold]",
             "Just run cosmergon-dashboard again. Credentials are",
             "stored in ~/.cosmergon/config.toml and reused.",
             "",
             "[bold]Auth failed / 401 error?[/bold]",
-            "Your API key expired (anonymous keys last 24 h).",
+            "Your API key ended (see 'When does my agent's key end?').",
             "Run:  rm ~/.cosmergon/config.toml",
             "Then: cosmergon-dashboard   (re-registers automatically)",
             "Your old agent lives on as a Vagant — see below.",
             "",
             "[bold]What is a Vagant?[/bold]",
-            "When an anonymous agent's key expires its player account",
-            "is gone — but the agent stays alive on the server and",
-            "keeps playing autonomously forever. It becomes a Vagant.",
-            "You can reclaim it later with 'cosmergon-dashboard",
-            "--claim' if you register a permanent account.",
+            "When an agent's key ends, the agent stays on the server",
+            "and the server takes it over. It becomes a Vagant.",
+            "There is no way to get it back.",
             "",
             "[bold]What is Energy?[/bold]",
             "The game currency. Earned automatically each tick when",
@@ -603,9 +617,11 @@ class HelpModal(ModalScreen):
             "tick and generate Energy.",
             "",
             "[bold]What is a Compass?[/bold]",
-            "A strategic hint you give your agent: grow, trade,",
+            "A direction you set for your agent: grow, trade,",
             "attack, defend, cooperate, explore, or autonomous.",
-            "The agent interprets it — it is not a direct command.",
+            "A program that plays your agent reads it (for example",
+            "Shikigon's brain). On its own it makes nothing happen",
+            "in the main world — the server does not play your agent.",
             "",
             "[bold]Found a bug or have a question?[/bold]",
             "Open an issue on GitHub:",
@@ -625,11 +641,13 @@ class HelpModal(ModalScreen):
             "[cyan]\\[E][/cyan]  Evolve entity",
             "[cyan]\\[V][/cyan]  View Conway field (zoom, scroll, minimap)",
             "[cyan]\\[T][/cyan]  Join the tournament the server offers you",
+            "[cyan]\\[W][/cyan]  Marauder: bus, market, combat status",
+            "[cyan]\\[M][/cyan]  Chat",
             "[cyan]\\[X][/cyan]  Pause / Resume agent (asks twice; resume only after a wait)",
-            "[cyan]\\[U][/cyan]  Upgrade to next tier (opens browser)",
+            "[cyan]\\[U][/cyan]  Keep this agent / upgrade (checkout in browser)",
             "[cyan]\\[K][/cyan]  Show API key + config path",
             "[cyan]\\[R][/cyan]  Refresh data",
-            "[cyan]\\[Q][/cyan]  Quit",
+            "[cyan]\\[Q][/cyan]  Quit (warns first while the key can end)",
             "",
             f"[dim]Theme: {self._theme_name}   SDK: {__version__}[/dim]",
             "[dim]Themes: cosmergon  matrix  mono  high-contrast[/dim]",
@@ -1128,7 +1146,8 @@ class CosmergonDashboard(App):
         Binding("s", "toggle_showcase", "Showcase", show=False, priority=True),
         Binding("w", "marauder_menu", "Marauder", show=False, priority=True),
         Binding("question_mark", "help", "Help", show=False, priority=True),
-        Binding("q", "quit", "Quit", show=False, priority=True),
+        # #468: Q warns first while the key can end (``action_leave``); App.action_quit stays.
+        Binding("q", "leave", "Quit", show=False, priority=True),
     ]
 
     def __init__(self, agent: CosmergonAgent, theme: Theme) -> None:
@@ -1137,6 +1156,7 @@ class CosmergonDashboard(App):
         self._theme = theme
         self._log: list[str] = []  # type: ignore[assignment]
         self._paused = False
+        self._quit_warning_open = False  # #468: a second Q under the warning quits
         self._compass_preset = "autonomous"
         self._compass_ever_set = False
         self._last_energy: float | None = None
@@ -1650,26 +1670,16 @@ class CosmergonDashboard(App):
         else:
             # Empty feed — structured welcome block instead of black void.
             # Fills available space with context until real events arrive.
-            no_fields = not (state and state.fields)
             welcome: list[str] = [
                 _c("dim", "Connecting to cosmergon.com..."),
                 "",
-                _c(t.struct, "  Conway cells evolve every tick (~60s)."),
+                _c(t.struct, "  Conway cells evolve every tick."),
                 _c("dim", "  Energy is earned through active patterns."),
-                _c("dim", "  Your agent lives on the server — always on."),
+                _c("dim", "  Your agent acts when you act — here or in your code."),
                 "",
             ]
-            if no_fields:
-                welcome += [
-                    _c(t.guide, f"  {_hk('F')} Claim a field   {_hk('C')} Set Compass"),
-                    _c(t.guide, f"  {_hk('P')} Place cells     {_hk('V')} View field"),
-                    _c(t.guide, f"  {_hk('?')} Help"),
-                ]
-            else:
-                welcome += [
-                    _c(t.guide, f"  {_hk('C')} Set Compass     {_hk('P')} Place cells"),
-                    _c(t.guide, f"  {_hk('V')} View field      {_hk('?')} Help"),
-                ]
+            # #468: the same keys as the bar — without a field, F/P/V were promised here too.
+            welcome += [_c(t.guide, zeile) for zeile in _welcome_keys(state)]
             welcome.append("")
             welcome.append(_c("dim", "  Activity will appear here once connected."))
             lines.extend(welcome[:feed_n])
@@ -1743,7 +1753,14 @@ class CosmergonDashboard(App):
         tier = (state.subscription_tier if state else None) or "free"
         key_masked = self._get_masked_key()
         segments = [name, tier, key_masked]
-        self._update_panel("status-bar", f"[dim]{sep.join(segments)}[/dim]")
+        line = f"[dim]{sep.join(segments)}[/dim]"
+        # #468: when the agent is lost comes FIRST, so a narrow terminal cuts the rest, not it.
+        ends = _key_ends(state)
+        if ends and ends[1]:
+            line = _c(self._theme.warn, f"⚠ key ends {ends[0]} unless used") + sep + line
+        elif ends:
+            line = _c("dim", f"key kept until {ends[0]}") + sep + line
+        self._update_panel("status-bar", line)
 
     def _set_feedback(self, msg: str, duration: float = 4.0, at_tick: bool | None = None) -> None:
         """Show a timed message in the hint bar (line 1 only).
@@ -2059,18 +2076,51 @@ class CosmergonDashboard(App):
             self._set_feedback(_c(self._theme.warn, f"✗ Evolve failed: {exc}"))
 
     @work
+    async def action_leave(self) -> None:
+        """[Q] — quit; while the agent's key ends unless used, warn first (#468).
+
+        Once this dashboard is closed, nothing of ours renews the key. The warning names the
+        time, what happens then and how to avoid it: [1] quit · [2] keep this agent · Esc stay.
+        A second Q under the warning quits — the player has read it.
+        """
+        ends = _key_ends(self.agent._state)
+        if ends is None or not ends[1] or self._quit_warning_open:
+            self.exit()
+            return
+        self._quit_warning_open = True
+        try:
+            choice = await self.push_screen_wait(
+                SelectModal(
+                    _QUIT_TITLE.format(when=ends[0]),
+                    ["Quit", "Keep this agent (key persistence, paid)"],
+                    body=_quit_warning(ends[0]),
+                    tall=True,
+                )
+            )
+        finally:
+            self._quit_warning_open = False
+        if choice == 0:
+            self.exit()
+        elif choice == 1:
+            await self._keep_or_upgrade(keep=True, plans=False)
+
+    @work
     async def action_upgrade(self) -> None:
-        """[U] — upgrade. Runs as a worker: the tier dialog waits for an answer, and
-        without one Textual raises NoActiveWorker — the key crashed the dashboard for
-        every anonymous free agent (found on the device, cos20 #468)."""
+        """[U] — keep this agent or upgrade. Runs as a worker: the dialog waits for an answer,
+        and without one Textual raises NoActiveWorker — the key crashed the dashboard for
+        every anonymous free agent (found on the device, cos20 #468).
+
+        While the key ends unless used, keeping the agent comes first (#468); an anonymous
+        free agent also sees the plans. Everyone else goes to the website as before.
+        """
         state = self.agent._state
         tier = state.subscription_tier if state else "free"
         agent_type = state.agent_type if state else ""
-
-        # Anonymous free agent → direct Stripe checkout via API (Paket 2.7a SDK)
-        # Panel S112: einstimmig, mit SelectModal + Fallback
-        if agent_type == "anonymous_agent" and tier == "free":
-            await self._upgrade_anonymous_via_api()
+        ends = _key_ends(state)
+        keep = bool(ends and ends[1])
+        plans = agent_type == "anonymous_agent" and tier == "free"
+        if keep or plans:
+            await self._keep_or_upgrade(keep=keep, plans=plans)
             return
 
         # All other cases → open website (owner manages billing)
@@ -2087,19 +2137,69 @@ class CosmergonDashboard(App):
         self._add_log(_c(self._theme.pos, f"✓ Upgrade page opened ({tier} → next tier)"))
         self._set_feedback(_c(self._theme.pos, "✓ Browser opened — complete upgrade there"))
 
-    async def _upgrade_anonymous_via_api(self) -> None:
-        """Paket 2.7a SDK: Direct Stripe checkout for anonymous free agents.
+    async def _keep_or_upgrade(self, *, keep: bool, plans: bool) -> None:
+        """Choose: keep this agent (key persistence) and/or a plan (#468, Paket 2.7a).
 
-        Panel S112: SelectModal for tier choice + robust fallback on any error.
+        No prices and no plan details here — the Stripe checkout names them; a number copied
+        into the SDK goes stale without anyone noticing.
         """
-        # Tier selection (Panel: Security — user decides, not SDK)
+        options: list[tuple[str, str, str]] = []
+        if keep:
+            options += [
+                ("Keep this agent — monthly (price shown at checkout)", "persist", "monthly"),
+                ("Keep this agent — yearly (price shown at checkout)", "persist", "annual"),
+            ]
+        if plans:
+            options += [
+                ("Solo plan (details at checkout)", "plan", "solo"),
+                ("Developer plan (details at checkout)", "plan", "developer"),
+            ]
+        title = "Keep this agent or upgrade" if keep and plans else "Keep this agent"
+        if not keep:
+            title = "Upgrade"
+        body = "\n\n".join(text for on, text in ((keep, _KEEP_BODY), (plans, _PLANS_BODY)) if on)
         choice = await self.push_screen_wait(
-            SelectModal("Upgrade to:", ["Solo — 2 agents, permanent", "Developer — 5 agents, team"])
+            SelectModal(title, [o[0] for o in options], body=body, tall=True)
         )
         if choice is None:
             return  # Esc
-        tier = "solo" if choice == 0 else "developer"
+        _, kind, value = options[choice]
+        if kind == "persist":
+            await self._keep_agent(value)
+        else:
+            await self._upgrade_anonymous_via_api(value)
 
+    async def _keep_agent(self, interval: str) -> None:
+        """Open the key-persistence checkout (``POST /api/v1/billing/persist-checkout``, #468).
+
+        The server keeps this agent's newest active key; prices and terms are on the checkout.
+        """
+        warn = self._theme.warn
+        try:
+            resp = await self.agent._request(
+                "POST", "/api/v1/billing/persist-checkout", params={"interval": interval}
+            )
+        except CosmergonError as exc:
+            self._set_feedback(_c(warn, f"✗ Keep this agent: {exc}"))
+            return
+        body = _json_or_empty(resp)
+        url = body.get("checkout_url") if resp.status_code == 200 else None
+        if url:
+            webbrowser.open(url)
+            self._add_log(_c(self._theme.pos, f"✓ Key persistence checkout opened ({interval})"))
+            self._set_feedback(
+                _c(self._theme.pos, "✓ Checkout opened in your browser — pay there to keep it")
+            )
+            return
+        message = (body.get("error") or {}).get("message") or f"HTTP {resp.status_code}"
+        self._set_feedback(_c(warn, f"✗ Keep this agent: {message}"), duration=10.0)
+
+    async def _upgrade_anonymous_via_api(self, tier: str) -> None:
+        """Paket 2.7a SDK: Direct Stripe checkout for anonymous free agents.
+
+        Panel S112: the player chooses the plan (``_keep_or_upgrade``); robust fallback on
+        any error.
+        """
         import httpx as _httpx
 
         url = f"{self.agent.base_url}/api/v1/billing/create-upgrade-checkout?tier={tier}"
@@ -3174,16 +3274,86 @@ def _fix_bar_keys(state: GameState | None, *, agents: bool = False) -> list[tupl
         keys.append(("V", "View"))
     if state and _turnier_id(state.next_step):
         keys.append(("T", "Tournament"))
-    keys += [("W", "Marauder"), ("M", "Chat"), ("U", "Upgrade"), ("K", "Key")]
+    ends = _key_ends(state)
+    upgrade = "Keep agent" if ends and ends[1] else "Upgrade"  # #468 A3: keeping comes first
+    keys += [("W", "Marauder"), ("M", "Chat"), ("U", upgrade), ("K", "Key")]
     if agents:  # agent selector — only with a player token in the config
         keys.append(("A", "Agents"))
     return [*keys, ("?", "Help"), ("Q", "Quit")]
+
+
+_WELCOME_KEYS = ("F", "C", "P", "V", "T", "?")
+
+
+def _welcome_keys(state: GameState | None) -> list[str]:
+    """The welcome block's hotkey lines, two per line — from the bar's keys (#468).
+
+    One source with ``_fix_bar_keys``: a key the bar does not show is not offered here either.
+    """
+    keys = [(k, label) for k, label in _fix_bar_keys(state) if k in _WELCOME_KEYS]
+    cells = [f"{_hk(k)} {label}".ljust(16) for k, label in keys]
+    return ["  " + " ".join(cells[i : i + 2]).rstrip() for i in range(0, len(cells), 2)]
 
 
 def _turnier_id(next_step: dict | None) -> str | None:
     """The round id when the server's advice is "take a free tournament slot" (#468)."""
     treffer = _TURNIER_ANMELDUNG.match(str((next_step or {}).get("where", "")))
     return treffer.group(1) if treffer else None
+
+
+def _key_ends(state: GameState | None) -> tuple[str, bool] | None:
+    """When the agent's key ends, in local time, and whether using it renews it (#468).
+
+    Read from the server's ``key_expiry`` — no hours are counted here. ``None`` when nothing
+    ends (permanent key) or the server does not say (older backend).
+    """
+    expiry = state.key_expiry if state else None
+    if not expiry or not expiry.get("at"):
+        return None
+    try:
+        at = datetime.fromisoformat(str(expiry["at"])).astimezone()
+    except ValueError:
+        return None
+    return at.strftime("%a %d %b, %H:%M"), bool(expiry.get("renews_on_use"))
+
+
+_QUIT_TITLE = "Before you go: your agent's key ends {when} (local time)"
+
+_KEEP_BODY = (
+    "Key persistence keeps your agent's key from ending while you pay — you can be away "
+    "as long as you like. Price and terms are shown at checkout, in your browser."
+)
+_PLANS_BODY = (
+    "A plan makes this agent's key permanent and opens an account for you. What each plan "
+    "includes is shown at checkout, in your browser."
+)
+
+
+def _json_or_empty(resp: Any) -> dict:
+    """The response body as a dict — ``{}`` when it is not JSON or not an object."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+def _quit_warning(when: str) -> str:
+    """What the player loses by leaving, and the three ways to keep the agent (#468).
+
+    Every sentence is a fact of the server: in the main world it does not play an ``api``
+    agent; a key nobody uses ends at the time it names; the agent then becomes a Vagant and
+    there is no way back (``claim-agent`` answers 410).
+    """
+    # Two paragraphs: the dialog shows about eight lines before it scrolls, and the ways to
+    # keep the agent must be among them (#468).
+    return (
+        f"If nothing uses its key before {when}, the key ends: your agent becomes a Vagant — "
+        "the server takes it over, and you cannot get it back. While you are away, the server "
+        "does not play your agent in the main world.\n\n"
+        "To keep it: come back before then (opening this dashboard renews the key), keep a "
+        "program of yours running with this key, or choose [2] — key persistence, paid."
+    )
 
 
 class PauseConfirmModal(ModalScreen):

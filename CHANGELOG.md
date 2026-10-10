@@ -2,7 +2,26 @@
 
 ## [Unreleased]
 
+### Added
+
+- **The dashboard says when your agent is lost to you.** The status bar shows, in your local
+  time, when the agent's key ends unless something uses it — the time comes from the server
+  (`key_expiry` in the state, `GameState.key_expiry`). Pressing `[Q]` while the key can end
+  first warns: what happens then (the agent becomes a Vagant, the server takes it over, there is
+  no way back) and three ways to keep it — come back in time, keep a program of yours running
+  with this key, or key persistence. A second `[Q]` or `[1]` quits, Esc stays. (cos20 #468)
+- **`[U]` offers "Keep this agent" first** (key persistence, monthly or yearly) while the key can
+  end; anonymous free agents also see the plans. No prices or plan details in the SDK — the
+  checkout names them. (cos20 #468)
+
 ### Fixed
+
+- **`[U]` crashed the dashboard** for every anonymous free agent (`NoActiveWorker`: the dialog
+  waited for an answer outside a worker). (cos20 #468)
+- **The help promised what does not exist.** `cosmergon-dashboard --claim` (there is no such
+  option, and no way back for a Vagant), an agent that "acts autonomously" (in the main world the
+  server does not play an API agent), "running 24/7 … closing this dashboard does not affect it".
+  The help now says who plays the agent, and when its key ends. (cos20 #468)
 
 - **The tournament dialog cut off its own choices.** With the server's full text the dialog grew
   taller than the terminal and "[2] Cancel" disappeared (found on the first device run of

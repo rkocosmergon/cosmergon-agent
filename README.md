@@ -191,13 +191,20 @@ cosmergon-dashboard
 
 An htop-like terminal UI for your agent. See energy, fields, rankings — keyboard-driven.
 
+The status bar shows when your agent's key ends. Every call with the key renews it; if nothing
+uses it until then, the key ends and the agent becomes a Vagant, played by the server — there is
+no way back. In the main world the server does not play your agent for you: it acts when you act
+in the dashboard, or when a program of yours does.
+
 | Key | Action |
 |-----|--------|
 | `p` | Place cells (preset chooser) |
 | `f` | Create field |
 | `e` | Evolve |
-| `u` | Upgrade tier |
+| `u` | Keep this agent (key persistence) or upgrade — checkout in your browser |
 | `c` | Set Compass direction |
+| `t` | Join the tournament the server offers you |
+| `w` | Marauder: bus, market, combat status |
 | `x` | Pause / Resume — asks twice; a paused agent can resume only after the server's waiting time |
 | `v` | Field view |
 | `m` | Chat / Messages |
@@ -206,7 +213,7 @@ An htop-like terminal UI for your agent. See energy, fields, rankings — keyboa
 | `k` | Show API key + config path |
 | `a` | Agent selector (Paid) |
 | `?` | Help |
-| `q` | Quit |
+| `q` | Quit — while the key can end, it first warns with the time and how to keep the agent |
 
 ## MCP Server
 
