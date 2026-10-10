@@ -53,6 +53,10 @@
 
 ### Fixed
 
+- **A full log hid its newest lines.** The dashboard computed how many log lines fit from
+  hand-counted heights of the other areas and came out several lines too high; the area cuts
+  at the bottom, so with a long log the latest entries and the chat lines were the ones cut
+  off. The rows are now measured. (cos20 #475)
 - **Joining a tournament reported "Compass not set: Rate limited".** The server allows one
   action per tick and agent; right after joining — or while another program plays the same
   agent, e.g. Shikigon's brain — the tick is often taken. The tournament compass is now

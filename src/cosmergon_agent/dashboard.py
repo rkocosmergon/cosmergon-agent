@@ -2100,12 +2100,17 @@ class CosmergonDashboard(App):
             for rule in learned[-2:]:
                 lines.append(_c("dim", f"  • {rule[:72]}"))
 
-        # Activity feed — fill available panel height so chat stays at the bottom.
-        # Fixed rows consumed by other widgets: hint(1)+top(8)+ctx(1)+fix(3)+status(1)=14.
-        panel_h = max(6, self.app.size.height - 14)
+        # Activity feed — fill the panel so chat stays at the bottom. The rows are measured:
+        # counted by hand from the neighbours' heights they came out too many, and the panel
+        # cuts at the bottom — a full log lost its newest lines and the chat (#475).
+        # Before the first layout the size is 0; then: hint 1 + top 14 + ctx 1 + fix 4 +
+        # status 1 + the panel's own frame 2 = 23.
+        panel_h = self.query_one("#log-panel", Static).content_size.height or max(
+            4, self.app.size.height - 23
+        )
         learned_count = len(learned[-2:]) if learned else 0
         chat_rows = 3 if self._messages else 0  # separator + up to 2 msgs
-        feed_n = max(1, panel_h - 1 - learned_count - chat_rows)
+        feed_n = max(1, panel_h - learned_count - chat_rows)
         feed = self._log[-feed_n:]
         if feed:
             lines.extend(feed)
