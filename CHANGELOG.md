@@ -40,6 +40,16 @@
 - **The agent panel names both compasses while you are in a tournament.** Below `Compass:` (the
   main world) it adds `in tournament: attack`. The main-world compass alone was read as the
   tournament's. Found by the founder on the device. (cos20 #468)
+- **The dashboard's frames are visible, and the dashboard follows your desktop theme.** The
+  frames around AGENT, ECONOMY and LOG were a grey one shade off their background (contrast
+  1.26:1). Each area now has its own muted frame color with at least 3:1 against its surface,
+  the titles sit in the frame line (one more row of content per area), and the focused area has
+  a heavier line in the accent color — yellow stays "your next step". Surfaces and frames are
+  part of the theme now, for all four themes. On Omarchy the dashboard reads the colors of the
+  active desktop theme (`~/.local/state/omarchy/current/theme/colors.toml`) unless you chose a
+  theme yourself (`--theme`, `COSMERGON_THEME`, `dashboard.toml`); `--theme omarchy` asks for
+  it by name. Takes effect at the next start. Asked for by the founder on the device.
+  (cos20 #475)
 
 ### Fixed
 

@@ -112,38 +112,192 @@ class Theme:
     warn: str  # warning / loss
     struct: str  # headers / separators
     data: str  # neutral data text
+    # Surfaces and frames (#475) — "#rrggbb" only, they go into the CSS.
+    bg: str = "#1e1e1e"  # screen behind the panels
+    panel: str = "#161616"  # panel surface
+    bar: str = "#252525"  # hint bar
+    frame_agent: str = "#5d6b8a"
+    frame_economy: str = "#7a6390"
+    frame_log: str = "#4c7773"
+    focus: str = "#c8c8c8"  # frame of the focused panel, dialog frames
+
+
+# A line that separates areas needs 3:1 against its surface (WCAG 2.1, 1.4.11).
+_FRAME_CONTRAST = 3.0
+_HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _rgb(color: str) -> tuple[int, int, int]:
+    return int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+
+
+def _contrast(a: str, b: str) -> float:
+    """WCAG contrast ratio of two "#rrggbb" colors (1.0 … 21.0)."""
+
+    def luminance(color: str) -> float:
+        channels = [c / 255 for c in _rgb(color)]
+        lin = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+    hi, lo = sorted((luminance(a), luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _mix(color: str, other: str, share: float) -> str:
+    """``share`` of ``color``, the rest ``other``."""
+    return "#" + "".join(
+        f"{round(c * share + o * (1 - share)):02x}"
+        for c, o in zip(_rgb(color), _rgb(other), strict=True)
+    )
+
+
+def _frame_color(color: str, surface: str) -> str:
+    """The most muted shade of ``color`` that still separates from ``surface``.
+
+    Fades the color into the surface as far as ``_FRAME_CONTRAST`` allows. A color
+    that is too dark even at full strength is lifted towards white instead.
+    """
+    for step in range(6, 21):  # 30 % … 100 % of the color
+        shade = _mix(color, surface, step / 20)
+        if _contrast(shade, surface) >= _FRAME_CONTRAST:
+            return shade
+    for step in range(1, 21):
+        shade = _mix("#ffffff", color, step / 20)
+        if _contrast(shade, surface) >= _FRAME_CONTRAST:
+            return shade
+    return "#ffffff"
 
 
 THEMES: dict[str, Theme] = {
     "cosmergon": Theme("cosmergon", "#aaaaaa", "yellow", "#6EE21C", "red", "#999999", "white"),
-    "matrix": Theme("matrix", "green", "bright_green", "green", "red", "green", "green"),
-    "mono": Theme("mono", "white", "white", "white", "white", "white", "white"),
-    "high-contrast": Theme("high-contrast", "yellow", "cyan", "green", "red", "white", "white"),
+    "matrix": Theme(
+        "matrix",
+        "green",
+        "bright_green",
+        "green",
+        "red",
+        "green",
+        "green",
+        bg="#0a0f0a",
+        panel="#050805",
+        bar="#0f170f",
+        frame_agent="#2f8f2f",
+        frame_economy="#2f8f2f",
+        frame_log="#2f8f2f",
+        focus="#55ff55",
+    ),
+    "mono": Theme(
+        "mono",
+        "white",
+        "white",
+        "white",
+        "white",
+        "white",
+        "white",
+        frame_agent="#6e6e6e",
+        frame_economy="#6e6e6e",
+        frame_log="#6e6e6e",
+        focus="#ffffff",
+    ),
+    "high-contrast": Theme(
+        "high-contrast",
+        "yellow",
+        "cyan",
+        "green",
+        "red",
+        "white",
+        "white",
+        bg="#000000",
+        panel="#000000",
+        bar="#1a1a1a",
+        frame_agent="#ffffff",
+        frame_economy="#ffffff",
+        frame_log="#ffffff",
+        focus="#00ffff",
+    ),
 }
+
+# Omarchy writes the colors of the active desktop theme here (24 named values).
+_OMARCHY_COLORS = Path(".local/state/omarchy/current/theme/colors.toml")
+
+
+def _read_toml(path: Path) -> dict[str, Any]:
+    try:
+        import tomllib  # type: ignore[import-not-found]
+    except ImportError:
+        import tomli as tomllib  # type: ignore[no-redef,import-not-found]
+    with path.open("rb") as fh:
+        data: dict[str, Any] = tomllib.load(fh)
+    return data
+
+
+def _omarchy_theme(path: Path | None = None) -> Theme | None:
+    """Build the theme from Omarchy's color table — None unless it is there and clean.
+
+    Every value used must be a plain "#rrggbb": the strings end up in CSS and markup.
+    """
+    path = path or Path.home() / _OMARCHY_COLORS
+    if not path.is_file():
+        return None
+    try:
+        raw = _read_toml(path)
+    except Exception:
+        logger.debug("_omarchy_theme: unreadable %s", path, exc_info=True)
+        return None
+
+    def color(key: str, fallback: str = "") -> str:
+        value = raw.get(key)
+        if isinstance(value, str) and _HEX_COLOR.match(value):
+            return value.lower()
+        return fallback
+
+    bg, fg, accent = color("background"), color("foreground"), color("accent")
+    green, red, yellow = color("green"), color("red"), color("yellow")
+    if not all((bg, fg, accent, green, red, yellow)):
+        return None
+    panel = color("dark_background", bg)
+    return Theme(
+        name="omarchy",
+        cmd=fg,
+        guide=yellow,
+        pos=green,
+        warn=red,
+        struct=fg,
+        data=color("bright_foreground", fg),
+        bg=bg,
+        panel=panel,
+        bar=color("lighter_background", bg),
+        frame_agent=_frame_color(color("blue", accent), panel),
+        frame_economy=_frame_color(color("magenta", accent), panel),
+        frame_log=_frame_color(color("cyan", accent), panel),
+        focus=accent,
+    )
+
+
+def _theme_by_name(name: str | None) -> Theme | None:
+    if name == "omarchy":
+        return _omarchy_theme()
+    return THEMES.get(name) if name else None
 
 
 def _load_theme(cli_theme: str | None = None) -> Theme:
-    """Resolve theme: CLI arg > COSMERGON_THEME env > ~/.cosmergon/dashboard.toml > default."""
-    if cli_theme and cli_theme in THEMES:
-        return THEMES[cli_theme]
-    env = os.environ.get("COSMERGON_THEME")
-    if env and env in THEMES:
-        return THEMES[env]
+    """Resolve the theme.
+
+    CLI arg > COSMERGON_THEME env > ~/.cosmergon/dashboard.toml > the Omarchy
+    desktop theme (on an Omarchy machine) > default.
+    """
+    chosen = _theme_by_name(cli_theme) or _theme_by_name(os.environ.get("COSMERGON_THEME"))
+    if chosen:
+        return chosen
     cfg = Path.home() / ".cosmergon" / "dashboard.toml"
     if cfg.exists():
         try:
-            try:
-                import tomllib  # type: ignore[import-not-found]
-            except ImportError:
-                import tomli as tomllib  # type: ignore[no-redef,import-not-found]
-            with cfg.open("rb") as fh:
-                data = tomllib.load(fh)
-            name = data.get("dashboard", {}).get("theme")
-            if name and name in THEMES:
-                return THEMES[name]
+            chosen = _theme_by_name(_read_toml(cfg).get("dashboard", {}).get("theme"))
+            if chosen:
+                return chosen
         except Exception:
             logger.debug("_load_theme: failed, falling back", exc_info=True)
-    return THEMES["cosmergon"]
+    return _omarchy_theme() or THEMES["cosmergon"]
 
 
 def _c(color: str, text: str) -> str:
@@ -1078,15 +1232,16 @@ class CosmergonDashboard(App):
 
     ENABLE_COMMAND_PALETTE = False
 
+    # Colors come from the theme (``get_css_variables``) — none are fixed here (#475).
     DEFAULT_CSS = """
     Screen {
-        background: #1e1e1e;
+        background: $csg-bg;
         layout: vertical;
     }
 
     #hint-bar {
         height: 1;
-        background: #252525;
+        background: $csg-bar;
         padding: 0 1;
     }
 
@@ -1095,51 +1250,56 @@ class CosmergonDashboard(App):
         min-height: 14;
     }
 
-    #agent-panel {
-        width: 1fr;
-        background: #161616;
-        border: solid #2a2a2a;
+    #agent-panel, #economy-panel, #log-panel {
+        background: $csg-panel;
         padding: 0 1;
         overflow: hidden hidden;
+        border-title-style: bold;
+    }
+
+    #agent-panel {
+        width: 1fr;
+        border: solid $csg-frame-agent;
+        border-title-color: $csg-frame-agent;
     }
 
     #economy-panel {
         width: 1fr;
-        background: #161616;
-        border: solid #2a2a2a;
-        padding: 0 1;
-        overflow: hidden hidden;
+        border: solid $csg-frame-economy;
+        border-title-color: $csg-frame-economy;
     }
 
     #log-panel {
-        background: #161616;
-        border: solid #2a2a2a;
-        padding: 0 1;
+        border: solid $csg-frame-log;
+        border-title-color: $csg-frame-log;
+        border-subtitle-color: $csg-frame-log;
         height: 1fr;
         min-height: 6;
-        overflow: hidden hidden;
     }
 
     #context-bar {
         height: 1;
-        background: #1e1e1e;
+        background: $csg-bg;
         padding: 0 1;
     }
 
     #fix-bar {
         height: 4;
-        background: #1e1e1e;
-        border-top: solid #2a2a2a;
+        background: $csg-bg;
+        border-top: solid $csg-frame-log;
     }
 
     #status-bar {
         height: 1;
-        background: #1e1e1e;
+        background: $csg-bg;
         padding: 0 1;
     }
 
-    .panel-focused {
-        border: solid yellow;
+    /* Focus is a heavier line in the accent color — yellow stays "your next step". */
+    #agent-panel.panel-focused, #log-panel.panel-focused {
+        border: heavy $csg-focus;
+        border-title-color: $csg-focus;
+        border-subtitle-color: $csg-focus;
     }
     """
 
@@ -1171,9 +1331,9 @@ class CosmergonDashboard(App):
     ]
 
     def __init__(self, agent: CosmergonAgent, theme: Theme) -> None:
+        self._theme = theme  # before super(): the stylesheet reads it through the variables
         super().__init__()
         self.agent = agent
-        self._theme = theme
         self._log: list[str] = []  # type: ignore[assignment]
         self._paused = False
         self._quit_warning_open = False  # #468: a second Q under the warning quits
@@ -1209,7 +1369,31 @@ class CosmergonDashboard(App):
         yield Static("", id="fix-bar")
         yield Static("", id="status-bar")
 
+    def get_css_variables(self) -> dict[str, str]:
+        """The theme's surfaces and frames as CSS variables; dialogs follow via accent/surface."""
+        t = self._theme
+        return {
+            **super().get_css_variables(),
+            "csg-bg": t.bg,
+            "csg-panel": t.panel,
+            "csg-bar": t.bar,
+            "csg-frame-agent": t.frame_agent,
+            "csg-frame-economy": t.frame_economy,
+            "csg-frame-log": t.frame_log,
+            "csg-focus": t.focus,
+            # Textual's own Screen rule reads $background and beats the Screen rule above.
+            "background": t.bg,
+            "accent": t.focus,
+            "surface": t.panel,
+        }
+
     def on_mount(self) -> None:
+        # The titles sit in the frame line — a panel keeps every row for content (#475).
+        self.query_one("#agent-panel", Static).border_title = "AGENT"
+        self.query_one("#economy-panel", Static).border_title = "ECONOMY"
+        log_panel = self.query_one("#log-panel", Static)
+        log_panel.border_title = "LOG"
+        log_panel.border_subtitle = r"\[L] fullscreen  \[M] chat"
         self._register_agent_handlers()
         self._run_agent()
         self.set_interval(0.5, self._redraw)
@@ -1775,14 +1959,21 @@ class CosmergonDashboard(App):
         "log": "log-panel",
     }
 
+    _PANEL_TITLE: ClassVar[dict[str, str]] = {"agent-panel": "AGENT", "log-panel": "LOG"}
+
     def _sync_focus_border(self) -> None:
         target = self._FOCUS_TO_PANEL.get(self._focus or "")
         if target == self._focus_panel_id:
             return
+        # Frame and a ▶ in the title: the marker carries the focus where color cannot.
         if self._focus_panel_id:
-            self.query_one(f"#{self._focus_panel_id}", Static).remove_class("panel-focused")
+            alt = self.query_one(f"#{self._focus_panel_id}", Static)
+            alt.remove_class("panel-focused")
+            alt.border_title = self._PANEL_TITLE[self._focus_panel_id]
         if target:
-            self.query_one(f"#{target}", Static).add_class("panel-focused")
+            neu = self.query_one(f"#{target}", Static)
+            neu.add_class("panel-focused")
+            neu.border_title = f"{self._PANEL_TITLE[target]} ▶"
         self._focus_panel_id = target
 
     def _redraw(self) -> None:
@@ -1802,8 +1993,7 @@ class CosmergonDashboard(App):
 
     def _draw_agent_panel(self, state: GameState | None) -> None:
         t = self._theme
-        focus_marker = _c(t.guide, " ▶") if self._focus in ("agent", "fields") else ""
-        lines = [_c(t.struct, "[bold]═ AGENT[/bold]") + focus_marker]
+        lines: list[str] = []
 
         if not state:
             lines.append(_c("dim", "Connecting..."))
@@ -1872,7 +2062,7 @@ class CosmergonDashboard(App):
 
     def _draw_economy_panel(self, state: GameState | None) -> None:
         t = self._theme
-        lines = [_c(t.struct, "[bold]═ ECONOMY[/bold]")]
+        lines: list[str] = []
 
         if state and state.world_briefing:
             wb = state.world_briefing
@@ -1904,10 +2094,8 @@ class CosmergonDashboard(App):
 
     def _draw_log_panel(self, state: GameState | None) -> None:
         t = self._theme
-        focus_marker = _c(t.guide, " ▶") if self._focus == "log" else ""
         agent_name = (state.agent_name if state and state.agent_name else None) or "Agent"
-        hint = _c("dim", r"  \[L] fullscreen  \[M] chat")
-        lines = [_c(t.struct, f"[bold]═ LOG[/bold]{focus_marker}") + hint]
+        lines: list[str] = []
 
         # Learned rules — show last 2 (compact)
         learned = (state.learned_rules if state else None) or []
@@ -4382,7 +4570,7 @@ def main() -> None:
     parser.add_argument("--api-key", help="API key (auto-registers if omitted)")
     parser.add_argument("--token", help="Master Key (CSMR-...) — loads all your agents")
     parser.add_argument("--base-url", default="https://cosmergon.com")
-    parser.add_argument("--theme", choices=list(THEMES), default=None)
+    parser.add_argument("--theme", choices=[*THEMES, "omarchy"], default=None)
     args = parser.parse_args()
     logging.basicConfig(level=logging.WARNING)
 
