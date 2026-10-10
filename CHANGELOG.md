@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-10-10
+
 ### Added
 
 - **Mission kinds and outcomes in a player's words, as public helpers.** `mission_word("siege_field")`
