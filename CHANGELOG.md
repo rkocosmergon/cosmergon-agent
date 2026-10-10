@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`agent.tournament_current()`** — the posting of the current round, including the server's
+  `goal` (how the round is scored) and `options` (how you steer your arena bodies).
+  (cos20 #468, #471)
+
+### Changed
+
+- **Dashboard key bar shows only keys that do something right now.** Place/View need a field,
+  Field needs a free slot the server offers, Evolve needs an eligible field; **W** (missions)
+  and **T** (tournament) appear when the server offers them. The keys themselves still work —
+  a key that is not shown answers with its hint. (cos20 #468)
+- **The tournament dialog says what you play for.** Before you confirm, **T** shows the
+  server's goal and options. Without them (older server, no connection) it asks as before.
+
+### Fixed
+
+- Dialog titles were cut off at the border ("… 8 free sl") — they wrap now.
+- A cancelled or failed action no longer says "takes effect at next tick".
+
 ## [0.23.0] — 2026-10-09
 
 ### Added

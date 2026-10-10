@@ -456,20 +456,33 @@ class SelectModal(ModalScreen):
         width: 44;
         height: auto;
         max-height: 20;
+    }
+    SelectModal.-wide > #dialog {
+        width: 76;
+        max-width: 95%;
+        max-height: 85%;
         border: solid $accent;
         background: $surface;
         padding: 1 2;
     }
     """
 
-    def __init__(self, title: str, options: list[str]) -> None:
+    def __init__(self, title: str, options: list[str], body: str = "") -> None:
         super().__init__()
         self._title = title
         self._options = options[:9]
+        self._body = body
+        if body:
+            self.add_class("-wide")
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
-            yield Label(f"[bold]{self._title}[/bold]")
+            # Static, not Label: a Label is as wide as its text and was cut off at the
+            # dialog border ("… 8 free sl", #468); a Static wraps.
+            yield Static(f"[bold]{self._title}[/bold]", markup=True)
+            if self._body:
+                yield Static("")
+                yield Static(self._body, markup=False)
             yield Label("")
             for i, opt in enumerate(self._options):
                 yield Label(f"[cyan][{i + 1}][/cyan] {opt}")
@@ -1118,6 +1131,7 @@ class CosmergonDashboard(App):
         self._last_energy: float | None = None
         self._feedback: str = ""
         self._feedback_until: float = 0.0
+        self._feedback_at_tick: bool = False
         self._tick_received_at: float = 0.0
         self._tick_interval: float = 60.0  # self-calibrating from observed tick gaps
         self._last_tick: int = -1
@@ -1514,7 +1528,7 @@ class CosmergonDashboard(App):
         self._draw_economy_panel(state)
         self._draw_log_panel(state)
         self._draw_context_bar(state)
-        self._draw_fix_bar()
+        self._draw_fix_bar(state)
         self._draw_status_bar(state)
 
     def _draw_agent_panel(self, state: GameState | None) -> None:
@@ -1691,7 +1705,7 @@ class CosmergonDashboard(App):
         else:
             self._update_panel("context-bar", "")
 
-    def _draw_fix_bar(self) -> None:
+    def _draw_fix_bar(self, state: GameState | None = None) -> None:
         t = self._theme
 
         def k(key: str, label: str, color: str | None = None) -> str:
@@ -1700,20 +1714,9 @@ class CosmergonDashboard(App):
         # [C] orange until first compass use — onboarding signal
         c_color = t.guide if not self._compass_ever_set else t.cmd
         keys = [
-            k("Tab", "Focus"),
-            k("C", "Compass", c_color),
-            k("P", "Place"),
-            k("F", "Field"),
-            k("E", "Evolve"),
-            k("V", "View"),
-            k("M", "Chat"),
-            k("U", "Upgrade"),
-            k("K", "Key"),
+            k(key, label, c_color if key == "C" else None)
+            for key, label in _fix_bar_keys(state, agents=bool(load_token()))
         ]
-        # [A] Agent selector — only for Paid users with token in config
-        if load_token():
-            keys.append(k("A", "Agents"))
-        keys += [k("?", "Help"), k("Q", "Quit")]
         self._update_panel("fix-bar", "  ".join(keys))
 
     def _get_plain_key(self) -> str:
@@ -1738,9 +1741,17 @@ class CosmergonDashboard(App):
         segments = [name, tier, key_masked]
         self._update_panel("status-bar", f"[dim]{sep.join(segments)}[/dim]")
 
-    def _set_feedback(self, msg: str, duration: float = 4.0) -> None:
-        """Show a timed message in the hint bar (line 1 only)."""
+    def _set_feedback(
+        self, msg: str, duration: float = 4.0, at_tick: bool | None = None
+    ) -> None:
+        """Show a timed message in the hint bar (line 1 only).
+
+        ``at_tick`` adds "takes effect at next tick". By default only a confirmation (✓)
+        gets it: a cancel or an error changes nothing, and saying it "takes effect"
+        was wrong (#468).
+        """
         self._feedback = msg
+        self._feedback_at_tick = ("✓" in msg) if at_tick is None else at_tick
         self._feedback_until = time.monotonic() + duration
 
     def _countdown_suffix(self) -> str:
@@ -1773,6 +1784,8 @@ class CosmergonDashboard(App):
 
         # 1. Active feedback — show confirmation + countdown so user knows *when* it fires.
         if self._feedback and time.monotonic() < self._feedback_until:
+            if not self._feedback_at_tick:
+                return self._feedback
             state = self.agent.state
             if state and state.next_tick_at:
                 remaining = state.next_tick_at - time.time()
@@ -2209,7 +2222,8 @@ class CosmergonDashboard(App):
             self._set_feedback(_c("dim", "No free tournament slot offered right now"))
             return
         frage = f"Join: {(schritt or {}).get('next', 'tournament')}?"
-        if await self.push_screen_wait(SelectModal(frage, ["Join", "Cancel"])) != 0:
+        warum = await self._turnier_warum()
+        if await self.push_screen_wait(SelectModal(frage, ["Join", "Cancel"], warum)) != 0:
             self._set_feedback(_c("dim", "Not joined — nothing changed"))
             return
         try:
@@ -2222,7 +2236,20 @@ class CosmergonDashboard(App):
             self._set_feedback(_c(self._theme.warn, f"✗ {str(antwort['error'])[:120]}"))
             return
         self._add_log(_c(self._theme.pos, "✓ registered for the tournament"))
-        self._set_feedback(_c(self._theme.pos, "✓ Registered — the round starts on its own"))
+        self._set_feedback(
+            _c(self._theme.pos, "✓ Registered — the round starts on its own"), at_tick=False
+        )
+
+    async def _turnier_warum(self) -> str:
+        """Why play the round — the server's own goal and options (#468 S3), or ""."""
+        try:
+            aushang = await self.agent.tournament_current()
+        except (CosmergonError, RuntimeError) as exc:
+            # The reason is an extra: without it the question is asked as before.
+            self._add_log(_c("dim", f"tournament posting unavailable: {exc}"))
+            return ""
+        teile = [str(aushang[k]) for k in ("goal", "options", "prizes") if aushang.get(k)]
+        return "\n\n".join(teile)
 
     @work
     async def action_pause(self) -> None:
@@ -3114,6 +3141,36 @@ class IdentitySetupScreen(ModalScreen):
 
 
 _TURNIER_ANMELDUNG = re.compile(r"^POST /api/v1/tournaments/([0-9a-fA-F-]{36})/register$")
+
+
+def _fix_bar_keys(state: GameState | None, *, agents: bool = False) -> list[tuple[str, str]]:
+    """The keys the bottom bar shows — only those that do something right now (#468 S2).
+
+    The bar used to be a fixed list: a new agent without a field saw P/F/E/V, none of
+    which could work, and neither the tournament nor the missions. What is available comes
+    from the server's state (``available_actions``, ``next_step``), not from a guess here.
+    The bindings stay: a key that is not shown still answers with its hint. Pause ([X]) is
+    deliberately absent — it is an explicit action and lives in the help.
+    """
+    actions = (state.available_actions if state else None) or {}
+    has_fields = bool(state and state.fields)
+    keys = [("Tab", "Focus"), ("C", "Compass")]
+    if has_fields:
+        keys.append(("P", "Place"))
+    if (actions.get("create_field") or {}).get("available"):
+        keys.append(("F", "Field"))
+    if (actions.get("evolve") or {}).get("eligible_fields"):
+        keys.append(("E", "Evolve"))
+    if has_fields:
+        keys.append(("V", "View"))
+    if actions.get("start_mission"):
+        keys.append(("W", "Missions"))
+    if state and _turnier_id(state.next_step):
+        keys.append(("T", "Tournament"))
+    keys += [("M", "Chat"), ("U", "Upgrade"), ("K", "Key")]
+    if agents:  # agent selector — only with a player token in the config
+        keys.append(("A", "Agents"))
+    return [*keys, ("?", "Help"), ("Q", "Quit")]
 
 
 def _turnier_id(next_step: dict | None) -> str | None:

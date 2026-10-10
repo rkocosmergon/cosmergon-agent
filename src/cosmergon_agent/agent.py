@@ -771,6 +771,22 @@ class CosmergonAgent:
             return {"error": resp.text}
         return resp.json()  # type: ignore[no-any-return]
 
+    async def tournament_current(self) -> dict:
+        """The posting of the current tournament round: start, slots, goal and options.
+
+        ``goal`` (how the round is scored) and ``options`` (how you steer your arena
+        bodies) are the server's own words — show them, do not rewrite them.
+
+        Returns:
+            The ``tournament`` object (empty when none is scheduled), or
+            ``{"error": ...}`` on failure.
+        """
+        resp = await self._request("GET", "/api/v1/tournaments/current")
+        if resp.status_code >= 400:
+            return {"error": resp.text}
+        body = resp.json()
+        return (body.get("data", body) or {}).get("tournament") or {}
+
     async def register_tournament(self, tournament_id: str) -> dict:
         """Take a free slot in a tournament round.
 
