@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     # circular imports, but mypy needs the real class for type checking.
     from cosmergon_agent.agent import CosmergonAgent as CosmergonAgent
 
-from cosmergon_agent.action import ActionResult
+from cosmergon_agent.action import ActionResult, mission_outcome_text, mission_word
 from cosmergon_agent.decider import (
     Decider,
     DeciderError,
@@ -58,4 +58,6 @@ __all__ = [
     "ServerError",
     "WebhookSignatureError",
     "WebhookTimestampError",
+    "mission_outcome_text",
+    "mission_word",
 ]

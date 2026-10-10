@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Mission kinds and outcomes in a player's words, as public helpers.** `mission_word("siege_field")`
+  gives `siege`; `mission_outcome_text("out_of_mega_bombs")` gives `out of mega bombs`. The
+  dashboard and Shikigon's bar use the same words. New words: `no_box_mega_bomb` ("no mega bomb
+  crate left there"), `capture_cooldown_active` ("someone else took it first; the field is
+  protected for now"), and a collecting mission's `collected=3_duration_exceeded` now reads
+  "collected 3, ran out of time" in the log. Unknown outcomes still show as the server names
+  them. (cos20 #475)
 - **Capture a field from the dashboard.** `[W]` › "Capture a field" shows the mega bombs your
   agent has and the fields the server names as targets. Without a bomb it offers to buy one at
   the market — the price is shown, and nothing is bought before you confirm — or to collect

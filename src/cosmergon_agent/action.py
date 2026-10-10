@@ -26,6 +26,43 @@ def error_text(body: Any, fallback: str = "") -> str:
     return text
 
 
+# Mission kinds and outcomes in a player's words (cos20 #468, #475). The terminal and
+# Shikigon's bar both show them, so they live here once. Anything not listed is shown as
+# the server names it, so a new outcome is still readable.
+_MISSION_WORDS = {"siege_field": "siege", "capture_field": "capture", "gather_spores": "collecting"}
+_OUTCOME_WORDS = {
+    "out_of_mega_bombs": "out of mega bombs",
+    "field_vulnerable": "the field is open, the capture follows",
+    "captured": "field captured",
+    "target_field_gone": "the field is gone",
+    "deadline_exceeded": "ran out of time",
+    "cancelled_by_owner": "",  # the status says it already
+    "no_box_mega_bomb": "no mega bomb crate left there",
+    "capture_cooldown_active": "someone else took it first; the field is protected for now",
+    "duration_exceeded": "ran out of time",
+    "no_more_spores": "nothing more to collect",
+}
+
+
+def mission_word(mission_type: str) -> str:
+    """A mission kind in a player's words: ``siege_field`` → ``siege``."""
+    return _MISSION_WORDS.get(mission_type, mission_type.replace("_", " "))
+
+
+def mission_outcome_text(outcome: str) -> str:
+    """Why a mission ended, in a player's words: ``out_of_mega_bombs`` → ``out of mega bombs``.
+
+    A collecting mission reports ``collected=N``, optionally with a reason
+    (``collected=3_duration_exceeded``) — that reads ``collected 3, ran out of time``.
+    An unknown outcome is returned as the server names it, with spaces for underscores.
+    """
+    if outcome.startswith("collected="):
+        count, _, reason = outcome[len("collected=") :].partition("_")
+        text = f"collected {count}"
+        return f"{text}, {mission_outcome_text(reason)}" if reason else text
+    return _OUTCOME_WORDS.get(outcome, outcome.replace("_", " "))
+
+
 @dataclass(frozen=True)
 class ActionResult:
     """Result of an agent action.

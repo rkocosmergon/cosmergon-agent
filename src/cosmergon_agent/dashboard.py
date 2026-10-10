@@ -53,6 +53,7 @@ except ImportError as _exc:
     ) from _exc
 
 from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError, __version__
+from cosmergon_agent.action import mission_outcome_text, mission_word
 from cosmergon_agent.config import (
     is_onboarding_dismissed,
     load_all_agents,
@@ -1565,7 +1566,7 @@ class CosmergonDashboard(App):
             auftrag = {"params": {"mission_type": art, "params": params, "reward_energy": 0.0}}
             self._schedule_pending(
                 _PendingAction(
-                    kind="act", action="start_mission", params=auftrag, display=_MISSION_WORT[art]
+                    kind="act", action="start_mission", params=auftrag, display=mission_word(art)
                 ),
                 retry_after=exc.retry_after,
             )
@@ -4106,21 +4107,12 @@ def _turnier_bild(brief: dict) -> str:
 _MISSION_FRIST = 200
 _SAMMEL_STUECK = 10  # items one collecting mission picks up at most
 
-# Mission kinds and outcomes in a player's words; anything else is shown as the server names it.
-_MISSION_WORT = {"siege_field": "siege", "capture_field": "capture", "gather_spores": "collecting"}
-_MISSION_AUSGANG = {
-    "out_of_mega_bombs": "out of mega bombs",
-    "field_vulnerable": "the field is open, the capture follows",
-    "captured": "field captured",
-    "target_field_gone": "the field is gone",
-    "deadline_exceeded": "ran out of time",
-    "cancelled_by_owner": "",  # the status says it already
-}
+# Mission kinds and outcomes in a player's words: `mission_word` / `mission_outcome_text`
+# (action.py) — one table for the terminal and Shikigon's bar (cos20 #475).
 
 
 def _mission_wort(mission: dict) -> str:
-    art = str(mission.get("mission_type") or "mission")
-    return _MISSION_WORT.get(art, art.replace("_", " "))
+    return mission_word(str(mission.get("mission_type") or "mission"))
 
 
 def _mission_zeile(mission: dict) -> str:
@@ -4133,7 +4125,7 @@ def _mission_zeile(mission: dict) -> str:
 def _mission_ende(mission: dict) -> str:
     """One log line for a mission that ended: what, how, and why if the server says."""
     ausgang = str(mission.get("outcome") or "")
-    grund = _MISSION_AUSGANG.get(ausgang, ausgang.replace("_", " "))
+    grund = mission_outcome_text(ausgang)
     wie = "done" if mission.get("status") == "completed" else str(mission.get("status"))
     text = f"Marauder: {_mission_wort(mission)} {wie}"
     return f"{text} — {grund}" if grund else text
