@@ -2684,25 +2684,28 @@ class CosmergonDashboard(App):
     async def _turnier_kompass_waehlen(self, brief: dict) -> None:
         """[T] while registered: show the tournament and choose its compass."""
         jetzt = brief.get("compass")
-        # Running: exact scores and each Marauder, then when it ends — the title names the
-        # tournament, so the text is short enough to show all of it at 120x30.
-        bild = _turnier_bild(brief)
-        if bild:
-            wartet = _turnier_wartet(brief)
-            kopf = f"{bild}\n\n" + (f"{wartet}\n\n" if wartet else "")
-            kopf += f"Ends {_wann(brief.get('ends_at'))}. "
-        else:
-            kopf = _turnier_zeile(brief) + "\n\n"
-        body = (
-            kopf
-            + (
+        if jetzt:
+            satz = (
                 f"Your Marauders play by the compass {jetzt}, also while this terminal is closed."
-                if jetzt
-                else "No compass yet — choose one, then your Marauders play by themselves, "
+            )
+        else:
+            satz = (
+                "No compass yet — choose one, then your Marauders play by themselves, "
                 "also while this terminal is closed."
             )
-            + " Esc keeps it as it is."
-        )
+        # Running: exact scores and each Marauder, then when it ends — the title names the
+        # tournament, so the text shows all of it at 108x27. With attack, what attack does
+        # takes the place of the closing sentence (two lines, not five).
+        bild = _turnier_bild(brief)
+        lage = _eroberung_lage(self.agent.state)
+        angriff = _turnier_angriff(brief, lage["bomben"] if lage else None)
+        ende = f"Ends {_wann(brief.get('ends_at'))}."
+        if bild and angriff:
+            body = f"{bild}\n\n{angriff} {ende}"
+        elif bild:
+            body = f"{bild}\n\n{ende} {satz} Esc keeps it as it is."
+        else:
+            body = f"{_turnier_zeile(brief)}\n\n{satz} Esc keeps it as it is."
         optionen = [f"{name} — {wirkung}" for name, wirkung in _TURNIER_KOMPASSE]
         titel = f"Tournament #{brief.get('number', '?')} — your compass"
         wahl = await self.push_screen_wait(SelectModal(titel, optionen, body=body, tall=True))
@@ -3689,27 +3692,30 @@ def _ortszeit(iso: object) -> str | None:
 
 # The three tournament compasses a player chooses from (#468) — the server maps them to its
 # mission kinds (attack: capture a field, defend: guard your field, grow: gather spores on
-# your field). Said as it is: with attack the server sends a Marauder only to a field that is
-# open — holed by a siege, or without an owner — and does not siege for the player. At the
-# start no field is open (tournament #269: Root-storm's four Marauders stood idle; in #268
-# the first field opened after 169 minutes), so "your Marauders capture fields" was untrue.
+# your field). attack is a chain (cos20 #471): a field that is open — holed, short of cells,
+# or without an owner — is captured; if none is open, one Marauder sieges with the player's
+# mega bombs; without a bomb, one collects bomb boxes. The server buys nothing. Until #471
+# the server only captured: in tournament #269 Root-storm's four Marauders stood idle,
+# because at the start no field is open (in #268 the first one opened after 169 minutes).
 _TURNIER_KOMPASSE: tuple[tuple[str, str], ...] = (
-    ("attack", "they take open fields; at the start they wait"),
+    ("attack", "they capture fields; a siege uses your mega bombs"),
     ("defend", "they guard your field"),
     ("grow", "they gather spores on your field"),
 )
 
 
-def _turnier_wartet(brief: dict) -> str:
-    """Why nothing moves, when the compass is attack and no living Marauder has a mission."""
-    lebende = [k for k in brief.get("bodies") or [] if isinstance(k, dict) and not k.get("dead")]
-    if brief.get("compass") != "attack" or not lebende:
+def _turnier_angriff(brief: dict, bomben: int | None) -> str:
+    """What attack does, with the mega bombs the player has — shown while the compass is attack.
+
+    ``bomben`` is ``None`` when the state does not name them; the sentence then leaves the
+    number out rather than guess it.
+    """
+    if brief.get("compass") != "attack":
         return ""
-    if any(k.get("on_mission") for k in lebende):
-        return ""
+    habe = "" if bomben is None else f" (you have {bomben})"
     return (
-        "They wait: attack takes fields that are open — holed by a siege, or without an "
-        "owner — and the server has found none yet. grow and defend start at once."
+        "attack: capture an open field — else siege with your mega bombs"
+        f"{habe} — else collect bomb boxes."
     )
 
 

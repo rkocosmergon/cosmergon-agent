@@ -24,12 +24,13 @@
 
 ### Changed
 
-- **The tournament compass "attack" says what it does.** With attack the server sends a
-  Marauder only to a field that is open — holed by a siege, or without an owner — and does not
-  siege for you. At the start of a tournament no field is open, so the Marauders wait. The
-  choice read "your Marauders capture fields"; it now reads "they take open fields; at the
-  start they wait", and `[T]` says why nothing moves while they wait. Found in tournament #269.
-  (cos20 #468, #471)
+- **The tournament compass "attack" says what it does.** attack is a chain: a field that is
+  open is captured; if none is open, one of your Marauders sieges with *your* mega bombs; without
+  a bomb, one collects bomb boxes in the arena. The server buys nothing. The choice read "your
+  Marauders capture fields"; it now reads "they capture fields; a siege uses your mega bombs",
+  and `[T]` names the chain with the mega bombs you have. Needs a server from cos20 #471 on:
+  before it, the server only captured, and at the start of a tournament no field is open — in
+  tournament #269 four Marauders stood idle. (cos20 #468, #471)
 - **The tournament line names vitality and fits the terminal.** It now reads
   `you/best: arena energy 63k/659k · fields 1/9 · vitality 98/1,310` — "arena energy" instead
   of "E" (which is also the balance in the agent panel), and "best" instead of "leader" (the
