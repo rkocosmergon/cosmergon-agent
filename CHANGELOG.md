@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Joining a tournament reported "Compass not set: Rate limited".** The server allows one
+  action per tick and agent; right after joining — or while another program plays the same
+  agent, e.g. Shikigon's brain — the tick is often taken. The tournament compass is now
+  queued for the next tick, like the main compass. Found by the founder on the device.
+  (cos20 #468)
+
 ## [0.25.0] — 2026-10-10
 
 ### Added

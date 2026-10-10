@@ -2394,6 +2394,25 @@ class CosmergonDashboard(App):
         nochmal = f"press {_hk('T')} to try again"
         try:
             r = await self.agent.set_tournament_compass(kompass)
+        except RateLimitError as exc:
+            # One action per tick and agent (server). Right after joining — or while another
+            # program plays the same agent, e.g. Shikigon's brain — the tick is often taken.
+            # Queue it for the next tick, like the main compass (#468, found on the device).
+            self._schedule_pending(
+                _PendingAction(
+                    kind="act",
+                    action="set_tournament_compass",
+                    params={"compass_preset": kompass},
+                    display=f"tournament compass {kompass}",
+                ),
+                retry_after=exc.retry_after,
+            )
+            self._set_feedback(
+                _c("dim", f"⏳ Tournament compass {kompass} — set at the next tick"),
+                at_tick=False,
+                duration=10.0,
+            )
+            return
         except CosmergonError as exc:
             self._set_feedback(_c(warn, f"✗ Compass not set: {exc} — {nochmal}"), duration=10.0)
             return
