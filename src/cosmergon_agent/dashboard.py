@@ -113,8 +113,9 @@ class Theme:
     struct: str  # headers / separators
     data: str  # neutral data text
     # Surfaces and frames (#475) — "#rrggbb" only, they go into the CSS.
-    bg: str = "#1e1e1e"  # screen behind the panels
-    panel: str = "#161616"  # panel surface
+    # One surface for screen and panels: a frame row is drawn on its panel's background,
+    # a second surface level leaves a strip of it outside every frame line.
+    bg: str = "#161616"
     bar: str = "#252525"  # hint bar
     frame_agent: str = "#5d6b8a"
     frame_economy: str = "#7a6390"
@@ -178,8 +179,7 @@ THEMES: dict[str, Theme] = {
         "red",
         "green",
         "green",
-        bg="#0a0f0a",
-        panel="#050805",
+        bg="#050805",
         bar="#0f170f",
         frame_agent="#2f8f2f",
         frame_economy="#2f8f2f",
@@ -208,7 +208,6 @@ THEMES: dict[str, Theme] = {
         "white",
         "white",
         bg="#000000",
-        panel="#000000",
         bar="#1a1a1a",
         frame_agent="#ffffff",
         frame_economy="#ffffff",
@@ -255,7 +254,6 @@ def _omarchy_theme(path: Path | None = None) -> Theme | None:
     green, red, yellow = color("green"), color("red"), color("yellow")
     if not all((bg, fg, accent, green, red, yellow)):
         return None
-    panel = color("dark_background", bg)
     return Theme(
         name="omarchy",
         cmd=fg,
@@ -265,11 +263,10 @@ def _omarchy_theme(path: Path | None = None) -> Theme | None:
         struct=fg,
         data=color("bright_foreground", fg),
         bg=bg,
-        panel=panel,
         bar=color("lighter_background", bg),
-        frame_agent=_frame_color(color("blue", accent), panel),
-        frame_economy=_frame_color(color("magenta", accent), panel),
-        frame_log=_frame_color(color("cyan", accent), panel),
+        frame_agent=_frame_color(color("blue", accent), bg),
+        frame_economy=_frame_color(color("magenta", accent), bg),
+        frame_log=_frame_color(color("cyan", accent), bg),
         focus=accent,
     )
 
@@ -1251,27 +1248,27 @@ class CosmergonDashboard(App):
     }
 
     #agent-panel, #economy-panel, #log-panel {
-        background: $csg-panel;
+        background: $csg-bg;
         padding: 0 1;
         overflow: hidden hidden;
         border-title-style: bold;
+        border-title-color: $csg-title;
     }
 
     #agent-panel {
         width: 1fr;
+        height: 100%;
         border: solid $csg-frame-agent;
-        border-title-color: $csg-frame-agent;
     }
 
     #economy-panel {
         width: 1fr;
+        height: 100%;
         border: solid $csg-frame-economy;
-        border-title-color: $csg-frame-economy;
     }
 
     #log-panel {
         border: solid $csg-frame-log;
-        border-title-color: $csg-frame-log;
         border-subtitle-color: $csg-frame-log;
         height: 1fr;
         min-height: 6;
@@ -1375,8 +1372,8 @@ class CosmergonDashboard(App):
         return {
             **super().get_css_variables(),
             "csg-bg": t.bg,
-            "csg-panel": t.panel,
             "csg-bar": t.bar,
+            "csg-title": t.struct,
             "csg-frame-agent": t.frame_agent,
             "csg-frame-economy": t.frame_economy,
             "csg-frame-log": t.frame_log,
@@ -1384,7 +1381,7 @@ class CosmergonDashboard(App):
             # Textual's own Screen rule reads $background and beats the Screen rule above.
             "background": t.bg,
             "accent": t.focus,
-            "surface": t.panel,
+            "surface": t.bg,
         }
 
     def on_mount(self) -> None:
