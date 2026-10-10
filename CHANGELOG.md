@@ -24,6 +24,12 @@
 
 ### Changed
 
+- **The tournament compass "attack" says what it does.** With attack the server sends a
+  Marauder only to a field that is open — holed by a siege, or without an owner — and does not
+  siege for you. At the start of a tournament no field is open, so the Marauders wait. The
+  choice read "your Marauders capture fields"; it now reads "they take open fields; at the
+  start they wait", and `[T]` says why nothing moves while they wait. Found in tournament #269.
+  (cos20 #468, #471)
 - **The tournament line names vitality and fits the terminal.** It now reads
   `you/best: arena energy 63k/659k · fields 1/9 · vitality 98/1,310` — "arena energy" instead
   of "E" (which is also the balance in the agent panel), and "best" instead of "leader" (the

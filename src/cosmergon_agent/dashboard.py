@@ -2688,7 +2688,9 @@ class CosmergonDashboard(App):
         # tournament, so the text is short enough to show all of it at 120x30.
         bild = _turnier_bild(brief)
         if bild:
-            kopf = f"{bild}\n\nEnds {_wann(brief.get('ends_at'))}. "
+            wartet = _turnier_wartet(brief)
+            kopf = f"{bild}\n\n" + (f"{wartet}\n\n" if wartet else "")
+            kopf += f"Ends {_wann(brief.get('ends_at'))}. "
         else:
             kopf = _turnier_zeile(brief) + "\n\n"
         body = (
@@ -3686,12 +3688,30 @@ def _ortszeit(iso: object) -> str | None:
 
 
 # The three tournament compasses a player chooses from (#468) — the server maps them to its
-# mission kinds (attack: capture fields, defend: guard your fields, grow: gather spores).
+# mission kinds (attack: capture a field, defend: guard your field, grow: gather spores on
+# your field). Said as it is: with attack the server sends a Marauder only to a field that is
+# open — holed by a siege, or without an owner — and does not siege for the player. At the
+# start no field is open (tournament #269: Root-storm's four Marauders stood idle; in #268
+# the first field opened after 169 minutes), so "your Marauders capture fields" was untrue.
 _TURNIER_KOMPASSE: tuple[tuple[str, str], ...] = (
-    ("attack", "your Marauders capture fields"),
-    ("defend", "they guard your fields"),
-    ("grow", "they gather spores"),
+    ("attack", "they take open fields; at the start they wait"),
+    ("defend", "they guard your field"),
+    ("grow", "they gather spores on your field"),
 )
+
+
+def _turnier_wartet(brief: dict) -> str:
+    """Why nothing moves, when the compass is attack and no living Marauder has a mission."""
+    lebende = [k for k in brief.get("bodies") or [] if isinstance(k, dict) and not k.get("dead")]
+    if brief.get("compass") != "attack" or not lebende:
+        return ""
+    if any(k.get("on_mission") for k in lebende):
+        return ""
+    return (
+        "They wait: attack takes fields that are open — holed by a siege, or without an "
+        "owner — and the server has found none yet. grow and defend start at once."
+    )
+
 
 # How the server scores a tournament, in a player's words (categories of `prizes`).
 _PREIS_KATEGORIEN = {
