@@ -2058,7 +2058,11 @@ class CosmergonDashboard(App):
             self._add_log(_c(self._theme.warn, f"✗ evolve: {exc}"))
             self._set_feedback(_c(self._theme.warn, f"✗ Evolve failed: {exc}"))
 
+    @work
     async def action_upgrade(self) -> None:
+        """[U] — upgrade. Runs as a worker: the tier dialog waits for an answer, and
+        without one Textual raises NoActiveWorker — the key crashed the dashboard for
+        every anonymous free agent (found on the device, cos20 #468)."""
         state = self.agent._state
         tier = state.subscription_tier if state else "free"
         agent_type = state.agent_type if state else ""
