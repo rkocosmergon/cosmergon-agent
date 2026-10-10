@@ -1190,21 +1190,26 @@ class CosmergonDashboard(App):
 
     @work
     async def action_marauder_menu(self) -> None:
-        """[W] — Marauder action sub-menu: missions, bus, market, combat."""
+        """[W] — Marauder menu: bus, market, combat status.
+
+        "Start mission" is deliberately not offered here. Every mission type needs
+        parameters (own field, target field, target marauder — the server refuses with
+        "missing param"), and this menu sent only the type; its list also read the wrong
+        keys and showed "?" for every entry (found on the device, cos20 #468). Missions
+        come back when the dashboard can pick a field and a target.
+        """
         options = [
-            "Mission starten",
-            "Bus: Abfahrten",
-            "Bus: Ticket kaufen",
-            "Markt: Listings",
-            "Markt: Item verkaufen",
-            "Combat: HP-Status",
-            "Bus: Passagier-Status",
+            "Bus: departures",
+            "Bus: buy ticket",
+            "Market: listings",
+            "Market: sell item",
+            "Combat: HP status",
+            "Bus: passenger status",
         ]
-        idx = await self.push_screen_wait(SelectModal("Marauder-Aktionen", options))
+        idx = await self.push_screen_wait(SelectModal("Marauder", options))
         if idx is None:
             return
         handlers = [
-            self._mar_start_mission,
             self._mar_bus_departures,
             self._mar_buy_ticket,
             self._mar_market_listings,
@@ -1217,37 +1222,25 @@ class CosmergonDashboard(App):
         except Exception as e:
             self._set_feedback(_c(self._theme.warn, f"✗ {e}"))
 
-    async def _mar_start_mission(self) -> None:
-        templates = await self.agent.list_mission_templates()
-        if not templates:
-            self._set_feedback("Keine Mission-Templates")
-            return
-        names = [t.get("mission_type", t.get("name", "?")) for t in templates]
-        i = await self.push_screen_wait(SelectModal("Mission wählen", names))
-        if i is None:
-            return
-        await self.agent.start_mission(names[i])
-        self._set_feedback(_c(self._theme.pos, f"✓ Mission: {names[i]}"))
-
     async def _mar_bus_departures(self) -> None:
         cube = self._first_cube_id()
         if not cube:
-            self._set_feedback("Kein Cube bekannt")
+            self._set_feedback("No cube known yet")
             return
         deps = await self.agent.bus_departures(cube)
         for d in deps:
             dest = d.get("dest_cube_name", "?")
-            self._add_log(f"🚌 → {dest} · ETA {d.get('eta_ticks', '?')} Ticks")
-        self._set_feedback(f"{len(deps)} Abfahrt(en)")
+            self._add_log(f"🚌 → {dest} · ETA {d.get('eta_ticks', '?')} ticks")
+        self._set_feedback(f"{len(deps)} departure(s) — see log")
 
     async def _mar_buy_ticket(self) -> None:
         cube = self._first_cube_id()
         deps = await self.agent.bus_departures(cube) if cube else []
         if not deps:
-            self._set_feedback("Keine Linien")
+            self._set_feedback("No bus lines from here")
             return
         names = [d.get("dest_cube_name", d.get("dest_cube_id", "?")) for d in deps]
-        i = await self.push_screen_wait(SelectModal("Ziel wählen", names))
+        i = await self.push_screen_wait(SelectModal("Choose destination", names))
         if i is None:
             return
         r = await self.agent.buy_bus_ticket(deps[i].get("dest_cube_id"))
@@ -1257,32 +1250,32 @@ class CosmergonDashboard(App):
         listings = await self.agent.market_listings()
         for ml in listings[:8]:
             self._add_log(f"🏪 {ml.get('item_type', '?')} · {ml.get('price_energy', '?')} E")
-        self._set_feedback(f"{len(listings)} Listing(s)")
+        self._set_feedback(f"{len(listings)} listing(s) — see log")
 
     async def _mar_sell_item(self) -> None:
         items = list(self._MARAUDER_SELL_PRICE.keys())
-        i = await self.push_screen_wait(SelectModal("Verkaufen — Item", items))
+        i = await self.push_screen_wait(SelectModal("Sell — item", items))
         if i is None:
             return
         item = items[i]
         r = await self.agent.list_item(item, self._MARAUDER_SELL_PRICE[item])
         if r.get("error") or r.get("detail"):
-            reason = r.get("detail", "Verkauf fehlgeschlagen")
+            reason = r.get("detail", "Sale failed")
             self._set_feedback(_c(self._theme.warn, f"✗ {reason}"))
         else:
-            self._set_feedback(_c(self._theme.pos, f"✓ {item} gelistet"))
+            self._set_feedback(_c(self._theme.pos, f"✓ {item} listed"))
 
     async def _mar_hp_status(self) -> None:
         hp = await self.agent.hp_status()
-        alive = "tot" if hp.get("dead") else "lebt"
+        alive = "dead" if hp.get("dead") else "alive"
         self._set_feedback(f"HP {hp.get('marauder_hp', '?')} · {alive}")
 
     async def _mar_passenger_status(self) -> None:
         st = await self.agent.bus_passenger_status()
         if st:
-            self._set_feedback("Im Bus → " + str(st.get("to_cube_id", "?"))[:8])
+            self._set_feedback("On the bus → " + str(st.get("to_cube_id", "?"))[:8])
         else:
-            self._set_feedback("Nicht im Bus")
+            self._set_feedback("Not on a bus")
 
     def _register_agent_handlers(self) -> None:
         @self.agent.on_tick
@@ -3161,7 +3154,8 @@ def _fix_bar_keys(state: GameState | None, *, agents: bool = False) -> list[tupl
     which could work, and neither the tournament nor the missions. What is available comes
     from the server's state (``available_actions``, ``next_step``), not from a guess here.
     The bindings stay: a key that is not shown still answers with its hint. Pause ([X]) is
-    deliberately absent — it is an explicit action and lives in the help.
+    deliberately absent — it is an explicit action and lives in the help. [W] carries the
+    name of the menu it opens (bus, market, combat status).
     """
     actions = (state.available_actions if state else None) or {}
     has_fields = bool(state and state.fields)
@@ -3174,11 +3168,9 @@ def _fix_bar_keys(state: GameState | None, *, agents: bool = False) -> list[tupl
         keys.append(("E", "Evolve"))
     if has_fields:
         keys.append(("V", "View"))
-    if actions.get("start_mission"):
-        keys.append(("W", "Missions"))
     if state and _turnier_id(state.next_step):
         keys.append(("T", "Tournament"))
-    keys += [("M", "Chat"), ("U", "Upgrade"), ("K", "Key")]
+    keys += [("W", "Marauder"), ("M", "Chat"), ("U", "Upgrade"), ("K", "Key")]
     if agents:  # agent selector — only with a player token in the config
         keys.append(("A", "Agents"))
     return [*keys, ("?", "Help"), ("Q", "Quit")]
@@ -3326,7 +3318,7 @@ class OnboardingModal(ModalScreen):
                 zeilen.append(f"  {_c(g, _hk('T'))}  Join the tournament")
             zeilen.append("")
         zeilen.append(f"  {_c(g, _hk('C'))}  Set compass  — give your agent a direction")
-        zeilen.append(f"  {_c(g, _hk('W'))}  Marauder     — missions, bus, market")
+        zeilen.append(f"  {_c(g, _hk('W'))}  Marauder     — bus, market, combat status")
         zeilen.append(f"  {_c(g, _hk('?'))}  Help")
         return "\n".join(zeilen)
 

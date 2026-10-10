@@ -9,6 +9,16 @@
   0.24.0). The text now scrolls (↑/↓) inside the dialog and the choices stay visible at every
   size. The dialog shows the goal and the prizes; the posting's `options` (action names and
   routes for API agents) is no longer shown there. (cos20 #468)
+- **[W] is called "Marauder" in the key bar, like the menu it opens** — the bar said
+  "Missions". The menu is in English now.
+
+### Removed
+
+- **"Start mission" in the dashboard's Marauder menu.** It could never work: the list read the
+  wrong keys and showed "?" for every mission, and every mission type needs parameters (a
+  field, a target) the menu did not ask for — the server answers "missing param". Missions are
+  unchanged for code (`agent.start_mission(type, params)`); the dashboard gets them back when
+  it can pick a field and a target. (cos20 #468)
 
 ## [0.24.0] — 2026-10-10
 
