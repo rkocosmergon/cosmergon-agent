@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-10-10
+
 ### Added
 
 - **`agent.tournament_current()`** — the posting of the current round, including the server's
