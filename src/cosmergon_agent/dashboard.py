@@ -1188,6 +1188,8 @@ class CosmergonDashboard(App):
         self._last_tick: int = -1
         self._moves_from_tick: int = -1  # tick at connect — older actions are not news (#468)
         self._moves_seen: deque[str] = deque(maxlen=200)  # event ids already in the log
+        self._mission: dict | None = None  # the Marauder's running mission (agent panel)
+        self._missions_known: dict[str, str] | None = None  # mission id → status last seen
         self._last_situation_log: str = ""  # dedup system messages
         self._panel_cache: dict[str, str] = {}  # widget-id → last rendered content
         self._auth_error: str = ""  # set on AuthenticationError — shown in hint-bar
@@ -1232,15 +1234,16 @@ class CosmergonDashboard(App):
 
     @work
     async def action_marauder_menu(self) -> None:
-        """[W] — Marauder menu: bus, market, combat status.
+        """[W] — Marauder menu: capture a field, bus, market, combat status.
 
-        "Start mission" is deliberately not offered here. Every mission type needs
+        A bare "Start mission" is deliberately not offered here. Every mission type needs
         parameters (own field, target field, target marauder — the server refuses with
-        "missing param"), and this menu sent only the type; its list also read the wrong
-        keys and showed "?" for every entry (found on the device, cos20 #468). Missions
-        come back when the dashboard can pick a field and a target.
+        "missing param"), and the old entry sent only the type (found on the device, cos20
+        #468). "Capture a field" is the first mission that is back: the server names the
+        targets and what is missing, so the dashboard can ask for both.
         """
         options = [
+            "Capture a field",
             "Bus: departures",
             "Bus: buy ticket",
             "Market: listings",
@@ -1252,6 +1255,7 @@ class CosmergonDashboard(App):
         if idx is None:
             return
         handlers = [
+            self._mar_capture_field,
             self._mar_bus_departures,
             self._mar_buy_ticket,
             self._mar_market_listings,
@@ -1263,6 +1267,136 @@ class CosmergonDashboard(App):
             await handlers[idx]()
         except Exception as e:
             self._set_feedback(_c(self._theme.warn, f"✗ {e}"))
+
+    async def _mar_capture_field(self) -> None:
+        """Capture a field: say what is missing, then let the player pick (cos20 #468).
+
+        The server's chain is siege (mega bombs tear holes) → capture (the server starts it
+        itself). The dialog shows the bombs the agent has and the targets the server names;
+        without a bomb it offers to buy one or to collect them.
+        """
+        lage = _eroberung_lage(self.agent.state)
+        if lage is None:
+            self._set_feedback(_c("dim", "The server offers this agent no missions right now"))
+            return
+        if not lage["frei"]:
+            self._set_feedback(_c("dim", self._marauder_nicht_frei(lage)), duration=8.0)
+            return
+        preis = await self._bomben_preis() if lage["bomben"] < 1 else None
+        optionen, griffe = _eroberung_optionen(lage, preis)
+        if not optionen:
+            self._set_feedback(_c("dim", "No field in reach and no mega bomb to get right now"))
+            return
+        wahl = await self.push_screen_wait(
+            SelectModal("Capture a field", optionen, body=_eroberung_text(lage), tall=True)
+        )
+        if wahl is None:
+            self._set_feedback(_c("dim", "Nothing started"))
+            return
+        art, wert = griffe[wahl]
+        if art == "kaufen":
+            await self._bombe_kaufen(float(wert))
+        elif art == "sammeln":
+            await self._mission_starten(
+                "gather_spores",
+                {"field_id": wert, "max_items": _SAMMEL_STUECK, "duration_ticks": _MISSION_FRIST},
+                "Collecting started",
+            )
+        elif lage["bomben"] < 1 and not wert.get("is_vulnerable"):
+            hinweis = f"That field needs a mega bomb first — {_hk('W')} to buy or collect one"
+            self._set_feedback(_c(self._theme.warn, hinweis), duration=8.0)
+        else:
+            await self._mission_starten(
+                "siege_field",
+                {"target_field_id": wert["field_id"], "deadline_ticks": _MISSION_FRIST},
+                "Siege started — the server captures the field once it is open",
+            )
+
+    def _marauder_nicht_frei(self, lage: dict) -> str:
+        """Why no mission can start now, in a sentence."""
+        if lage["marauder"] is None:
+            return "Your agent has no Marauder in the main world yet"
+        was = _mission_zeile(self._mission) if self._mission else str(lage["marauder"])
+        return f"Your Marauder is busy ({was}) — one mission at a time"
+
+    async def _bomben_preis(self) -> float | None:
+        """The cheapest mega bomb on the market right now, or ``None`` if there is none."""
+        try:
+            anzeigen = await self.agent.market_listings(item_type="mega_bomb")
+        except (CosmergonError, RuntimeError, ValueError):
+            return None
+        preise = [
+            float(a["price_energy"])
+            for a in anzeigen
+            if isinstance(a, dict) and a.get("price_energy") is not None
+        ]
+        return min(preise, default=None)
+
+    async def _bombe_kaufen(self, preis: float) -> None:
+        """Buy one mega bomb — only after the player has seen the price and said yes."""
+        warn = self._theme.warn
+        state = self.agent.state
+        energie = float(state.energy) if state else 0.0
+        if preis > energie:
+            text = f"A mega bomb costs {preis:,.0f} E — you have {energie:,.0f} E"
+            self._set_feedback(_c(warn, text), duration=8.0)
+            return
+        body = (
+            f"The cheapest mega bomb on the market costs {preis:,.0f} E.\n"
+            f"Your energy: {energie:,.0f} E now, {energie - preis:,.0f} E after.\n"
+            "Energy is in-game only. Esc buys nothing."
+        )
+        wahl = await self.push_screen_wait(
+            SelectModal("Buy a mega bomb?", [f"Buy for {preis:,.0f} E", "Do not buy"], body=body)
+        )
+        if wahl != 0:
+            self._set_feedback(_c("dim", "Nothing bought"))
+            return
+        kauf = {"item_type": "mega_bomb", "max_price": preis}
+        try:
+            r = await self.agent.act("market_buy", **kauf)
+        except RateLimitError as exc:  # one action per tick and agent — queue it
+            self._schedule_pending(
+                _PendingAction(
+                    kind="act", action="market_buy", params=kauf, display="buy mega bomb"
+                ),
+                retry_after=exc.retry_after,
+            )
+            self._set_feedback(_c("dim", "⏳ Mega bomb — bought at the next tick"), duration=10.0)
+            return
+        except CosmergonError as exc:
+            self._set_feedback(_c(warn, f"✗ Not bought: {exc}"), duration=10.0)
+            return
+        if not r.success:
+            self._set_feedback(_c(warn, f"✗ Not bought: {r.error_message}"), duration=10.0)
+            return
+        bezahlt = float(((r.data or {}).get("result") or {}).get("price") or preis)
+        self._add_log(_c(self._theme.pos, f"✓ bought a mega bomb (-{bezahlt:,.0f} E)"))
+        fertig = f"✓ Mega bomb bought — {_hk('W')} shows it after the next tick"
+        self._set_feedback(_c(self._theme.pos, fertig), at_tick=False, duration=10.0)
+
+    async def _mission_starten(self, art: str, params: dict, erfolg: str) -> None:
+        """Start a mission of the Marauder and say what happened — also when the tick is taken."""
+        warn = self._theme.warn
+        try:
+            r = await self.agent.start_mission(art, params)
+        except RateLimitError as exc:  # one action per tick and agent — queue it
+            auftrag = {"params": {"mission_type": art, "params": params, "reward_energy": 0.0}}
+            self._schedule_pending(
+                _PendingAction(
+                    kind="act", action="start_mission", params=auftrag, display=_MISSION_WORT[art]
+                ),
+                retry_after=exc.retry_after,
+            )
+            self._set_feedback(_c("dim", "⏳ Mission — started at the next tick"), duration=10.0)
+            return
+        except CosmergonError as exc:
+            self._set_feedback(_c(warn, f"✗ Not started: {exc}"), duration=10.0)
+            return
+        if not r.success:
+            self._set_feedback(_c(warn, f"✗ Not started: {r.error_message}"), duration=10.0)
+            return
+        self._set_feedback(_c(self._theme.pos, f"✓ {erfolg}"), at_tick=False, duration=10.0)
 
     async def _mar_bus_departures(self) -> None:
         cube = self._first_cube_id()
@@ -1338,6 +1472,7 @@ class CosmergonDashboard(App):
                     self._compass_ever_set = True
                 self._add_log(_c(self._theme.pos, f"● Connected  {state.energy:,.0f} E"))
                 self._moves_from_tick = state.tick
+                await self._follow_missions()
                 if not self._identity_prompted and _is_auto_name(state.agent_name):
                     self._identity_prompted = True
                     self._show_identity_setup()
@@ -1354,6 +1489,7 @@ class CosmergonDashboard(App):
             self._log_situation(state)
             await self._fire_pending()
             await self._log_program_moves()
+            await self._follow_missions()
             # Refresh chat messages each tick (1 extra HTTP call / ~60s — non-fatal)
             try:
                 self._messages = await self.agent.get_messages(limit=20)
@@ -1517,6 +1653,46 @@ class CosmergonDashboard(App):
         kosten = _cost_str(_cost_of(data))
         self._add_log(_c(self._theme.data, f"[tick {tick}] program: {action}{kosten}"))
 
+    async def _follow_missions(self) -> None:
+        """Keep the Marauder's running mission for the panel; log each start and end (#468).
+
+        A conquest takes hours and runs on the server: without this the player starts it
+        and sees nothing of it. One extra HTTP call per tick; non-fatal. What was there
+        before the dashboard connected is not news — the first reading only remembers.
+
+        Only missions of the main-world Marauder (``body == "main"``): in a tournament the
+        agent has more bodies, and their missions are in the same list — the \\[T] dialog
+        shows those. A server that does not name the body yet is not followed at all,
+        rather than showing a tournament mission as the main Marauder's.
+        """
+        try:
+            alle = await self.agent.missions()
+        except Exception:
+            logger.debug("missions unavailable", exc_info=True)
+            return
+        if alle is None:
+            return
+        missionen = [m for m in alle if isinstance(m, dict) and m.get("body") == "main"]
+        neu = self._missions_known is not None
+        bekannt = self._missions_known or {}
+        for mission in reversed(missionen):  # the server sends the newest first
+            kennung, status = str(mission.get("mission_id")), str(mission.get("status"))
+            vorher = bekannt.get(kennung)
+            bekannt[kennung] = status
+            if not neu or vorher == status:
+                continue
+            if status in ("pending", "active"):
+                if vorher is None:
+                    start = f"▶ Marauder: {_mission_wort(mission)} started"
+                    self._add_log(_c(self._theme.data, start))
+            else:
+                farbe = self._theme.pos if status == "completed" else self._theme.warn
+                self._add_log(_c(farbe, _mission_ende(mission)))
+        self._missions_known = bekannt
+        self._mission = next(
+            (m for m in missionen if m.get("status") in ("pending", "active")), None
+        )
+
     def _own_move(self, action: str, tick: int) -> bool:
         """True, once, for an action this dashboard sent itself.
 
@@ -1653,7 +1829,11 @@ class CosmergonDashboard(App):
             )
             tier_line = f"T{state.ranking.player_tier} {state.ranking.tier_name}{score_part}"
             lines.append(_c(t.data, tier_line))
-        lines.append("")
+        # What the main-world Marauder does, while a mission runs (#468) — in the place of
+        # the blank line, the panel has a fixed height.
+        lines.append(
+            _c(t.data, f"Marauder: {_mission_zeile(self._mission)}") if self._mission else ""
+        )
 
         # Compass — CTA lives in hint-bar, agent panel shows current state only
         compass_label = _COMPASS_DISPLAY.get(self._compass_preset, self._compass_preset)
@@ -3700,6 +3880,116 @@ def _turnier_bild(brief: dict) -> str:
     if koerper:
         zeilen += ["", *(_marauder_zeile(k) for k in koerper)]
     return "\n".join(zeilen)
+
+
+# --- Capture a field (cos20 #468) ---------------------------------------------------------------
+
+# Time limit of a mission started here, in ticks. The schemas in the state allow 50 to 2000
+# for a siege and 50 to 1000 for collecting; 200 leaves hours for the walk and frees the Marauder
+# if the target cannot be reached.
+_MISSION_FRIST = 200
+_SAMMEL_STUECK = 10  # items one collecting mission picks up at most
+
+# Mission kinds and outcomes in a player's words; anything else is shown as the server names it.
+_MISSION_WORT = {"siege_field": "siege", "capture_field": "capture", "gather_spores": "collecting"}
+_MISSION_AUSGANG = {
+    "out_of_mega_bombs": "out of mega bombs",
+    "field_vulnerable": "the field is open, the capture follows",
+    "captured": "field captured",
+    "target_field_gone": "the field is gone",
+    "deadline_exceeded": "ran out of time",
+    "cancelled_by_owner": "",  # the status says it already
+}
+
+
+def _mission_wort(mission: dict) -> str:
+    art = str(mission.get("mission_type") or "mission")
+    return _MISSION_WORT.get(art, art.replace("_", " "))
+
+
+def _mission_zeile(mission: dict) -> str:
+    """The running mission for the agent panel: ``siege — traveling``."""
+    schritt = str(mission.get("current_step") or mission.get("status") or "")
+    schritt = schritt.split(":", 1)[0].replace("_", " ")
+    return f"{_mission_wort(mission)} — {schritt}" if schritt else _mission_wort(mission)
+
+
+def _mission_ende(mission: dict) -> str:
+    """One log line for a mission that ended: what, how, and why if the server says."""
+    ausgang = str(mission.get("outcome") or "")
+    grund = _MISSION_AUSGANG.get(ausgang, ausgang.replace("_", " "))
+    wie = "done" if mission.get("status") == "completed" else str(mission.get("status"))
+    text = f"Marauder: {_mission_wort(mission)} {wie}"
+    return f"{text} — {grund}" if grund else text
+
+
+def _eroberung_lage(state: GameState | None) -> dict | None:
+    """What the server says about capturing a field — ``None`` if it offers no missions.
+
+    Read from ``available_actions`` of the state: whether the Marauder is free, the mega
+    bombs the agent has, up to three target fields and where bomb boxes lie.
+    """
+    aktionen = state.available_actions if state else {}
+    start = aktionen.get("start_mission")
+    if not isinstance(start, dict):
+        return None
+    claim = aktionen.get("claim_field")
+    if not isinstance(claim, dict):
+        claim = {}
+    ziele = [z for z in claim.get("targets") or [] if isinstance(z, dict) and z.get("field_id")]
+    beute = start.get("richest_loot_field")
+    return {
+        "frei": bool(start.get("available")),
+        "marauder": start.get("marauder_state"),
+        "bomben": int(start.get("mega_bombs") or 0),
+        "schwelle": start.get("holes_threshold"),
+        "halten": claim.get("claim_ticks"),
+        "ziele": ziele[:3],
+        "beute": beute.get("field_id") if isinstance(beute, dict) else None,
+    }
+
+
+def _ziel_zeile(ziel: dict, bomben: int) -> str:
+    """One target field: its facts, and whether it can be taken as things stand."""
+    zeile = (
+        f"Field {str(ziel['field_id'])[:8]} · tier {int(ziel.get('tier') or 0)} · "
+        f"{int(ziel.get('active_cells') or 0):,} cells · {int(ziel.get('hole_count') or 0)} holes"
+    )
+    if ziel.get("is_vulnerable"):
+        return zeile + " — open, no bomb needed"
+    return zeile + (" — needs a mega bomb" if bomben < 1 else "")
+
+
+def _eroberung_optionen(lage: dict, preis: float | None) -> tuple[list[str], list[tuple]]:
+    """The choices of the dialog and what each one does: target, buy, collect."""
+    optionen = [_ziel_zeile(z, lage["bomben"]) for z in lage["ziele"]]
+    griffe: list[tuple] = [("ziel", z) for z in lage["ziele"]]
+    if lage["bomben"] < 1:
+        if preis is not None:
+            optionen.append(f"Buy a mega bomb — {preis:,.0f} E (asks before it pays)")
+            griffe.append(("kaufen", preis))
+        if lage["beute"]:
+            optionen.append("Collect bomb boxes — free, about half an hour, may bring none")
+            griffe.append(("sammeln", lage["beute"]))
+    return optionen, griffe
+
+
+def _eroberung_text(lage: dict) -> str:
+    """How capturing works and what the agent has — numbers from the server, none invented."""
+    loecher = f"more than {lage['schwelle']} holes" if lage["schwelle"] else "enough holes"
+    halten = f" for about {lage['halten']} ticks" if lage["halten"] else ""
+    wie = (
+        "How it works: your Marauder walks to the field and sieges it with mega bombs until "
+        f"the field has {loecher}. The server then captures it for you; your Marauder holds "
+        f"it{halten}. Your main world keeps running."
+    )
+    bomben = lage["bomben"]
+    habe = f"You have {bomben} mega bomb{'s' if bomben != 1 else ''}."
+    if bomben < 1:
+        habe += " A siege needs at least one, unless the field is open already."
+    if not lage["ziele"]:
+        habe += " The server names no field in reach right now."
+    return f"{wie}\n\n{habe}"
 
 
 _QUIT_TITLE = "Before you go: your agent's key ends {when} (local time)"

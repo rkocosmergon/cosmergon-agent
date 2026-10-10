@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Capture a field from the dashboard.** `[W]` › "Capture a field" shows the mega bombs your
+  agent has and the fields the server names as targets. Without a bomb it offers to buy one at
+  the market — the price is shown, and nothing is bought before you confirm — or to collect
+  bomb boxes (free, slower, not certain). Choosing a target starts the siege; the server
+  captures the field afterwards. While a mission runs, the agent panel shows what your
+  main-world Marauder does, and the log says when a mission starts and how it ends — with the
+  server's reason ("out of mega bombs") from servers that send it. New: `agent.missions()`,
+  `agent.market_listings(item_type=...)`. Asked for by the founder on the device. (cos20 #468)
 - **The log shows what a program does with your agent.** Until now the dashboard log listed
   only what you did in the dashboard: with Shikigon's brain or your own code playing the agent,
   it stayed empty and the agent looked idle. Each tick the dashboard now reads the agent's

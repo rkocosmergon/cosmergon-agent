@@ -469,6 +469,23 @@ class CosmergonAgent:
         """Cancel the agent's currently active mission. Marauder → recovery."""
         return await self.act("cancel_mission")
 
+    async def missions(self) -> list[dict] | None:
+        """This agent's missions, newest first (at most 50), running and ended.
+
+        Each entry: ``mission_id``, ``mission_type``, ``status`` (pending, active, completed,
+        failed, cancelled), ``current_step``, ``progress``, ``deadline_tick``, ``params`` and
+        — from servers that send it — ``outcome``: the result of a completed mission or the
+        reason of a failed one (``out_of_mega_bombs``).
+
+        Returns:
+            The list, or ``None`` when the server could not be read — an agent that has
+            never started a mission gets ``[]``.
+        """
+        resp = await self._request("GET", "/api/v1/agent-missions")
+        if resp.status_code >= 400:
+            return None
+        return list(resp.json().get("missions") or [])
+
     async def list_mission_templates(self) -> list[dict]:
         """Fetch the 11 Mission-Templates (M01..M11) with params-schema + affinity."""
         resp = await self._request("GET", "/api/v1/agent-missions/templates")
@@ -531,9 +548,14 @@ class CosmergonAgent:
 
     # ── Marketplace ───────────────────────────────────────────────────────────
 
-    async def market_listings(self) -> list[dict]:
-        """List active marketplace listings (public)."""
-        resp = await self._request("GET", "/api/v1/market/listings")
+    async def market_listings(self, item_type: str | None = None) -> list[dict]:
+        """List active marketplace listings (public), newest first, at most 100.
+
+        Args:
+            item_type: Only this kind of item, e.g. ``"mega_bomb"``.
+        """
+        params = {"item_type": item_type} if item_type else None
+        resp = await self._request("GET", "/api/v1/market/listings", params=params)
         return resp.json()  # type: ignore[no-any-return]
 
     async def list_item(self, item_type: str, price_energy: float) -> dict:
