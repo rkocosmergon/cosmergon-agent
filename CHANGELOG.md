@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-10-10
+
 ### Added
 
 - **The dashboard says when your agent is lost to you.** The status bar shows, in your local
