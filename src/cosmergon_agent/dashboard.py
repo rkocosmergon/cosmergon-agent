@@ -460,7 +460,11 @@ class SelectModal(ModalScreen):
     SelectModal.-wide > #dialog {
         width: 76;
         max-width: 95%;
-        max-height: 85%;
+        max-height: 95%;
+    }
+    SelectModal #body {
+        height: auto;
+        max-height: 8;
         border: solid $accent;
         background: $surface;
         padding: 1 2;
@@ -482,16 +486,23 @@ class SelectModal(ModalScreen):
             yield Static(f"[bold]{self._title}[/bold]", markup=True)
             if self._body:
                 yield Static("")
-                yield Static(self._body, markup=False)
+                # Scrollable and capped: the choices below must stay visible. On the first
+                # device run the text pushed "[2] Cancel" out of the dialog (#468).
+                with VerticalScroll(id="body"):
+                    yield Static(self._body, markup=False)
             yield Label("")
             for i, opt in enumerate(self._options):
                 yield Label(f"[cyan][{i + 1}][/cyan] {opt}")
             yield Label("")
-            yield Label("[dim][1-9] select  \\[Esc] cancel[/dim]")
+            mehr = "  [↑/↓] scroll" if self._body else ""
+            yield Label(f"[dim][1-9] select  \\[Esc] cancel{mehr}[/dim]")
 
     def on_key(self, event: Any) -> None:
         if event.key == "escape":
             self.dismiss(None)
+        elif event.key in ("up", "down") and self._body:
+            body = self.query_one("#body", VerticalScroll)
+            body.scroll_relative(y=-1 if event.key == "up" else 1, animate=False)
         elif event.key.isdigit():
             idx = int(event.key) - 1
             if 0 <= idx < len(self._options):
@@ -2246,7 +2257,9 @@ class CosmergonDashboard(App):
             # The reason is an extra: without it the question is asked as before.
             self._add_log(_c("dim", f"tournament posting unavailable: {exc}"))
             return ""
-        teile = [str(aushang[k]) for k in ("goal", "options", "prizes") if aushang.get(k)]
+        # Goal and prizes answer "why". `options` is written for API agents (action names,
+        # routes) and is not shown here — it stays in the posting for those who steer by code.
+        teile = [str(aushang[k]) for k in ("goal", "prizes") if aushang.get(k)]
         return "\n\n".join(teile)
 
     @work

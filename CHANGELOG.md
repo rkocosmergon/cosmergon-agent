@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **The tournament dialog cut off its own choices.** With the server's full text the dialog grew
+  taller than the terminal and "[2] Cancel" disappeared (found on the first device run of
+  0.24.0). The text now scrolls (↑/↓) inside the dialog and the choices stay visible at every
+  size. The dialog shows the goal and the prizes; the posting's `options` (action names and
+  routes for API agents) is no longer shown there. (cos20 #468)
+
 ## [0.24.0] — 2026-10-10
 
 ### Added
