@@ -1659,10 +1659,18 @@ class CosmergonDashboard(App):
         compass_label = _COMPASS_DISPLAY.get(self._compass_preset, self._compass_preset)
         compass_val = compass_label if self._compass_ever_set else "—"
         lines.append(_c(t.data, f"Compass: {compass_val}"))
+        # In a tournament the player has two compasses. The panel names both: the main-world
+        # one alone was read as the tournament's ("compass grow — what happens?", #468), and
+        # a narrow terminal drops the tournament compass from the top line. Its line takes the
+        # place of the blank one before FIELDS — the panel has a fixed height.
+        turnier_kompass = (state.tournament or {}).get("compass")
+        if turnier_kompass:
+            lines.append(_c(t.data, f"  in tournament: {turnier_kompass}"))
 
         # Fields
         if state.fields:
-            lines.append("")
+            if not turnier_kompass:
+                lines.append("")
             lines.append(_c(t.struct, "[bold]═ FIELDS[/bold]"))
             narrow = self.app.size.width < 70
             for f in state.fields[:_MAX_FIELDS]:

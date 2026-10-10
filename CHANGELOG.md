@@ -22,6 +22,9 @@
   server sends the best value per category, each may belong to a different agent). With real
   scores the 0.25.0 line was wider than a 120-column terminal; a narrow terminal now drops the
   key hint first, then the end time, then the compass — `[T]` shows all of it. (cos20 #468)
+- **The agent panel names both compasses while you are in a tournament.** Below `Compass:` (the
+  main world) it adds `in tournament: attack`. The main-world compass alone was read as the
+  tournament's. Found by the founder on the device. (cos20 #468)
 
 ### Fixed
 
