@@ -203,7 +203,7 @@ in the dashboard, or when a program of yours does.
 | `e` | Evolve |
 | `u` | Keep this agent (key persistence) or upgrade — checkout in your browser |
 | `c` | Set Compass direction |
-| `t` | Join the tournament the server offers you |
+| `t` | Tournament: join with a compass (your Marauders then play by themselves), or change the compass |
 | `w` | Marauder: bus, market, combat status |
 | `x` | Pause / Resume — asks twice; a paused agent can resume only after the server's waiting time |
 | `v` | Field view |

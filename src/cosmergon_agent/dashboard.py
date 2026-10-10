@@ -464,7 +464,7 @@ class SelectModal(ModalScreen):
         max-height: 95%;
     }
     SelectModal.-tall #body {
-        max-height: 14;
+        max-height: 65vh;
     }
     SelectModal #body {
         height: auto;
@@ -588,8 +588,8 @@ class HelpModal(ModalScreen):
             "If nothing uses the key until then, it ends and your",
             "agent becomes a Vagant. To keep your agent: come back in",
             "time, keep a program of yours running with this key, or",
-            "keep it for good with key persistence ([U], paid).",
-            "[Q] warns you with the time before you leave.",
+            "keep it for good with key persistence (\\[U], paid).",
+            "\\[Q] warns you with the time before you leave.",
             "",
             "[bold]How do I reconnect to my agent?[/bold]",
             "Just run cosmergon-dashboard again. Credentials are",
@@ -616,6 +616,15 @@ class HelpModal(ModalScreen):
             "multiple fields. Cells placed on a field evolve each",
             "tick and generate Energy.",
             "",
+            "[bold]What is a tournament?[/bold]",
+            "A contest in its own arena, apart from your main world.",
+            "When the server offers you a free slot, \\[T] shows when",
+            "it runs, what you can win and how many Marauders you get.",
+            "You join with a compass; the server then plays your",
+            "Marauders, also while this terminal is closed. During",
+            "the tournament \\[T] shows your score and changes the",
+            "compass. Joining counts for one tournament only.",
+            "",
             "[bold]What is a Compass?[/bold]",
             "A direction you set for your agent: grow, trade,",
             "attack, defend, cooperate, explore, or autonomous.",
@@ -640,7 +649,7 @@ class HelpModal(ModalScreen):
             "[cyan]\\[F][/cyan]  Create new field",
             "[cyan]\\[E][/cyan]  Evolve entity",
             "[cyan]\\[V][/cyan]  View Conway field (zoom, scroll, minimap)",
-            "[cyan]\\[T][/cyan]  Join the tournament the server offers you",
+            "[cyan]\\[T][/cyan]  Tournament: join with a compass, or change it",
             "[cyan]\\[W][/cyan]  Marauder: bus, market, combat status",
             "[cyan]\\[M][/cyan]  Chat",
             "[cyan]\\[X][/cyan]  Pause / Resume agent (asks twice; resume only after a wait)",
@@ -1836,6 +1845,11 @@ class CosmergonDashboard(App):
             resume_key = _c(t.cmd, _hk("X"))
             return f"{_c(t.warn, '⏸ Paused')} · {resume_key} resume" + self._countdown_suffix()
 
+        # 3a. The player's tournament (#468) — it is the game they joined; its line comes
+        # before the server's advice, which would name the same tournament in API words.
+        if state.tournament:
+            return self._turnier_hinweis(state.tournament) + self._countdown_suffix()
+
         # 3b. The server's advice (#468) — only while a prerequisite is missing (S293);
         # after that the next move is the player's own choice and nothing is announced.
         if state.next_step:
@@ -2321,43 +2335,107 @@ class CosmergonDashboard(App):
 
     @work
     async def action_join_tournament(self) -> None:
-        """[T] — take the free tournament slot the server offers, after one confirmation."""
-        schritt = self._next_step()
-        tournament_id = _turnier_id(schritt)
+        """[T] — join the tournament the server offers, or change your tournament compass.
+
+        Joining asks for the compass in the same step: with it the server plays the
+        player's Marauders, also while the terminal is closed (#468). Without the compass a
+        dashboard player could join a tournament and then do nothing in it.
+        """
+        state = self.agent.state
+        if state and state.tournament:
+            await self._turnier_kompass_waehlen(state.tournament)
+            return
+        tournament_id = _turnier_id(self._next_step())
         if not tournament_id:
             self._set_feedback(_c("dim", "No free tournament slot offered right now"))
             return
-        frage = f"Join: {(schritt or {}).get('next', 'tournament')}?"
-        warum = await self._turnier_warum()
-        if await self.push_screen_wait(SelectModal(frage, ["Join", "Cancel"], warum)) != 0:
+        eintrag = await self._turnier_eintrag(tournament_id)
+        nummer = eintrag.get("number")
+        titel = f"Tournament #{nummer} — a free slot" if nummer else "Tournament — a free slot"
+        body = _turnier_erklaerung(eintrag) if eintrag else _TURNIER_OHNE_AUSHANG
+        optionen = [f"Join — {name}: {wirkung}" for name, wirkung in _TURNIER_KOMPASSE]
+        wahl = await self.push_screen_wait(SelectModal(titel, optionen, body=body, tall=True))
+        if wahl is None:
             self._set_feedback(_c("dim", "Not joined — nothing changed"))
             return
+        await self._turnier_beitreten(tournament_id, _TURNIER_KOMPASSE[wahl][0])
+
+    async def _turnier_eintrag(self, tournament_id: str) -> dict:
+        """The server's posting of THIS tournament (``GET /tournaments/open``), or ``{}``.
+
+        Not ``/tournaments/current``: that is the most recently scheduled one, which need not
+        be the one the server offers this player.
+        """
+        try:
+            offene = await self.agent.tournaments_open()
+        except (CosmergonError, RuntimeError) as exc:
+            self._add_log(_c("dim", f"tournament posting unavailable: {exc}"))
+            return {}
+        return next((t for t in offene if str(t.get("id")) == tournament_id), {})
+
+    async def _turnier_beitreten(self, tournament_id: str, kompass: str) -> None:
+        """Register, then set the tournament compass — both reported, neither hidden."""
+        warn = self._theme.warn
         try:
             antwort = await self.agent.register_tournament(tournament_id)
         except CosmergonError as exc:
-            self._set_feedback(_c(self._theme.warn, f"✗ Tournament: {exc}"))
+            self._set_feedback(_c(warn, f"✗ Tournament: {exc}"))
             return
         if "error" in antwort:
-            self._add_log(_c(self._theme.warn, "✗ tournament registration refused"))
-            self._set_feedback(_c(self._theme.warn, f"✗ {str(antwort['error'])[:120]}"))
+            self._add_log(_c(warn, "✗ tournament registration refused"))
+            self._set_feedback(_c(warn, f"✗ {str(antwort['error'])[:120]}"))
             return
         self._add_log(_c(self._theme.pos, "✓ registered for the tournament"))
+        await self._turnier_kompass_setzen(kompass)
+
+    async def _turnier_kompass_setzen(self, kompass: str) -> None:
+        """Set the tournament compass and say what it does — or why it did not."""
+        warn = self._theme.warn
+        nochmal = f"press {_hk('T')} to try again"
+        try:
+            r = await self.agent.set_tournament_compass(kompass)
+        except CosmergonError as exc:
+            self._set_feedback(_c(warn, f"✗ Compass not set: {exc} — {nochmal}"), duration=10.0)
+            return
+        if not r.success:
+            fehler = r.error_message or "refused"
+            self._set_feedback(_c(warn, f"✗ Compass not set: {fehler} — {nochmal}"), duration=10.0)
+            return
+        self._add_log(_c(self._theme.pos, f"✓ tournament compass: {kompass}"))
         self._set_feedback(
-            _c(self._theme.pos, "✓ Registered — the round starts on its own"), at_tick=False
+            _c(self._theme.pos, f"✓ Tournament compass {kompass} — your Marauders play by it"),
+            at_tick=False,
         )
 
-    async def _turnier_warum(self) -> str:
-        """Why play the round — the server's own goal and options (#468 S3), or ""."""
-        try:
-            aushang = await self.agent.tournament_current()
-        except (CosmergonError, RuntimeError) as exc:
-            # The reason is an extra: without it the question is asked as before.
-            self._add_log(_c("dim", f"tournament posting unavailable: {exc}"))
-            return ""
-        # Goal and prizes answer "why". `options` is written for API agents (action names,
-        # routes) and is not shown here — it stays in the posting for those who steer by code.
-        teile = [str(aushang[k]) for k in ("goal", "prizes") if aushang.get(k)]
-        return "\n\n".join(teile)
+    async def _turnier_kompass_waehlen(self, brief: dict) -> None:
+        """[T] while registered: show the tournament and choose its compass."""
+        jetzt = brief.get("compass")
+        body = (
+            _turnier_zeile(brief)
+            + "\n\n"
+            + (
+                f"Your Marauders play by the compass {jetzt}, also while this terminal is closed."
+                if jetzt
+                else "No compass yet — choose one, then your Marauders play by themselves, "
+                "also while this terminal is closed."
+            )
+            + " Esc keeps it as it is."
+        )
+        optionen = [f"{name} — {wirkung}" for name, wirkung in _TURNIER_KOMPASSE]
+        titel = f"Tournament #{brief.get('number', '?')} — your compass"
+        wahl = await self.push_screen_wait(SelectModal(titel, optionen, body=body, tall=True))
+        if wahl is None:
+            self._set_feedback(_c("dim", "Compass unchanged"))
+            return
+        await self._turnier_kompass_setzen(_TURNIER_KOMPASSE[wahl][0])
+
+    def _turnier_hinweis(self, brief: dict) -> str:
+        """Hint-bar line while the player is in a tournament (#468)."""
+        t = self._theme
+        taste = _c(t.cmd, _hk("T"))
+        if not brief.get("compass"):
+            return f"{_c(t.guide, '→')} {_turnier_zeile(brief)} — press {taste} to choose one"
+        return f"{_c(t.guide, '⚑')} {_turnier_zeile(brief)} · {taste} compass"
 
     @work
     async def action_pause(self) -> None:
@@ -3272,7 +3350,7 @@ def _fix_bar_keys(state: GameState | None, *, agents: bool = False) -> list[tupl
         keys.append(("E", "Evolve"))
     if has_fields:
         keys.append(("V", "View"))
-    if state and _turnier_id(state.next_step):
+    if state and (state.tournament or _turnier_id(state.next_step)):
         keys.append(("T", "Tournament"))
     ends = _key_ends(state)
     upgrade = "Keep agent" if ends and ends[1] else "Upgrade"  # #468 A3: keeping comes first
@@ -3308,13 +3386,148 @@ def _key_ends(state: GameState | None) -> tuple[str, bool] | None:
     ends (permanent key) or the server does not say (older backend).
     """
     expiry = state.key_expiry if state else None
-    if not expiry or not expiry.get("at"):
+    when = _ortszeit((expiry or {}).get("at"))
+    if when is None:
+        return None
+    return when, bool((expiry or {}).get("renews_on_use"))
+
+
+def _ortszeit(iso: object) -> str | None:
+    """A server time (ISO, UTC) in the viewer's local time, e.g. ``Sat 10 Oct, 20:30``."""
+    if not iso:
         return None
     try:
-        at = datetime.fromisoformat(str(expiry["at"])).astimezone()
+        return datetime.fromisoformat(str(iso)).astimezone().strftime("%a %d %b, %H:%M")
     except ValueError:
         return None
-    return at.strftime("%a %d %b, %H:%M"), bool(expiry.get("renews_on_use"))
+
+
+# The three tournament compasses a player chooses from (#468) — the server maps them to its
+# mission kinds (attack: capture fields, defend: guard your fields, grow: gather spores).
+_TURNIER_KOMPASSE: tuple[tuple[str, str], ...] = (
+    ("attack", "your Marauders capture fields"),
+    ("defend", "they guard your fields"),
+    ("grow", "they gather spores"),
+)
+
+# How the server scores a tournament, in a player's words (categories of `prizes`).
+_PREIS_KATEGORIEN = {
+    "overall": "Overall",
+    "energy": "Most energy produced",
+    "territory": "Most fields",
+    "tier": "Highest tier",
+    "vitality": "Most alive field",
+}
+
+
+def _rang(n: int) -> str:
+    """1 -> 1st, 2 -> 2nd, 3 -> 3rd, 4 -> 4th, 11 -> 11th, 21 -> 21st."""
+    endung = "th"
+    if not 11 <= n % 100 <= 13:
+        endung = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{endung}"
+
+
+# Without the server's posting (older server, no network) the dialog still says what it is —
+# without numbers, which only the server knows.
+_TURNIER_OHNE_AUSHANG = (
+    "A contest in its own arena, apart from your main world, which keeps running. You get "
+    "one living field there and Marauders — your agent's bodies in the arena. Choose a "
+    "compass below; your Marauders then play by themselves, also while this terminal is "
+    "closed. The slot is free; prizes are in-game only."
+)
+
+
+def _preis(eintrag: dict) -> str:
+    """One prize, in energy: ``50,000 + shield``."""
+    teile = []
+    if eintrag.get("energy"):
+        teile.append(f"{float(eintrag['energy']):,.0f}")
+    teile += [str(item) for item in eintrag.get("items") or []]
+    return " + ".join(teile)
+
+
+def _preise(prizes: dict) -> list[str]:
+    """The prize list of a tournament (its ``chest_catalog``): ranked categories one line each,
+    the single-winner categories together on one line — the dialog has little height."""
+    zeilen, einzeln = [], []
+    for kategorie, raenge in prizes.items():
+        if not isinstance(raenge, dict) or not raenge:
+            continue
+        name = _PREIS_KATEGORIEN.get(kategorie, kategorie)
+        if list(raenge) == ["1"]:
+            einzeln.append(f"{name} {_preis(raenge['1'])}")
+            continue
+        plaetze = sorted(raenge.items(), key=lambda kv: int(kv[0]))
+        zeilen.append(
+            f"  {name}: " + " · ".join(f"{_rang(int(r))} {_preis(p)}" for r, p in plaetze)
+        )
+    if einzeln:
+        zeilen.append("  " + " · ".join(einzeln))
+    return zeilen
+
+
+def _turnier_erklaerung(eintrag: dict) -> str:
+    """What a tournament is, why join, and what you do here — for a person (#468).
+
+    Numbers come from the server's posting (``GET /tournaments/open``); a value it does not
+    send is left out, never filled in here. Short on purpose: the three answers must fit the
+    dialog without scrolling at a normal terminal size; what each compass does stands in
+    the choices below the text.
+    """
+    slots = eintrag.get("slots") or {}
+    teilnehmer = sum(int((slots.get(k) or {}).get("quota") or 0) for k in ("free", "npc"))
+    marauder = int(eintrag.get("marauders_per_agent") or 1)
+    energie = float(eintrag.get("start_energy") or 0)
+    start = _ortszeit(eintrag.get("starts_at")) or "soon"
+    ende = _ortszeit(eintrag.get("ends_at")) or "later"
+    was = (
+        "What is it? A contest in its own arena; your main world keeps running. "
+        f"From {start} to {ende} (local time). "
+    )
+    was += f"Up to {teilnehmer} agents; each" if teilnehmer else "Each"
+    was += (
+        f" gets one living field, {marauder} Marauder{'s' if marauder != 1 else ''}"
+        " (your bodies there)"
+    )
+    was += f" and {energie:,.0f} energy." if energie else "."
+    was += " You join this one tournament only."
+    preise = _preise(eintrag.get("prizes") or {})
+    warum = "Why join? A free slot; every result counts in the hall of fame."
+    if preise:
+        warum += "\nPrizes in energy (in-game only, no cash-out):\n" + "\n".join(preise)
+    hier = (
+        "What you do here: choose a compass below; your Marauders then play by themselves, "
+        "even with this terminal closed. Later, [T] shows your score and changes the compass."
+    )
+    return "\n\n".join([was, warum, hier])
+
+
+def _turnier_zeile(brief: dict) -> str:
+    """One line about the player's tournament: compass, when, and the score while it runs.
+
+    Short on purpose — it is the top line of the dashboard and must fit 120 columns.
+    """
+
+    def _wann(iso: object) -> str:
+        try:
+            return datetime.fromisoformat(str(iso)).astimezone().strftime("%a %H:%M")
+        except ValueError:
+            return "?"
+
+    teile = [f"Tournament #{brief.get('number', '?')}"]
+    teile.append(f"compass {brief['compass']}" if brief.get("compass") else "no compass yet")
+    if brief.get("status") == "running":
+        teile.append(f"ends {_wann(brief.get('ends_at'))}")
+        for wer, stand in (("you", brief.get("my_score")), ("leader", brief.get("leader"))):
+            if stand:
+                teile.append(
+                    f"{wer} {float(stand.get('energy') or 0):,.0f} E, "
+                    f"{int(stand.get('territory') or 0)} fields"
+                )
+    else:
+        teile.append(f"starts {_wann(brief.get('starts_at'))}")
+    return " · ".join(teile)
 
 
 _QUIT_TITLE = "Before you go: your agent's key ends {when} (local time)"

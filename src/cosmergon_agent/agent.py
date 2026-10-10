@@ -787,6 +787,33 @@ class CosmergonAgent:
         body = resp.json()
         return (body.get("data", body) or {}).get("tournament") or {}
 
+    async def tournaments_open(self) -> list[dict]:
+        """All open tournaments (scheduled and running), oldest first.
+
+        Each entry carries its times, slots, ``start_energy``, ``marauders_per_agent`` and
+        ``prizes`` — the numbers come from the server, never from this SDK.
+
+        Returns:
+            The list, or ``[]`` on failure.
+        """
+        resp = await self._request("GET", "/api/v1/tournaments/open")
+        if resp.status_code >= 400:
+            return []
+        body = resp.json()
+        return list((body.get("data", body) or {}).get("tournaments") or [])
+
+    async def set_tournament_compass(self, preset: str) -> ActionResult:
+        """Set the compass for your Marauders in the tournament you are registered for.
+
+        With a tournament compass set, the server plays your Marauders in the arena — also
+        while you are away: ``attack`` captures fields, ``defend`` guards yours, ``grow``
+        gathers spores.
+
+        Args:
+            preset: A compass preset, e.g. ``attack``, ``defend`` or ``grow``.
+        """
+        return await self.act("set_tournament_compass", compass_preset=preset)
+
     async def register_tournament(self, tournament_id: str) -> dict:
         """Take a free slot in a tournament round.
 

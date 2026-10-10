@@ -10,6 +10,14 @@
   first warns: what happens then (the agent becomes a Vagant, the server takes it over, there is
   no way back) and three ways to keep it — come back in time, keep a program of yours running
   with this key, or key persistence. A second `[Q]` or `[1]` quits, Esc stays. (cos20 #468)
+- **Tournaments, for a person.** `[T]` explains the tournament the server offers you — what it
+  is, why join, what you do here — with the numbers of *that* tournament (start and end in your
+  local time, participants, Marauders, start energy, prizes; from `GET /tournaments/open`).
+  You join with a compass (attack / defend / grow); the server then plays your Marauders,
+  also while the terminal is closed. Registered, the top line shows the tournament, your
+  compass and — while it runs — your score against the leader; `[T]` changes the compass.
+  New: `agent.tournaments_open()`, `agent.set_tournament_compass(preset)`,
+  `GameState.tournament`. (cos20 #468)
 - **`[U]` offers "Keep this agent" first** (key persistence, monthly or yearly) while the key can
   end; anonymous free agents also see the plans. No prices or plan details in the SDK — the
   checkout names them. (cos20 #468)
@@ -30,6 +38,12 @@
   routes for API agents) is no longer shown there. (cos20 #468)
 - **[W] is called "Marauder" in the key bar, like the menu it opens** — the bar said
   "Missions". The menu is in English now.
+
+### Changed
+
+- **The tournament dialog** no longer shows the posting written for API agents
+  (`/tournaments/current`, the most recently scheduled tournament — not necessarily yours);
+  `[1]`–`[3]` join with a compass, Esc cancels. (cos20 #468)
 
 ### Removed
 

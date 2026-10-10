@@ -320,6 +320,11 @@ class GameState:
     # while every call with the key moves that time out again (a paid key stays further out).
     # ``None``: nothing ends (permanent key), or an older backend (forward-compatibility, C3).
     key_expiry: dict | None = None
+    # The tournament this agent is registered for (cos20 #468): ``tournament_id``, ``number``,
+    # ``status`` (scheduled/running), ``starts_at``, ``ends_at``, ``compass``; while it runs
+    # also ``my_score``, ``leader`` and ``bodies``. ``None``: in no tournament, or an older
+    # backend (forward-compatibility, C3).
+    tournament: dict | None = None
 
     @classmethod
     def from_api(cls, data: dict) -> GameState:
@@ -370,5 +375,8 @@ class GameState:
             next_step=data.get("next_step") if isinstance(data.get("next_step"), dict) else None,
             key_expiry=(
                 data.get("key_expiry") if isinstance(data.get("key_expiry"), dict) else None
+            ),
+            tournament=(
+                data.get("tournament") if isinstance(data.get("tournament"), dict) else None
             ),
         )
