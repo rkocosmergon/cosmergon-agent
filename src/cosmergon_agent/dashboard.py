@@ -1741,9 +1741,7 @@ class CosmergonDashboard(App):
         segments = [name, tier, key_masked]
         self._update_panel("status-bar", f"[dim]{sep.join(segments)}[/dim]")
 
-    def _set_feedback(
-        self, msg: str, duration: float = 4.0, at_tick: bool | None = None
-    ) -> None:
+    def _set_feedback(self, msg: str, duration: float = 4.0, at_tick: bool | None = None) -> None:
         """Show a timed message in the hint bar (line 1 only).
 
         ``at_tick`` adds "takes effect at next tick". By default only a confirmation (✓)
