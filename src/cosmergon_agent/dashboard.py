@@ -21,16 +21,19 @@ Config: COSMERGON_THEME env var  |  ~/.cosmergon/dashboard.toml
 from __future__ import annotations
 
 import argparse
+import asyncio
+import json
 import logging
 import os
 import re
+import shlex
 import time
 import webbrowser
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 
 if TYPE_CHECKING:
     from cosmergon_agent.action import ActionResult
@@ -305,6 +308,170 @@ def _c(color: str, text: str) -> str:
 def _hk(key: str) -> str:
     """Return Rich-escaped hotkey notation: _hk('C') → '\\[C]' (renders as literal [C])."""
     return "\\[" + key + "]"
+
+
+_BACKSLASHES_BEFORE_BRACKET = re.compile(r"(\\*)\[")
+_BACKSLASHES_AT_END = re.compile(r"(\\+)$")
+
+
+def _roh(text: object) -> str:
+    """Foreign text for a markup surface: no control characters, and never markup.
+
+    Other agents' messages, a model's answer and the server's sentences go into panels that
+    read markup. A ``[`` in them stays a bracket (``[SYSTEM]`` used to vanish from the log for
+    this reason), and a backslash cannot swallow the tag that follows the text.
+    """
+    sauber = "".join(z for z in str(text) if z >= " " and z != "\x7f")
+    sauber = _BACKSLASHES_BEFORE_BRACKET.sub(lambda m: m.group(1) * 2 + "\\[", sauber)
+    return _BACKSLASHES_AT_END.sub(lambda m: m.group(1) * 2, sauber)
+
+
+# The log panel's tabs: key → the word in the frame line (the website says "Arena chat").
+_LOG_TABS: tuple[tuple[str, str], ...] = (
+    ("world", "world"),
+    ("tournament", "tournament"),
+    ("arena", "arena chat"),
+)
+_TIMES = chr(0xD7)  # the multiplication sign: Shikigon's journal counts repeats the same way
+_MAL = re.compile(rf"  \[dim\]{_TIMES}(\d+)\[/dim\]$")
+
+
+def _zaehlend_anfuegen(log: list[str], msg: str) -> None:
+    """Append a line — or count the last one up when it says the same (a count behind it)."""
+    if log:
+        treffer = _MAL.search(log[-1])
+        basis = log[-1][: treffer.start()] if treffer else log[-1]
+        if basis == msg:
+            mal = int(treffer.group(1)) + 1 if treffer else 2
+            log[-1] = f"{msg}  [dim]{_TIMES}{mal}[/dim]"
+            return
+    log.append(msg)
+    del log[:-_MAX_LOG]
+
+
+class _Eintrag(NamedTuple):
+    """One line of the tournament or arena log, kept unrendered.
+
+    Another agent's sentence can be 280 characters long: the panel cuts it to its width
+    (a wrapped line would push the newest ones out at the bottom), the full screen wraps it.
+    """
+
+    wer: str  # who speaks; "" for a line without a speaker
+    text: str
+    farbe: str  # color of the speaker, or of the whole line without one
+    mal: int = 1
+
+
+def _eintrag_anfuegen(log: list[_Eintrag], neu: _Eintrag) -> None:
+    """Append an entry — or count the last one up when it says the same."""
+    if log and log[-1][:3] == neu[:3]:
+        log[-1] = log[-1]._replace(mal=log[-1].mal + neu.mal)
+        return
+    log.append(neu)
+    del log[:-_MAX_LOG]
+
+
+def _eintrag_zeile(eintrag: _Eintrag, breite: int | None = None) -> str:
+    """An entry as markup; with ``breite`` cut to that many characters, else whole."""
+    kopf = f"{eintrag.wer}: " if eintrag.wer else ""
+    mal = f"  {_TIMES}{eintrag.mal}" if eintrag.mal > 1 else ""
+    text = eintrag.text
+    if breite is not None:
+        platz = max(8, breite - len(kopf) - len(mal))
+        if len(text) > platz:
+            text = text[: platz - 1].rstrip() + "…"
+    zaehler = _c("dim", mal) if mal else ""
+    if not eintrag.wer:
+        return _c(eintrag.farbe, _roh(text)) + zaehler
+    return _c(eintrag.farbe, _roh(eintrag.wer)) + _c("dim", ":") + " " + _roh(text) + zaehler
+
+
+def _naechster_reiter(tab: str) -> str:
+    """The tab after ``tab``; after the last one the first."""
+    namen = [name for name, _wort in _LOG_TABS]
+    return namen[(namen.index(tab) + 1) % len(namen)] if tab in namen else namen[0]
+
+
+def _leerer_reiter(tab: str, state: GameState | None) -> str:
+    """What an empty tournament or arena tab says instead of nothing."""
+    if state is not None and state.tournament:
+        if tab == "arena":
+            return "Nobody has spoken in this tournament's arena chat yet."
+        return "Nothing has happened in this tournament yet."
+    if tab == "arena":
+        return "Not in a tournament — the arena chat is the talk inside one."
+    return "Not in a tournament — \\[T] takes a free slot when the server offers one."
+
+
+def _stimme_name(stimme: dict) -> str:
+    """Who said an arena chat message; without opt-in the server sends no name."""
+    name = str(stimme.get("agent_name") or "")
+    if name:
+        return name
+    persona = str(stimme.get("persona_type") or "")
+    return f"a {persona}" if persona else "an agent"
+
+
+# Who answers under [M]: a command the program that starts the dashboard may name (Shikigon's
+# starter names its brain). The dashboard itself connects to no model.
+_ADVISOR_ENV = "COSMERGON_ADVISOR_CMD"
+_ADVISOR_PATIENCE_S = 120.0
+_ADVISOR_KEPT_FROM_CHILD = ("COSMERGON_API_KEY", "COSMERGON_PLAYER_TOKEN", _ADVISOR_ENV)
+
+
+def _advisor_argv() -> list[str] | None:
+    """The advisor command from the environment, split like a shell would — or ``None``."""
+    try:
+        argv = shlex.split(os.environ.get(_ADVISOR_ENV, ""))
+    except ValueError:
+        return None
+    return argv or None
+
+
+def _advisor_answer(ausgabe: str) -> tuple[str, str, bool]:
+    """What the command printed as (who, answer, ok): plain text, or JSON with ``a``/``answer``.
+
+    JSON may also carry ``model`` (shown as the speaker) and ``why`` (said when there is no
+    answer). Shikigon's brain prints that form.
+    """
+    text = ausgabe.strip()
+    try:
+        daten = json.loads(text)
+    except ValueError:
+        daten = None
+    if not isinstance(daten, dict):
+        return "", text or "The advisor answered nothing.", bool(text)
+    wer = str(daten.get("model") or "")
+    antwort = str(daten.get("a") or daten.get("answer") or "").strip()
+    if antwort:
+        return wer, antwort, True
+    return wer, f"No answer: {daten.get('why') or 'the advisor answered nothing'}", False
+
+
+async def _ask_advisor(argv: list[str], question: str) -> tuple[str, str, bool]:
+    """Run the advisor command with the question as its last argument: (who, answer, ok).
+
+    No shell; the agent's key is not passed on to the command; a failure is a sentence.
+    """
+    umgebung = {k: v for k, v in os.environ.items() if k not in _ADVISOR_KEPT_FROM_CHILD}
+    try:
+        prozess = await asyncio.create_subprocess_exec(
+            *argv,
+            question,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            env=umgebung,
+        )
+    except OSError as exc:
+        return "", f"The advisor could not be started ({type(exc).__name__}).", False
+    try:
+        ausgabe, _ = await asyncio.wait_for(prozess.communicate(), _ADVISOR_PATIENCE_S)
+    except asyncio.TimeoutError:
+        prozess.kill()
+        await prozess.wait()
+        return "", f"No answer within {_ADVISOR_PATIENCE_S:.0f} s.", False
+    return _advisor_answer(ausgabe.decode("utf-8", "replace"))
 
 
 def _energy_ref(energy: float, max_e: float = 5000.0) -> str:
@@ -814,7 +981,9 @@ class HelpModal(ModalScreen):
             "[cyan]\\[V][/cyan]  View Conway field (zoom, scroll, minimap)",
             "[cyan]\\[T][/cyan]  Tournament: join with a compass, or change it",
             "[cyan]\\[W][/cyan]  Marauder: bus, market, combat status",
-            "[cyan]\\[M][/cyan]  Chat",
+            "[cyan]\\[M][/cyan]  Chat — or ask your advisor, where one is set up",
+            "[cyan]\\[L][/cyan]  Log: next tab (world, tournament, arena chat)",
+            "[cyan]\\[Shift+L][/cyan]  Log on the full screen",
             "[cyan]\\[X][/cyan]  Pause / Resume agent (asks twice; resume only after a wait)",
             "[cyan]\\[U][/cyan]  Keep this agent / upgrade (checkout in browser)",
             "[cyan]\\[K][/cyan]  Show API key + config path",
@@ -1315,7 +1484,9 @@ class CosmergonDashboard(App):
         Binding("x", "pause", "Pause", show=False, priority=True),
         Binding("t", "join_tournament", "Tournament", show=False, priority=True),
         Binding("r", "refresh_now", "Refresh", show=False, priority=True),
-        Binding("l", "log_screen", "Log", show=False, priority=True),
+        # L steps through the log's tabs, here and in the full screen; Shift+L opens it.
+        Binding("l", "log_next", "Log", show=False, priority=True),
+        Binding("L", "log_screen", "Log full screen", show=False, priority=True),
         Binding("m", "chat_screen", "Chat", show=False, priority=True),
         Binding("v", "field_view", "Fields", show=False, priority=True),
         Binding("tab", "cycle_focus", "Focus", show=False, priority=True),
@@ -1348,11 +1519,21 @@ class CosmergonDashboard(App):
         self._moves_seen: deque[str] = deque(maxlen=200)  # event ids already in the log
         self._mission: dict | None = None  # the Marauder's running mission (agent panel)
         self._missions_known: dict[str, str] | None = None  # mission id → status last seen
-        self._last_situation_log: str = ""  # dedup system messages
+        self._situation_seen: dict[str, str] = {}  # kind of system line → what was last said
+        # The log has three tabs (cos20 #468): the world (``_log``), the tournament (the own
+        # Marauders' missions and the server's ticker) and the arena chat of that tournament.
+        self._log_tab = "world"
+        self._log_tournament: list[_Eintrag] = []
+        self._log_arena: list[_Eintrag] = []
+        self._log_new: set[str] = set()  # tabs with lines the player has not looked at
+        self._ticker_seen: deque[tuple[Any, Any, str]] = deque(maxlen=400)
+        self._arena_seen: deque[str] = deque(maxlen=400)
+        self._arena_missions: dict[str, str] | None = None  # as _missions_known, arena bodies
+        self._advisor: list[str] | None = _advisor_argv()  # who answers under [M], if set
         self._panel_cache: dict[str, str] = {}  # widget-id → last rendered content
         self._auth_error: str = ""  # set on AuthenticationError — shown in hint-bar
         self._pending_action: _PendingAction | None = None  # queued on 429, fires next tick
-        self._messages: list[dict] = []  # chat conversation cache (refreshed each tick)
+        self._messages: list[dict] = []  # the server chat, read when [M] opens
         self._focus: str | None = None  # None | "agent" | "fields" | "log"
         self._focus_panel_id: str | None = None  # last panel id with .panel-focused class
         self._identity_prompted: bool = False  # True after identity setup shown once per session
@@ -1390,8 +1571,9 @@ class CosmergonDashboard(App):
         self.query_one("#agent-panel", Static).border_title = "AGENT"
         self.query_one("#economy-panel", Static).border_title = "ECONOMY"
         log_panel = self.query_one("#log-panel", Static)
-        log_panel.border_title = "LOG"
-        log_panel.border_subtitle = r"\[L] fullscreen  \[M] chat"
+        log_panel.border_title = self._log_title()
+        mit_wem = "ask" if self._advisor else "chat"
+        log_panel.border_subtitle = rf"\[L] next  \[Shift+L] full  \[M] {mit_wem}"
         self._register_agent_handlers()
         self._run_agent()
         self.set_interval(0.5, self._redraw)
@@ -1654,29 +1836,25 @@ class CosmergonDashboard(App):
                     self._compass_ever_set = True
                 self._add_log(_c(self._theme.pos, f"● Connected  {state.energy:,.0f} E"))
                 self._moves_from_tick = state.tick
+                # In a running tournament the tournament's log is the interesting one.
+                if (state.tournament or {}).get("status") == "running":
+                    self._log_tab = "tournament"
                 await self._follow_missions()
+                await self._follow_tournament(state)
                 if not self._identity_prompted and _is_auto_name(state.agent_name):
                     self._identity_prompted = True
                     self._show_identity_setup()
                 elif not is_onboarding_dismissed():
                     self._show_onboarding_modal()
                 return
-            delta = state.energy - self._last_energy
+            # No line per tick: energy and tick stand in the panels above, and a line that
+            # comes every minute hides the ones that say something (founder, 11.10.2026).
             self._last_energy = state.energy
-            sign = "+" if delta >= 0 else ""
-            color = self._theme.pos if delta >= 0 else self._theme.warn
-            self._add_log(
-                _c(color, f"[tick {state.tick}] {sign}{delta:.0f}E  {state.energy:,.0f} total")
-            )
             self._log_situation(state)
             await self._fire_pending()
             await self._log_program_moves()
             await self._follow_missions()
-            # Refresh chat messages each tick (1 extra HTTP call / ~60s — non-fatal)
-            try:
-                self._messages = await self.agent.get_messages(limit=20)
-            except Exception:
-                logger.debug("_tick: failed, falling back", exc_info=True)
+            await self._follow_tournament(state)
 
         @self.agent.on_error
         async def _error(result: Any) -> None:
@@ -1784,25 +1962,37 @@ class CosmergonDashboard(App):
 
         Messages are generated locally from structured server data — the server
         never sends free-text instructions (OWASP LLM01/LLM06 mitigation).
-        Only logs when situation changes to avoid spam.
+
+        Each line is said when it becomes true, not again while it stays true. Until
+        11.10.2026 all lines were repeated whenever one of them changed: the spore count
+        changes every few ticks, so "Benchmark ready in 5d" came with it each time. The
+        countdown is gone; the report is announced once, when it is ready.
         """
         sit = state.world_briefing.situation if state.world_briefing else AgentSituation()
-        msgs: list[str] = []
-        if sit.fields_owned > 0 and sit.fields_without_cells > 0:
-            msgs.append(f"{sit.fields_without_cells} of {sit.fields_owned} fields have no cells")
-        if sit.benchmark_ready:
-            msgs.append("7-day benchmark report is ready")
-        elif sit.benchmark_days_remaining > 0:
-            msgs.append(f"Benchmark ready in {sit.benchmark_days_remaining}d")
-        if sit.dormant_spores_on_fields > 0:
-            msgs.append(f"{sit.dormant_spores_on_fields} dormant spores on your fields")
-        if sit.active_catastrophe:
-            msgs.append(f"Active catastrophe: {sit.active_catastrophe}")
-        key = "|".join(msgs)
-        if key and key != self._last_situation_log:
-            self._last_situation_log = key
-            for m in msgs:
-                self._add_log(_c("dim", f"[SYSTEM] {m}"))
+        ohne_zellen = sit.fields_without_cells if sit.fields_owned > 0 else 0
+        lage = {
+            # kind → (what makes the line new, the line)
+            "cells": (
+                str(ohne_zellen or ""),
+                f"{ohne_zellen} of {sit.fields_owned} fields have no cells",
+            ),
+            "benchmark": (
+                "ready" if sit.benchmark_ready else "",
+                "7-day benchmark report is ready",
+            ),
+            "spores": (
+                "there" if sit.dormant_spores_on_fields > 0 else "",
+                f"{sit.dormant_spores_on_fields} dormant spores on your fields",
+            ),
+            "catastrophe": (
+                str(sit.active_catastrophe or ""),
+                f"Active catastrophe: {sit.active_catastrophe}",
+            ),
+        }
+        for art, (stand, zeile) in lage.items():
+            if stand and stand != self._situation_seen.get(art):
+                self._add_log(_c("dim", f"\\[SYSTEM] {_roh(zeile)}"))
+            self._situation_seen[art] = stand
 
     async def _log_program_moves(self) -> None:
         """Log the actions a program sent with this agent's key since the last tick (#468).
@@ -1833,7 +2023,8 @@ class CosmergonDashboard(App):
         if self._own_move(action, tick):
             return
         kosten = _cost_str(_cost_of(data))
-        self._add_log(_c(self._theme.data, f"[tick {tick}] program: {action}{kosten}"))
+        # No tick in front: the same move every minute is one line that counts up.
+        self._add_log(_c(self._theme.data, f"program: {_roh(action)}{kosten}"))
 
     async def _follow_missions(self) -> None:
         """Keep the Marauder's running mission for the panel; log each start and end (#468).
@@ -1842,10 +2033,10 @@ class CosmergonDashboard(App):
         and sees nothing of it. One extra HTTP call per tick; non-fatal. What was there
         before the dashboard connected is not news — the first reading only remembers.
 
-        Only missions of the main-world Marauder (``body == "main"``): in a tournament the
-        agent has more bodies, and their missions are in the same list — the \\[T] dialog
-        shows those. A server that does not name the body yet is not followed at all,
-        rather than showing a tournament mission as the main Marauder's.
+        The agent panel shows only the main-world Marauder's mission (``body == "main"``).
+        In a tournament the agent has more bodies, and their missions are in the same list:
+        those go to the log's tournament tab. A server that does not name the body yet is
+        not followed at all, rather than showing a tournament mission as the main Marauder's.
         """
         try:
             alle = await self.agent.missions()
@@ -1854,26 +2045,95 @@ class CosmergonDashboard(App):
             return
         if alle is None:
             return
-        missionen = [m for m in alle if isinstance(m, dict) and m.get("body") == "main"]
-        neu = self._missions_known is not None
-        bekannt = self._missions_known or {}
+        eigene = [m for m in alle if isinstance(m, dict)]
+        missionen = [m for m in eigene if m.get("body") == "main"]
+        self._missions_known = self._log_mission_changes(missionen, self._missions_known, "world")
+        self._arena_missions = self._log_mission_changes(
+            [m for m in eigene if m.get("body") == "tournament"], self._arena_missions, "tournament"
+        )
+        self._mission = next(
+            (m for m in missionen if m.get("status") in ("pending", "active")), None
+        )
+
+    def _log_mission_changes(
+        self, missionen: list[dict], bekannt: dict[str, str] | None, tab: str
+    ) -> dict[str, str]:
+        """Log each start and end since the last reading into ``tab``; return what is known.
+
+        ``bekannt`` is ``None`` on the first reading: what was there before the dashboard
+        connected is remembered, not logged.
+        """
+        neu = bekannt is not None
+        stand = dict(bekannt or {})
         for mission in reversed(missionen):  # the server sends the newest first
             kennung, status = str(mission.get("mission_id")), str(mission.get("status"))
-            vorher = bekannt.get(kennung)
-            bekannt[kennung] = status
+            vorher = stand.get(kennung)
+            stand[kennung] = status
             if not neu or vorher == status:
                 continue
             if status in ("pending", "active"):
                 if vorher is None:
                     start = f"▶ Marauder: {_mission_wort(mission)} started"
-                    self._add_log(_c(self._theme.data, start))
+                    self._log_line(tab, start, self._theme.data)
             else:
                 farbe = self._theme.pos if status == "completed" else self._theme.warn
-                self._add_log(_c(farbe, _mission_ende(mission)))
-        self._missions_known = bekannt
-        self._mission = next(
-            (m for m in missionen if m.get("status") in ("pending", "active")), None
-        )
+                self._log_line(tab, _mission_ende(mission), farbe)
+        return stand
+
+    def _log_line(self, tab: str, text: str, farbe: str) -> None:
+        """One line of the dashboard's own words into the world log or another tab."""
+        if tab == "world":
+            self._add_log(_c(farbe, _roh(text)))
+        else:
+            self._add_entry(tab, _Eintrag("", text, farbe))
+
+    async def _follow_tournament(self, state: GameState) -> None:
+        """Fill the tournament tab from the server's ticker and the arena chat tab (#468).
+
+        Both feeds are public and the server builds them: agents who did not opt in have no
+        name there. In a tournament: its ticker and its chat. In none: the ticker of all
+        open tournaments, and no chat (the chat belongs to one tournament). Two HTTP calls
+        per tick; non-fatal. What other agents say is shown, never handed to a model.
+        """
+        kennung = str((state.tournament or {}).get("tournament_id") or "") or None
+        try:
+            ereignisse = await self.agent.tournament_ticker(kennung, limit=20)
+        except Exception:
+            logger.debug("tournament ticker unavailable", exc_info=True)
+            ereignisse = []
+        for ereignis in reversed(ereignisse):  # the server sends the newest first
+            if not isinstance(ereignis, dict):
+                continue
+            text = str(ereignis.get("text") or "")
+            marke = (ereignis.get("tick"), ereignis.get("ts"), text)
+            if text and marke not in self._ticker_seen:
+                self._ticker_seen.append(marke)
+                self._add_entry("tournament", _Eintrag("", text, "dim"))
+        if kennung is None:
+            return
+        try:
+            stimmen = await self.agent.tournament_chat(kennung, limit=50)
+        except Exception:
+            logger.debug("arena chat unavailable", exc_info=True)
+            return
+        self._log_arena_voices(stimmen)
+
+    def _log_arena_voices(self, stimmen: list[dict]) -> None:
+        """New arena chat messages into their tab; the same sentence from many is one line.
+
+        Measured on 11.10.2026: of 2,815 messages in a day, 86 % were two sentences
+        ("moving to capture a field — now."). Listed one by one they bury the others.
+        """
+        gleiche: dict[str, list[dict]] = {}
+        for stimme in reversed(stimmen):  # the server sends the newest first
+            kennung = str(stimme.get("id")) if isinstance(stimme, dict) else ""
+            if not kennung or kennung in self._arena_seen:
+                continue
+            self._arena_seen.append(kennung)
+            gleiche.setdefault(str(stimme.get("body") or ""), []).append(stimme)
+        for satz, von in gleiche.items():
+            wer = f"{len(von)} agents" if len(von) > 1 else _stimme_name(von[0])
+            self._add_entry("arena", _Eintrag(wer, satz, self._theme.data))
 
     def _own_move(self, action: str, tick: int) -> bool:
         """True, once, for an action this dashboard sent itself.
@@ -1890,9 +2150,36 @@ class CosmergonDashboard(App):
         return False
 
     def _add_log(self, msg: str) -> None:
-        self._log.append(msg)
-        if len(self._log) > _MAX_LOG:
-            self._log = self._log[-_MAX_LOG:]
+        """A line (markup) into the world log; the same line again counts up."""
+        _zaehlend_anfuegen(self._log, msg)
+        self._mark_new("world")
+
+    def _add_entry(self, tab: str, eintrag: _Eintrag) -> None:
+        """An entry into the tournament or the arena log."""
+        _eintrag_anfuegen(self._log_tournament if tab == "tournament" else self._log_arena, eintrag)
+        self._mark_new(tab)
+
+    def _mark_new(self, tab: str) -> None:
+        if tab != self._log_tab:
+            self._log_new.add(tab)
+
+    def _log_title(self) -> str:
+        """The frame line of the log: its three tabs, the shown one bold, news marked •."""
+        teile = []
+        for tab, wort in _LOG_TABS:
+            if tab == self._log_tab:
+                teile.append(f"[bold]{wort}[/bold]")
+            else:
+                teile.append(f"[dim]{wort}{' •' if tab in self._log_new else ''}[/dim]")
+        kopf = "LOG ▶" if self._focus == "log" else "LOG"
+        return f"{kopf}  " + " · ".join(teile)
+
+    def _log_lines(self, tab: str, breite: int | None = None) -> list[str]:
+        """A tab's lines as markup; ``breite`` cuts long entries for the panel."""
+        if tab == "world":
+            return list(self._log)
+        log = self._log_tournament if tab == "tournament" else self._log_arena
+        return [_eintrag_zeile(eintrag, breite) for eintrag in log]
 
     def _schedule_pending(self, pending: _PendingAction, retry_after: float = 65.0) -> None:
         """Queue a pending action and schedule a timer-based retry.
@@ -1973,6 +2260,8 @@ class CosmergonDashboard(App):
             neu.add_class("panel-focused")
             neu.border_title = f"{self._PANEL_TITLE[target]} ▶"
         self._focus_panel_id = target
+        # The log's title carries its tabs; _draw_log_panel writes it (with the ▶).
+        self._panel_cache.pop("log-title", None)
 
     def _redraw(self) -> None:
         # Textual stops the app (`is_running` False) before it prunes the screens and
@@ -2092,30 +2381,28 @@ class CosmergonDashboard(App):
 
     def _draw_log_panel(self, state: GameState | None) -> None:
         t = self._theme
-        agent_name = (state.agent_name if state and state.agent_name else None) or "Agent"
+        panel = self.query_one("#log-panel", Static)
+        titel = self._log_title()
+        if self._panel_cache.get("log-title") != titel:
+            self._panel_cache["log-title"] = titel
+            panel.border_title = titel
+
+        # The rows are measured: counted by hand from the neighbours' heights they came out
+        # too many, and the panel cuts at the bottom — a full log lost its newest lines
+        # (#475). Before the first layout the size is 0; then: hint 1 + top 14 + ctx 1 +
+        # fix 4 + status 1 + the panel's own frame 2 = 23. Every row is the log's: the chat
+        # has its own key and no rows here (it took three of six on the founder's device).
+        panel_h = panel.content_size.height or max(4, self.app.size.height - 23)
+        breite = panel.content_size.width or max(20, self.app.size.width - 4)
         lines: list[str] = []
-
-        # Learned rules — show last 2 (compact)
-        learned = (state.learned_rules if state else None) or []
-        if learned:
-            for rule in learned[-2:]:
-                lines.append(_c("dim", f"  • {rule[:72]}"))
-
-        # Activity feed — fill the panel so chat stays at the bottom. The rows are measured:
-        # counted by hand from the neighbours' heights they came out too many, and the panel
-        # cuts at the bottom — a full log lost its newest lines and the chat (#475).
-        # Before the first layout the size is 0; then: hint 1 + top 14 + ctx 1 + fix 4 +
-        # status 1 + the panel's own frame 2 = 23.
-        panel_h = self.query_one("#log-panel", Static).content_size.height or max(
-            4, self.app.size.height - 23
-        )
-        learned_count = len(learned[-2:]) if learned else 0
-        chat_rows = 3 if self._messages else 0  # separator + up to 2 msgs
-        feed_n = max(1, panel_h - learned_count - chat_rows)
-        feed = self._log[-feed_n:]
+        if self._log_tab == "world":
+            # Learned rules — show last 2 (compact)
+            learned = (state.learned_rules if state else None) or []
+            lines += [_c("dim", f"  • {_roh(rule[:72])}") for rule in learned[-2:]]
+        feed = self._log_lines(self._log_tab, breite)[-max(1, panel_h - len(lines)) :]
         if feed:
             lines.extend(feed)
-        else:
+        elif self._log_tab == "world":
             # Empty feed — structured welcome block instead of black void.
             # Fills available space with context until real events arrive.
             welcome: list[str] = [
@@ -2130,17 +2417,9 @@ class CosmergonDashboard(App):
             welcome += [_c(t.guide, zeile) for zeile in _welcome_keys(state)]
             welcome.append("")
             welcome.append(_c("dim", "  Activity will appear here once connected."))
-            lines.extend(welcome[:feed_n])
-
-        # Chat messages — last 2, shown below activity feed
-        if self._messages:
-            lines.append(_c("dim", f"─ {agent_name}"))
-            for msg in self._messages[-2:]:
-                sender = msg.get("sender", "")
-                text = msg.get("message", "")
-                label = "Du" if sender == "player" else agent_name
-                color = t.data if sender == "player" else t.pos
-                lines.append(_c(color, f"  \\[{label}] {text[:68]}"))
+            lines.extend(welcome[: max(1, panel_h - len(lines))])
+        else:
+            lines.append(_c("dim", _leerer_reiter(self._log_tab, state)))
 
         self._update_panel("log-panel", "\n".join(lines))
 
@@ -2177,7 +2456,9 @@ class CosmergonDashboard(App):
         c_color = t.guide if not self._compass_ever_set else t.cmd
         keys = [
             k(key, label, c_color if key == "C" else None)
-            for key, label in _fix_bar_keys(state, agents=bool(load_token()))
+            for key, label in _fix_bar_keys(
+                state, agents=bool(load_token()), advisor=bool(self._advisor)
+            )
         ]
         self._update_panel("fix-bar", "  ".join(keys))
 
@@ -3195,25 +3476,53 @@ class CosmergonDashboard(App):
     async def action_help(self) -> None:
         await self.push_screen_wait(HelpModal(self._theme.name))
 
+    def action_log_next(self) -> None:
+        """Show the log's next tab: world → tournament → arena chat → world."""
+        schirm = self.screen
+        if isinstance(schirm, LogScreen):
+            schirm.next_tab()  # this binding has priority: it fires under the full screen too
+            return
+        self._show_log_tab(_naechster_reiter(self._log_tab))
+
+    def _show_log_tab(self, tab: str) -> None:
+        self._log_tab = tab
+        self._log_new.discard(tab)
+
     @work
     async def action_log_screen(self) -> None:
-        """Open full-screen LOG view (read-only, scrollable)."""
-        await self.push_screen_wait(LogScreen(list(self._log), self._theme))
+        """Open the log full-screen (read-only, scrollable), on the tab the panel shows."""
+        if isinstance(self.screen, LogScreen):
+            return  # Shift+L under the full screen: it is open already
+        tabs = {tab: self._log_lines(tab) or [""] for tab, _wort in _LOG_TABS}
+        for tab in ("tournament", "arena"):
+            if tabs[tab] == [""]:
+                tabs[tab] = [_c("dim", _leerer_reiter(tab, self.agent.state))]
+        gewaehlt = await self.push_screen_wait(LogScreen(tabs, self._log_tab, self._theme))
+        if gewaehlt in tabs:
+            self._show_log_tab(gewaehlt)
 
     @work
     async def action_chat_screen(self) -> None:
-        """Open full-screen CHAT view with input field."""
+        """Open the talk under \\[M]: with the advisor if one is set, else the server chat."""
         state = self.agent.state
         agent_name = (state.agent_name if state and state.agent_name else None) or "Agent"
         agent_mode = state.agent_mode if state else "api"
+        if not self._advisor:
+            # Fetched when the talk opens, not every tick: the log no longer shows it.
+            try:
+                self._messages = await self.agent.get_messages(limit=20)
+            except Exception:
+                logger.debug("action_chat_screen: failed, falling back", exc_info=True)
         await self.push_screen_wait(
-            ChatScreen(self.agent, list(self._messages), self._theme, agent_name, agent_mode)
+            ChatScreen(
+                self.agent,
+                list(self._messages),
+                self._theme,
+                agent_name,
+                agent_mode,
+                advisor=self._advisor,
+            )
         )
-        # Refresh messages after modal closes (Esc); next tick will also update.
-        try:
-            self._messages = await self.agent.get_messages(limit=20)
-        except Exception:
-            logger.debug("action_chat_screen: failed, falling back", exc_info=True)
 
     @work
     async def action_field_view(self) -> None:
@@ -3253,34 +3562,50 @@ class LogScreen(ModalScreen):
     }
     """
 
-    def __init__(self, log_entries: list[str], theme: Theme) -> None:
+    def __init__(self, tabs: dict[str, list[str]], tab: str, theme: Theme) -> None:
         super().__init__()
-        self._log_entries = log_entries
+        self._tabs = tabs  # tab → its lines as markup, whole (long ones wrap here)
+        self._tab = tab if tab in tabs else "world"
         self._theme = theme
+
+    def _header(self) -> str:
+        """The same tabs as the panel's frame line, then the keys."""
+        teile = [
+            f"[bold]{wort}[/bold]" if tab == self._tab else f"[dim]{wort}[/dim]"
+            for tab, wort in _LOG_TABS
+        ]
+        return " · ".join(teile) + "[dim]   L next · ↑ ↓ PgUp PgDn scroll · Esc close[/dim]"
 
     def compose(self) -> ComposeResult:
         with Vertical(id="log-wrap"):
-            yield Label(
-                "[dim]↑ ↓ PgUp PgDn to scroll · Esc or Q to close[/dim]",
-                id="log-header",
-            )
+            yield Label(self._header(), id="log-header")
             with VerticalScroll():
-                if self._log_entries:
-                    for entry in self._log_entries:
-                        yield Label(entry)
-                else:
-                    yield Label("[dim]No activity yet.[/dim]")
+                yield Static("", id="log-body")
 
     def on_mount(self) -> None:
-        vs = self.query_one(VerticalScroll)
-        vs.focus()
-        vs.scroll_end(animate=False)
+        self._show()
+        self.query_one(VerticalScroll).focus()
+
+    def _show(self) -> None:
+        zeilen = [zeile for zeile in self._tabs.get(self._tab, []) if zeile]
+        body = "\n".join(zeilen) if zeilen else "[dim]No activity yet.[/dim]"
+        self.query_one("#log-header", Label).update(self._header())
+        self.query_one("#log-body", Static).update(body)
+        self.query_one(VerticalScroll).scroll_end(animate=False)
 
     _SCROLL_KEYS: ClassVar[set[str]] = {"up", "down", "pageup", "pagedown", "home", "end"}
 
+    def next_tab(self) -> None:
+        """L does here what it does in the panel: the next tab."""
+        self._tab = _naechster_reiter(self._tab)
+        self._show()
+
     def on_key(self, event: Any) -> None:
-        if event.key not in self._SCROLL_KEYS:
-            self.dismiss(None)
+        # L never arrives here: the app's binding has priority and fires under a modal too
+        # (it calls next_tab). Any other key closes and returns the tab, so the panel shows
+        # what the player last looked at.
+        if event.key not in self._SCROLL_KEYS and event.key not in ("l", "L"):
+            self.dismiss(self._tab)
 
 
 class ChatScreen(ModalScreen):
@@ -3318,6 +3643,7 @@ class ChatScreen(ModalScreen):
         theme: Theme,
         agent_name: str = "Agent",
         agent_mode: str = "api",
+        advisor: list[str] | None = None,
     ) -> None:
         super().__init__()
         self._agent = agent
@@ -3325,26 +3651,42 @@ class ChatScreen(ModalScreen):
         self._theme = theme
         self._agent_name = agent_name
         self._agent_mode = agent_mode
+        self._advisor = advisor  # a command that answers a question (see _ask_advisor)
+
+    def _header(self) -> str:
+        """Who is on the other side, in one line — also when nobody is."""
+        if self._advisor:
+            wer = f"Ask your advisor about {_roh(self._agent_name)} · answered on this machine"
+        elif self._agent_mode == "api":
+            # The server chat is answered only where the server plays the agent (#468).
+            wer = (
+                f"Chat: {_roh(self._agent_name)} · your own program plays this agent, "
+                "so nobody answers here"
+            )
+        else:
+            wer = f"Chat: {_roh(self._agent_name)} · it answers within about a minute"
+        return f"[dim]{wer} · Enter send · Esc close[/dim]"
+
+    def _zeile(self, wer: str, text: str, farbe: str) -> Label:
+        return Label(_c(farbe, f"\\[{_roh(wer)}] {_roh(text)}"))
 
     def compose(self) -> ComposeResult:
-        if self._agent_mode == "api":
-            api_hint = " · Kein Auto-Antwort (API-Modus)"
-        else:
-            api_hint = " · Antwort ~60s"
-        header_text = f"[dim]Chat: {self._agent_name}{api_hint} · Enter send · Esc close[/dim]"
         with Vertical(id="chat-wrap"):
-            yield Label(header_text, id="chat-header")
+            yield Label(self._header(), id="chat-header")
             with VerticalScroll(id="history-scroll"):
-                if self._messages:
+                if self._advisor:
+                    yield Label("[dim]Ask a question about your agent or the world.[/dim]")
+                elif self._messages:
                     for msg in self._messages:
-                        sender = msg.get("sender", "")
-                        text = msg.get("message", "")
-                        label = "Du" if sender == "player" else self._agent_name
-                        color = self._theme.data if sender == "player" else self._theme.pos
-                        yield Label(_c(color, f"[{label}] {text}"))
+                        von_mir = msg.get("sender", "") == "player"
+                        yield self._zeile(
+                            "You" if von_mir else self._agent_name,
+                            str(msg.get("message", "")),
+                            self._theme.data if von_mir else self._theme.pos,
+                        )
                 else:
-                    yield Label("[dim]Noch keine Nachrichten.[/dim]")
-            yield Input(placeholder="Nachricht eingeben...", id="chat-input")
+                    yield Label("[dim]No messages yet.[/dim]")
+            yield Input(placeholder="Type and press Enter…", id="chat-input")
 
     def on_mount(self) -> None:
         self.query_one(VerticalScroll).scroll_end(animate=False)
@@ -3360,20 +3702,40 @@ class ChatScreen(ModalScreen):
         if not text:
             return
         event.input.clear()
-        self._send(text)
+        if self._advisor:
+            self._ask(text)
+        else:
+            self._send(text)
 
     @work
     async def _send(self, text: str) -> None:
         result = await self._agent.send_message(text)
+        if not self.is_attached:
+            return  # closed while the server answered
         scroll = self.query_one("#history-scroll", VerticalScroll)
         if "error" not in result:
-            sent_label = _c(self._theme.data, f"[Du] {text}")
-            scroll.mount(Label(sent_label))
+            scroll.mount(self._zeile("You", text, self._theme.data))
             scroll.scroll_end(animate=False)
         else:
-            err = _c(self._theme.warn, f"✗ Fehler: {result['error'][:60]}")
-            scroll.mount(Label(err))
-        # Stay open — user closes with Esc, which triggers message refresh
+            scroll.mount(Label(_c(self._theme.warn, f"✗ {_roh(str(result['error'])[:60])}")))
+        # Stay open — user closes with Esc
+        self.query_one(Input).focus()
+
+    @work
+    async def _ask(self, text: str) -> None:
+        """One question to the advisor command; the answer under the name it gives."""
+        scroll = self.query_one("#history-scroll", VerticalScroll)
+        scroll.mount(self._zeile("You", text, self._theme.data))
+        wartet = Label("[dim]…[/dim]")
+        scroll.mount(wartet)
+        scroll.scroll_end(animate=False)
+        wer, antwort, gut = await _ask_advisor(self._advisor or [], text)
+        if not self.is_attached:
+            return  # Esc while the advisor was thinking: nothing left to show it in
+        await wartet.remove()
+        farbe = self._theme.pos if gut else self._theme.warn
+        scroll.mount(self._zeile(wer or "advisor", antwort, farbe))
+        scroll.scroll_end(animate=False)
         self.query_one(Input).focus()
 
 
@@ -3808,7 +4170,9 @@ class IdentitySetupScreen(ModalScreen):
 _TURNIER_ANMELDUNG = re.compile(r"^POST /api/v1/tournaments/([0-9a-fA-F-]{36})/register$")
 
 
-def _fix_bar_keys(state: GameState | None, *, agents: bool = False) -> list[tuple[str, str]]:
+def _fix_bar_keys(
+    state: GameState | None, *, agents: bool = False, advisor: bool = False
+) -> list[tuple[str, str]]:
     """The keys the bottom bar shows — only those that do something right now (#468 S2).
 
     The bar used to be a fixed list: a new agent without a field saw P/F/E/V, none of
@@ -3833,7 +4197,8 @@ def _fix_bar_keys(state: GameState | None, *, agents: bool = False) -> list[tupl
         keys.append(("T", "Tournament"))
     ends = _key_ends(state)
     upgrade = "Keep agent" if ends and ends[1] else "Upgrade"  # #468 A3: keeping comes first
-    keys += [("W", "Marauder"), ("M", "Chat"), ("U", upgrade), ("K", "Key")]
+    # [M] asks the advisor where one is set (the same word as in the log's frame line).
+    keys += [("W", "Marauder"), ("M", "Ask" if advisor else "Chat"), ("U", upgrade), ("K", "Key")]
     if agents:  # agent selector — only with a player token in the config
         keys.append(("A", "Agents"))
     return [*keys, ("?", "Help"), ("Q", "Quit")]

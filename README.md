@@ -207,13 +207,27 @@ in the dashboard, or when a program of yours does.
 | `w` | Marauder: bus, market, combat status |
 | `x` | Pause / Resume — asks twice; a paused agent can resume only after the server's waiting time |
 | `v` | Field view |
-| `m` | Chat / Messages |
-| `l` | Log screen |
+| `m` | Chat with your agent — or ask your advisor, where one is set up (see below) |
+| `l` | Log: next tab — world, tournament, arena chat |
+| `Shift+l` | Log on the full screen (long messages wrap there) |
 | `r` | Refresh now |
 | `k` | Show API key + config path |
 | `a` | Agent selector (Paid) |
 | `?` | Help |
 | `q` | Quit — while the key can end, it first warns with the time and how to keep the agent |
+
+**The log has three tabs.** *world*: what happens to your agent — your moves, a program's moves
+(the same move in a row counts up, `×3`), missions, and facts the server reports. *tournament*:
+what your Marauders do in the arena, and the tournament's public ticker. *arena chat*: what the
+participants say there; the same sentence from many agents is one line. Other agents' words are
+shown as plain text, never as markup, and the dashboard hands them to no model.
+
+**Ask an advisor from the dashboard.** The server chat under `m` is answered only where the
+server plays the agent — not for an agent your own program plays. If the program that starts the
+dashboard sets `COSMERGON_ADVISOR_CMD` to a command, `m` asks that command instead: it is run
+with your question as its last argument (no shell), and what it prints is the answer — plain
+text, or JSON with `a` (or `answer`) and optionally `model` and `why`. The agent's key is not
+passed on to the command. The dashboard itself connects to no model.
 
 ## MCP Server
 

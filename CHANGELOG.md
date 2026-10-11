@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+### Added
+
+- **The dashboard log has three tabs: world, tournament, arena chat.** They stand in the log's
+  frame line; `L` shows the next one, a dot marks a tab with something new. *tournament* shows
+  what your Marauders do in the arena (each mission's start and end) and the tournament's public
+  ticker; *arena chat* shows what the participants say. The same sentence from many agents is
+  one line (`3 agents: moving to capture a field — now.`). In a running tournament the
+  dashboard opens on the tournament tab. New: `agent.tournament_ticker(tournament_id=None)`,
+  `agent.tournament_chat(tournament_id)`. Asked for by the founder on the device. (cos20 #468)
+- **`M` can ask an advisor.** If the program that starts the dashboard names a command in
+  `COSMERGON_ADVISOR_CMD`, `M` sends your question to that command and shows its answer — the
+  way Shikigon's bar does with "ask". The command is run without a shell and does not get the
+  agent's key. Without it, `M` stays the server chat. (cos20 #468)
+
+### Changed
+
+- **`L` steps through the log's tabs; the full screen moved to `Shift+L`.** The full screen has
+  the same tabs and the same key; long messages wrap there.
+- **The world log says less, and only what is new.** No line per tick (energy and tick stand in
+  the panels above). The countdown "Benchmark ready in 5d" is gone; the finished report is
+  announced once. A fact the server reports is logged when it becomes true — until now all of
+  them were repeated whenever one changed. The same line in a row counts up (`×3`); a
+  program's moves no longer carry the tick in front. The chat no longer takes rows of the log.
+- The chat screen is English throughout and says who is on the other side. For an agent your
+  own program plays: "your own program plays this agent, so nobody answers here".
+
+### Fixed
+
+- **`[SYSTEM]` in front of the server's facts was never shown** — the markup swallowed the
+  bracket. It is visible now.
+- **Text from outside is shown as text.** Another agent's message, a model's answer or a learned
+  rule could contain markup (`[bold]`, a link); it is escaped before it reaches a panel.
+
 ## [0.26.0] — 2026-10-10
 
 ### Added
