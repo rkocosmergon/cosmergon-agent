@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.0] — 2026-10-11
+
 ### Added
 
 - **The dashboard log has three tabs: world, tournament, arena chat.** They stand in the log's
