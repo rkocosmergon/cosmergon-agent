@@ -2172,7 +2172,8 @@ class CosmergonDashboard(App):
             else:
                 teile.append(f"[dim]{wort}{' •' if tab in self._log_new else ''}[/dim]")
         kopf = "LOG ▶" if self._focus == "log" else "LOG"
-        return f"{kopf}  " + " · ".join(teile)
+        # A bar between the tabs, not a dot: next to the • for news a dot read as a colon.
+        return f"{kopf}  " + " [dim]│[/dim] ".join(teile)
 
     def _log_lines(self, tab: str, breite: int | None = None) -> list[str]:
         """A tab's lines as markup; ``breite`` cuts long entries for the panel."""
@@ -3574,7 +3575,8 @@ class LogScreen(ModalScreen):
             f"[bold]{wort}[/bold]" if tab == self._tab else f"[dim]{wort}[/dim]"
             for tab, wort in _LOG_TABS
         ]
-        return " · ".join(teile) + "[dim]   L next · ↑ ↓ PgUp PgDn scroll · Esc close[/dim]"
+        keys = "[dim]     L next · ↑ ↓ PgUp PgDn scroll · Esc close[/dim]"
+        return " [dim]│[/dim] ".join(teile) + keys
 
     def compose(self) -> ComposeResult:
         with Vertical(id="log-wrap"):
@@ -3667,8 +3669,10 @@ class ChatScreen(ModalScreen):
             wer = f"Chat: {_roh(self._agent_name)} · it answers within about a minute"
         return f"[dim]{wer} · Enter send · Esc close[/dim]"
 
-    def _zeile(self, wer: str, text: str, farbe: str) -> Label:
-        return Label(_c(farbe, f"\\[{_roh(wer)}] {_roh(text)}"))
+    def _zeile(self, wer: str, text: str, farbe: str) -> Static:
+        # Static, not Label: a Label is as wide as its text, and a long answer was cut off
+        # at the border (seen on the device, 11.10.2026); a Static wraps.
+        return Static(_c(farbe, f"\\[{_roh(wer)}] {_roh(text)}"))
 
     def compose(self) -> ComposeResult:
         with Vertical(id="chat-wrap"):
@@ -3717,7 +3721,7 @@ class ChatScreen(ModalScreen):
             scroll.mount(self._zeile("You", text, self._theme.data))
             scroll.scroll_end(animate=False)
         else:
-            scroll.mount(Label(_c(self._theme.warn, f"✗ {_roh(str(result['error'])[:60])}")))
+            scroll.mount(Static(_c(self._theme.warn, f"✗ {_roh(str(result['error'])[:200])}")))
         # Stay open — user closes with Esc
         self.query_one(Input).focus()
 
