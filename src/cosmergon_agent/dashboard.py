@@ -2609,7 +2609,9 @@ class CosmergonDashboard(App):
                 self._update_panel("context-bar", _c("dim", "No fields yet") + esc)
         elif self._focus == "log":
             zurueck = f"  (-{self._log_scroll})" if self._log_scroll else ""
-            self._update_panel("context-bar", _c("dim", f"[↑/↓] Scroll{zurueck}  [Esc] back"))
+            # `esc` like the other panels: written as plain "[Esc]" the markup swallowed it
+            # and the line read "Scroll   back" (seen on the device, 12.10.2026).
+            self._update_panel("context-bar", _c("dim", f"[↑/↓] Scroll{zurueck}") + esc)
         else:
             self._update_panel("context-bar", "")
 
