@@ -773,6 +773,136 @@ def _fv_render_minimap(
 # ---------------------------------------------------------------------------
 
 
+def _step_line(current: int, labels: tuple[str, ...]) -> str:
+    """Where the viewer is in a dialog of several steps: ``✓ 1 Field ─── ● 2 Pattern``.
+
+    Readable without colour: done steps carry a tick, the current one a filled dot, the ones
+    still to come an empty dot.
+    """
+    parts = []
+    for i, label in enumerate(labels, start=1):
+        if i < current:
+            parts.append(f"[dim]✓ {i} {label}[/dim]")
+        elif i == current:
+            parts.append(f"[bold cyan]● {i} {label}[/bold cyan]")
+        else:
+            parts.append(f"[dim]○ {i} {label}[/dim]")
+    return " [dim]───[/dim] ".join(parts)
+
+
+_PLACE_STEPS = ("Field", "Pattern")
+_PLACE_FIELD_TEXT = (
+    "Pick the field the pattern goes on.\n\n"
+    "Why: living cells earn energy every tick, and a pattern that keeps living lets the "
+    "field mature and evolve to a higher tier. You set the seed; Conway's rules decide "
+    "each tick what lives."
+)
+_PLACE_PATTERN_TEXT = (
+    "Pick the pattern. The server chooses the spot on the field; what already lives there "
+    "stays.\n\n"
+    "A block just sits. Blinker, toad, pulsar and pentadecathlon oscillate: they earn more "
+    "per cell and qualify the field for tier 2. A glider travels (tier 3). The R-pentomino "
+    "grows wildly before it settles."
+)
+_EVOLVE_TEXT = (
+    "Evolve lifts a field to the next tier. Each tier multiplies what the field earns per "
+    "tick. The pattern on the field must already qualify — you pay and trigger the step. "
+    "If you don't, the server promotes the field on its own a little later.\n"
+    "Maturity restarts at 0 after each step. If the pattern decays, the field drops back; "
+    "climbing to a tier you already paid for is free."
+)
+
+
+def _num(value: object) -> str:
+    """A server number for a table cell: 1000.0 → ``1,000``, 1.5 → ``1.5``."""
+    try:
+        zahl = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "?"
+    return f"{int(zahl):,}" if zahl == int(zahl) else f"{zahl:g}"
+
+
+def _evolve_table(info: dict) -> list[str]:
+    """The tier table of the evolve dialog, from ``/game/info`` → ``actions.evolve`` (#484).
+
+    Every number is the server's. A column the server does not send (pattern type and income
+    factor came later) is left out, not invented; without thresholds there is no table.
+    """
+    reife = info.get("reife_thresholds") or {}
+    zellen = info.get("min_cells_per_tier") or {}
+    kosten = info.get("costs_per_tier") or {}
+    typ = info.get("required_type_per_tier") or {}
+    faktor = info.get("energy_multiplier_per_tier") or {}
+    stufen = [s for s in ("2", "3", "4", "5") if s in reife]
+    if not stufen:
+        return []
+    spalten: list[tuple[str, list[str]]] = [("Tier", [f"T{s}" for s in stufen])]
+    if typ:
+        spalten.append(("Pattern", [str(typ.get(s, "?")) for s in stufen]))
+    spalten.append(("Maturity", [_num(reife.get(s)) for s in stufen]))
+    spalten.append(("Cells", [_num(zellen.get(s)) for s in stufen]))
+    spalten.append(("Cost", [_num(kosten.get(str(int(s) - 1))) for s in stufen]))
+    if faktor:
+        spalten.append(("Income", [f"x{_num(faktor.get(s))}" for s in stufen]))
+    # Each column padded to its widest entry, header first.
+    gesetzt = [
+        [text.ljust(max(len(kopf), *(len(w) for w in werte))) for text in (kopf, *werte)]
+        for kopf, werte in spalten
+    ]
+    zeilen = ["  ".join(spalte[i] for spalte in gesetzt).rstrip() for i in range(len(stufen) + 1)]
+    if typ:
+        zeilen.append("A more complex pattern also satisfies a lower tier.")
+    return zeilen
+
+
+def _evolve_blocker(field: Field, info: dict, energy: float) -> str:
+    """Why this field cannot evolve right now, in the order the server checks (#484).
+
+    The verdict itself is the server's (``eligible_fields``); this only names what is missing,
+    from the server's own thresholds. Maturity, cells and energy are compared here; if all
+    three hold and the server still says no, what remains is the pattern type.
+    """
+    tier = field.entity_tier or 0
+    if not tier:
+        return "no pattern recognised yet — place one with [P]"
+    if tier >= 5:
+        return "highest tier reached"
+    ziel = str(tier + 1)
+    reife = (info.get("reife_thresholds") or {}).get(ziel)
+    if reife is None:
+        return f"not ready yet (maturity {field.reife_score})"
+    if field.reife_score < float(reife):
+        return f"maturity {field.reife_score}/{_num(reife)}"
+    zellen = (info.get("min_cells_per_tier") or {}).get(ziel)
+    if zellen is not None and field.active_cell_count < float(zellen):
+        return f"cells {field.active_cell_count}/{_num(zellen)}"
+    kosten = (info.get("costs_per_tier") or {}).get(str(tier))
+    if kosten is not None and energy < float(kosten):
+        return f"costs {_num(kosten)} energy, you have {_num(round(energy))}"
+    soll = (info.get("required_type_per_tier") or {}).get(ziel)
+    ist = field.entity_type or "unknown"
+    return f"needs pattern type {soll} (is {ist})" if soll else f"pattern type {ist} does not fit"
+
+
+def _evolve_body(fields: list[Field], ready: list[Field], info: dict, energy: float) -> str:
+    """Text of the evolve dialog: what evolve is, the tier table, and what each field lacks."""
+    teile = [_EVOLVE_TEXT]
+    tabelle = _evolve_table(info)
+    if tabelle:
+        teile.append("\n".join(tabelle))
+    bereit = {f.id for f in ready}
+    wartend = [f for f in fields if f.id not in bereit]
+    if not ready:
+        teile.append("No field can evolve right now.")
+    if wartend:
+        zeilen = ["Not ready:"]
+        for f in wartend[:9]:
+            stufe = f"T{f.entity_tier or 0}"
+            zeilen.append(f"  {f.id[:8]}  {stufe}  {_evolve_blocker(f, info, energy)}")
+        teile.append("\n".join(zeilen))
+    return "\n\n".join(teile)
+
+
 class SelectModal(ModalScreen):
     """Numbered selection overlay — dismisses with index (int) or None (Esc)."""
 
@@ -802,11 +932,20 @@ class SelectModal(ModalScreen):
     }
     """
 
-    def __init__(self, title: str, options: list[str], body: str = "", tall: bool = False) -> None:
+    def __init__(
+        self,
+        title: str,
+        options: list[str],
+        body: str = "",
+        tall: bool = False,
+        steps: tuple[int, tuple[str, ...]] | None = None,
+    ) -> None:
         super().__init__()
         self._title = title
         self._options = options[:9]
         self._body = body
+        # Where the viewer is in a dialog of several steps, e.g. (1, ("Field", "Pattern")).
+        self._steps = steps
         if body:
             self.add_class("-wide")
         if tall:  # a text that must be read before choosing (#468: the quit warning)
@@ -814,6 +953,9 @@ class SelectModal(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
+            if self._steps:
+                yield Static(_step_line(*self._steps), markup=True)
+                yield Static("")
             # Static, not Label: a Label is as wide as its text and was cut off at the
             # dialog border ("… 8 free sl", #468); a Static wraps.
             yield Static(f"[bold]{self._title}[/bold]", markup=True)
@@ -828,7 +970,10 @@ class SelectModal(ModalScreen):
                 yield Label(f"[cyan][{i + 1}][/cyan] {opt}")
             yield Label("")
             mehr = "  [↑/↓] scroll" if self._body else ""
-            yield Label(f"[dim][1-9] select  \\[Esc] cancel{mehr}[/dim]")
+            if self._options:
+                yield Label(f"[dim][1-9] select  \\[Esc] cancel{mehr}[/dim]")
+            else:  # nothing to choose: the dialog only explains
+                yield Label(f"[dim]\\[Esc] close{mehr}[/dim]")
 
     def on_key(self, event: Any) -> None:
         if event.key == "escape":
@@ -2703,10 +2848,31 @@ class CosmergonDashboard(App):
         field_labels = [
             f"{f.id[:8]} T{f.entity_tier or 0} ({f.active_cell_count} cells)" for f in state.fields
         ]
-        fi = await self.push_screen_wait(SelectModal("Field", field_labels))
+        # #484: two steps, shown as such, each with what it is for.
+        fi = await self.push_screen_wait(
+            SelectModal(
+                "Place a pattern",
+                field_labels,
+                body=_PLACE_FIELD_TEXT,
+                tall=True,
+                steps=(1, _PLACE_STEPS),
+            )
+        )
         if fi is None:
             return
-        pi = await self.push_screen_wait(SelectModal("Preset", _PRESETS))
+        costs = ((await self._game_actions()).get("place_cells") or {}).get("preset_costs") or {}
+        pattern_labels = [
+            f"{name} — {_num(costs[name])} energy" if name in costs else name for name in _PRESETS
+        ]
+        pi = await self.push_screen_wait(
+            SelectModal(
+                "Place a pattern",
+                pattern_labels,
+                body=_PLACE_PATTERN_TEXT,
+                tall=True,
+                steps=(2, _PLACE_STEPS),
+            )
+        )
         if pi is None:
             return
         try:
@@ -2778,14 +2944,35 @@ class CosmergonDashboard(App):
         if not state or not state.fields:
             self._add_log(_c(self._theme.warn, "No fields to evolve"))
             return
-        evolve_labels = [
-            f"{f.id[:8]} T{f.entity_tier or 0} maturity={f.reife_score}" for f in state.fields
-        ]
-        fi = await self.push_screen_wait(SelectModal("Evolve", evolve_labels))
+        # #484: only fields the server reports as ready can be chosen; every other field is
+        # listed with what it lacks. A server that says nothing about evolve (older backend)
+        # leaves the choice open, as before.
+        info = (await self._game_actions()).get("evolve") or {}
+        meldung = (state.available_actions or {}).get("evolve")
+        if isinstance(meldung, dict) and "eligible_fields" in meldung:
+            reif = {str(i) for i in meldung.get("eligible_fields") or []}
+            ready = [f for f in state.fields if f.id in reif]
+        else:
+            ready = list(state.fields)
+        kosten = info.get("costs_per_tier") or {}
+        evolve_labels = []
+        for f in ready:
+            tier = f.entity_tier or 0
+            preis = kosten.get(str(tier))
+            preis_text = f"  ({_num(preis)} energy)" if preis is not None else ""
+            evolve_labels.append(f"{f.id[:8]}  T{tier} → T{tier + 1}{preis_text}")
+        fi = await self.push_screen_wait(
+            SelectModal(
+                "Evolve a field",
+                evolve_labels,
+                body=_evolve_body(list(state.fields), ready, info, state.energy),
+                tall=True,
+            )
+        )
         if fi is None:
             return
         try:
-            r = await self.agent.act("evolve", field_id=state.fields[fi].id)
+            r = await self.agent.act("evolve", field_id=ready[fi].id)
             icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
             if r.success:
                 new_tier = (r.data.get("result") or {}).get("new_tier")
@@ -2804,7 +2991,7 @@ class CosmergonDashboard(App):
                 _PendingAction(
                     kind="act",
                     action="evolve",
-                    params={"field_id": state.fields[fi].id},
+                    params={"field_id": ready[fi].id},
                     display="evolve",
                 ),
                 retry_after=exc.retry_after,
@@ -3228,6 +3415,20 @@ class CosmergonDashboard(App):
         self._add_log(_c(color, f"{icon} {action}"))
         label = "⏸ Agent paused" if action == "pause" else "▶ Agent resumed"
         self._set_feedback(_c(color, f"{icon} {label}" if r.success else f"✗ {r.error_message}"))
+
+    async def _game_actions(self) -> dict:
+        """The server's rules per action, ``GET /api/v1/game/info`` → ``actions`` (#484).
+
+        The dialogs show the server's numbers (prices, thresholds), never a copy kept here.
+        Without an answer they show their text without numbers.
+        """
+        try:
+            resp = await self.agent._request("GET", "/api/v1/game/info")
+            actions = resp.json().get("actions")
+        except Exception:
+            logger.debug("_game_actions: no game info from server", exc_info=True)
+            return {}
+        return actions if isinstance(actions, dict) else {}
 
     async def _pause_waiting(self) -> str:
         """The server's waiting time before a paused agent can resume, in words (#468).
@@ -4210,10 +4411,10 @@ def _fix_bar_keys(
     ends = _key_ends(state)
     if not (ends and ends[1]):  # else [U] stands behind the key warning in the status bar
         keys.append(("U", "Upgrade"))
-    keys.append(("K", "Key"))
     if agents:  # agent selector — only with a player token in the config
         keys.append(("A", "Agents"))
-    return [*keys, ("?", "Help"), ("Q", "Quit")]
+    # [K] is the last entry (founder, 12.10.2026, #484): it is looked up, not used in play.
+    return [*keys, ("?", "Help"), ("Q", "Quit"), ("K", "Key")]
 
 
 def _keep_word(used: int, width: int) -> str:

@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Dashboard: `[E] Evolve` explains itself and offers only fields that can evolve.** The
+  dialog says what evolving does and shows the tier table (pattern type, maturity, cells, cost,
+  income factor), with the server's numbers from `GET /api/v1/game/info`. Only the fields the
+  server reports as ready can be chosen; every other field is listed with what it lacks
+  (`maturity 120/500`, `needs pattern type oscillator (is still_life)`). Against a server that
+  does not report readiness the choice stays open as before.
+- **Dashboard: `[P] Place` shows its two steps.** `● 1 Field ─── ○ 2 Pattern` stands at the top
+  of both dialogs, with a sentence on what the step is for and why placing a pattern pays. The
+  second step shows each pattern's price and says that the server chooses the spot.
+- **Dashboard: `[K] Key` is the last entry of the bottom bar.**
+
 ## [0.27.1] — 2026-10-12
 
 ### Changed
