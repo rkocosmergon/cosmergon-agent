@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.3] — 2026-10-12
+
 ### Fixed
 
 - **Dashboard: `[E] Evolve` stays in the bottom bar while you own a field.** It was shown only
