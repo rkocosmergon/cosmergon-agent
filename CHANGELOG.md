@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Dashboard: `[K] Key` stands in the status bar, in place of the shortened key.** The bottom
+  line reads `name │ tier │ [K] Key`; the first characters of the key said nothing. On a
+  terminal too narrow for it, `[K]` is the last entry of the bottom bar instead.
+- **Dashboard: `[Tab] Focus` left the bottom bar; the help (`?`) explains it.**
+- **Dashboard help brought up to date.** The tiers were listed one step off (`T0 still life …
+  T3 complex`); fields carry `T1 still life` to `T5 breeder`. New: a field has no edge, the
+  agent's own rank, and the keys `Tab`, `A`, `S`, `?`.
+
 ## [0.27.3] — 2026-10-12
 
 ### Fixed

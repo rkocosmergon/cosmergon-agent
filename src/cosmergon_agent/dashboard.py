@@ -1026,17 +1026,22 @@ class HelpModal(ModalScreen):
             "by Conway's rules. Your agent controls cells on game",
             "fields and earns [bold]Energy[/bold] from their activity.",
             "",
-            "Energy is the only currency. Spend it to create fields,",
-            "place cells, evolve patterns, or trade on the market.",
+            "Energy is the only currency. Spend it to place patterns,",
+            "evolve fields, or trade on the market — fields included.",
             "",
-            "Your agent evolves through 6 Tiers as its Conway patterns",
-            "grow more complex:",
-            "  T0  still life     (static cluster)",
-            "  T1  oscillator     (repeating pattern)",
-            "  T2  spaceship      (moving pattern)",
-            "  T3  complex        (large / irregular)",
+            "A field has no edge: what leaves on one side comes back",
+            "on the opposite side.",
+            "",
+            "Each field has a tier, by the pattern living on it. A",
+            "higher tier earns more per cell. \\[E] lifts a field one",
+            "step once its pattern qualifies — it shows the numbers:",
+            "  T1  still life     (static cluster)",
+            "  T2  oscillator     (repeating pattern)",
+            "  T3  spaceship      (moving pattern)",
             "  T4  gun            (shoots gliders)",
-            "  T5  breeder        (exponential growth)",
+            "  T5  breeder        (keeps growing)",
+            "Your agent's own rank (Novice to Diamond, top of the AGENT",
+            "panel) follows from its energy, fields and field tiers.",
             "",
             "Your agent acts when you act here, or when a program of",
             "yours plays it with this key. In the main world the server",
@@ -1119,10 +1124,12 @@ class HelpModal(ModalScreen):
             # ── HOTKEYS ───────────────────────────────────────────────────
             "[bold]═ HOTKEYS[/bold]",
             "",
+            "[cyan]\\[Tab][/cyan]  Focus: with the AGENT panel focused, \\[1]-\\[7]",
+            "       set the compass directly. Tab again moves on.",
             "[cyan]\\[C][/cyan]  Set Compass direction",
-            "[cyan]\\[P][/cyan]  Place cells on field",
-            "[cyan]\\[F][/cyan]  Create new field",
-            "[cyan]\\[E][/cyan]  Evolve entity",
+            "[cyan]\\[P][/cyan]  Place a pattern on a field (two steps)",
+            "[cyan]\\[F][/cyan]  Create a new field (when the server offers one)",
+            "[cyan]\\[E][/cyan]  Evolve a field — shows what each field lacks",
             "[cyan]\\[V][/cyan]  View Conway field (zoom, scroll, minimap)",
             "[cyan]\\[T][/cyan]  Tournament: join with a compass, or change it",
             "[cyan]\\[W][/cyan]  Marauder: bus, market, combat status",
@@ -1132,7 +1139,10 @@ class HelpModal(ModalScreen):
             "[cyan]\\[X][/cyan]  Pause / Resume agent (asks twice; resume only after a wait)",
             "[cyan]\\[U][/cyan]  Keep this agent / upgrade (checkout in browser)",
             "[cyan]\\[K][/cyan]  Show API key + config path",
+            "[cyan]\\[A][/cyan]  Switch agent (with a player token in the config)",
+            "[cyan]\\[S][/cyan]  Public showcase: show or hide your agent's card",
             "[cyan]\\[R][/cyan]  Refresh data",
+            "[cyan]\\[?][/cyan]  This help",
             "[cyan]\\[Q][/cyan]  Quit (warns first while the key can end)",
             "",
             f"[dim]Theme: {self._theme_name}   SDK: {__version__}[/dim]",
@@ -2603,7 +2613,10 @@ class CosmergonDashboard(App):
         keys = [
             k(key, label, c_color if key == "C" else None)
             for key, label in _fix_bar_keys(
-                state, agents=bool(load_token()), advisor=bool(self._advisor)
+                state,
+                agents=bool(load_token()),
+                advisor=bool(self._advisor),
+                key_in_status=self._key_hint_in_status(state),
             )
         ]
         self._update_panel("fix-bar", "  ".join(keys))
@@ -2612,12 +2625,23 @@ class CosmergonDashboard(App):
         """Return the unmasked API key (for KeyModal display)."""
         return self.agent._api_key.raw if self.agent._api_key else ""
 
-    def _get_masked_key(self) -> str:
-        """Return masked API key for status bar (first 8 chars + dots)."""
-        plain = self._get_plain_key()
-        if len(plain) <= 8:
-            return plain or "?"
-        return plain[:8] + "····"
+    def _key_hint_in_status(self, state: GameState | None) -> bool:
+        """Whether ``[K] Key`` fits at the end of the status bar (else the bottom bar keeps it).
+
+        The bar is one line and is cut on the right; the hint is its last entry. Counted with
+        the longer ``[U]`` word, so the answer does not flip with that word's choice.
+        """
+        name = (state.agent_name if state and state.agent_name else None) or (
+            (self.agent.agent_id or "?")[:8]
+        )
+        tier = (state.subscription_tier if state else None) or "free"
+        text = " │ ".join([name, tier, "[K] Key"])
+        ends = _key_ends(state)
+        if ends and ends[1]:
+            text = f"⚠ key ends {ends[0]} unless used · [U] Keep agent │ " + text
+        elif ends:
+            text = f"key kept until {ends[0]} │ " + text
+        return len(text) <= self.size.width - 2  # the bar's padding: 0 1
 
     def _draw_status_bar(self, state: GameState | None) -> None:
         name = (state.agent_name if state and state.agent_name else None) or (
@@ -2626,9 +2650,12 @@ class CosmergonDashboard(App):
         sep = " │ "
         # subscription tier in status bar (tick already shown in hint-bar — no duplicate)
         tier = (state.subscription_tier if state else None) or "free"
-        key_masked = self._get_masked_key()
-        segments = [name, tier, key_masked]
-        line = f"[dim]{sep.join(segments)}[/dim]"
+        line = f"[dim]{sep.join([name, tier])}[/dim]"
+        # [K] Key stands where the shortened key used to stand (founder on the device,
+        # 12.10.2026): the key itself is shown by [K], its first characters said nothing.
+        # Where the line has no room for it, [K] stays the last entry of the bottom bar.
+        if self._key_hint_in_status(state):
+            line += f"[dim]{sep}[/dim]" + _c(self._theme.cmd, _hk("K")) + "[dim] Key[/dim]"
         # #468: when the agent is lost comes FIRST, so a narrow terminal cuts the rest, not it.
         # What to do about it stands right behind the warning, not among the keys.
         ends = _key_ends(state)
@@ -4381,7 +4408,11 @@ _TURNIER_ANMELDUNG = re.compile(r"^POST /api/v1/tournaments/([0-9a-fA-F-]{36})/r
 
 
 def _fix_bar_keys(
-    state: GameState | None, *, agents: bool = False, advisor: bool = False
+    state: GameState | None,
+    *,
+    agents: bool = False,
+    advisor: bool = False,
+    key_in_status: bool = False,
 ) -> list[tuple[str, str]]:
     """The keys the bottom bar shows — only those that do something right now (#468 S2).
 
@@ -4395,7 +4426,8 @@ def _fix_bar_keys(
     """
     actions = (state.available_actions if state else None) or {}
     has_fields = bool(state and state.fields)
-    keys = [("Tab", "Focus"), ("C", "Compass")]
+    # [Tab] (focus a panel) is explained in the help, not in the bar (founder, 12.10.2026).
+    keys = [("C", "Compass")]
     if has_fields:
         keys.append(("P", "Place"))
     if (actions.get("create_field") or {}).get("available"):
@@ -4415,8 +4447,12 @@ def _fix_bar_keys(
         keys.append(("U", "Upgrade"))
     if agents:  # agent selector — only with a player token in the config
         keys.append(("A", "Agents"))
-    # [K] is the last entry (founder, 12.10.2026, #484): it is looked up, not used in play.
-    return [*keys, ("?", "Help"), ("Q", "Quit"), ("K", "Key")]
+    keys += [("?", "Help"), ("Q", "Quit")]
+    # [K] Key stands in the status bar, in place of the shortened key (#484). Only where
+    # that line has no room is it the last entry here.
+    if not key_in_status:
+        keys.append(("K", "Key"))
+    return keys
 
 
 def _keep_word(used: int, width: int) -> str:
