@@ -2703,7 +2703,7 @@ class CosmergonDashboard(App):
             text = f"⚠ key ends {ends[0]} unless used · [U] Keep agent │ " + text
         elif ends:
             text = f"key kept until {ends[0]} │ " + text
-        return len(text) <= self.size.width - 2  # the bar's padding: 0 1
+        return bool(len(text) <= self.size.width - 2)  # the bar's padding: 0 1
 
     def _draw_status_bar(self, state: GameState | None) -> None:
         name = (state.agent_name if state and state.agent_name else None) or (
@@ -4873,7 +4873,8 @@ def _fight_lines(events: list[dict]) -> list[tuple[str, str, bool]]:
     zeilen: list[tuple[str, str, bool]] = []
     siege: dict[tuple[str, str, str], list[float]] = {}
     for ev in events:
-        data = ev.get("data") if isinstance(ev.get("data"), dict) else {}
+        roh = ev.get("data")
+        data: dict = roh if isinstance(roh, dict) else {}
         tab = "tournament" if data.get("body") == "tournament" else "world"
         wer, gegner = _fight_who(data), _fight_opponent(data)
         energie = float(data.get("energy") or 0.0)

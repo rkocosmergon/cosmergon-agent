@@ -110,7 +110,8 @@ def mission_step_text(step: str | None) -> str | None:
 def mission_goal_text(mission: dict) -> str:
     """What a mission is after, from its parameters: ``a mega bomb crate, for a siege``,
     ``field 47bd787f``. Empty when the parameters do not say."""
-    params = mission.get("params") if isinstance(mission.get("params"), dict) else {}
+    roh = mission.get("params")
+    params: dict = roh if isinstance(roh, dict) else {}
     feld = params.get("target_field_id") or params.get("field_id")
     ort = f"field {str(feld)[:8]}" if feld else ""
     kiste = params.get("kiste")
