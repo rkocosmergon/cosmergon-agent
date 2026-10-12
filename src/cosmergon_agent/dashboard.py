@@ -56,7 +56,12 @@ except ImportError as _exc:
     ) from _exc
 
 from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError, __version__
-from cosmergon_agent.action import mission_outcome_text, mission_word
+from cosmergon_agent.action import (
+    mission_goal_text,
+    mission_outcome_text,
+    mission_step_text,
+    mission_word,
+)
 from cosmergon_agent.config import (
     is_onboarding_dismissed,
     load_all_agents,
@@ -1691,6 +1696,8 @@ class CosmergonDashboard(App):
         self._ticker_seen: deque[tuple[Any, Any, str]] = deque(maxlen=400)
         self._arena_seen: deque[str] = deque(maxlen=400)
         self._arena_missions: dict[str, str] | None = None  # as _missions_known, arena bodies
+        self._fights_seen: set[str] | None = None  # fight event ids already told (#486)
+        self._mission_steps: dict[str, str] = {}  # mission id → step last told (#486)
         self._advisor: list[str] | None = _advisor_argv()  # who answers under [M], if set
         self._panel_cache: dict[str, str] = {}  # widget-id → last rendered content
         self._auth_error: str = ""  # set on AuthenticationError — shown in hint-bar
@@ -2003,6 +2010,7 @@ class CosmergonDashboard(App):
                 if (state.tournament or {}).get("status") == "running":
                     self._log_tab = "tournament"
                 await self._follow_missions()
+                await self._follow_fights()
                 await self._follow_tournament(state)
                 if not self._identity_prompted and _is_auto_name(state.agent_name):
                     self._identity_prompted = True
@@ -2017,6 +2025,7 @@ class CosmergonDashboard(App):
             await self._fire_pending()
             await self._log_program_moves()
             await self._follow_missions()
+            await self._follow_fights()
             await self._follow_tournament(state)
 
         @self.agent.on_error
@@ -2218,6 +2227,34 @@ class CosmergonDashboard(App):
             (m for m in missionen if m.get("status") in ("pending", "active")), None
         )
 
+    async def _follow_fights(self) -> None:
+        """Tell each fight of the agent's Marauders in the log (#486).
+
+        The server writes one event per fight and side (``fight_lost``, ``fight_won``), for
+        this agent's eyes only. Until then a lost fight showed nowhere, and the next line —
+        the Marauder fetching the same thing again — made no sense. The first reading only
+        remembers; a server without these events leaves the log as it was.
+        """
+        neu: list[dict] = []
+        try:
+            for art in ("fight_lost", "fight_won"):
+                # Only what was asked for: a server that ignores the filter must not turn
+                # the agent's own actions into fights.
+                antwort = await self.agent.get_events(limit=40, event_type=art)
+                neu += [e for e in antwort if isinstance(e, dict) and e.get("event_type") == art]
+        except Exception:  # the log's extra lines must never stop the tick
+            logger.debug("fights unavailable", exc_info=True)
+            return
+        kennungen = {str(e.get("id")) for e in neu}
+        if self._fights_seen is None:
+            self._fights_seen = kennungen
+            return
+        frisch = [e for e in neu if str(e.get("id")) not in self._fights_seen]
+        self._fights_seen |= kennungen
+        frisch.sort(key=lambda e: (e.get("tick") or 0, str(e.get("created_at") or "")))
+        for tab, text, verloren in _fight_lines(frisch):
+            self._log_line(tab, text, self._theme.warn if verloren else self._theme.pos)
+
     def _log_mission_changes(
         self, missionen: list[dict], bekannt: dict[str, str] | None, tab: str
     ) -> dict[str, str]:
@@ -2232,15 +2269,27 @@ class CosmergonDashboard(App):
             kennung, status = str(mission.get("mission_id")), str(mission.get("status"))
             vorher = stand.get(kennung)
             stand[kennung] = status
-            if not neu or vorher == status:
-                continue
-            if status in ("pending", "active"):
-                if vorher is None:
-                    start = f"▶ Marauder: {_mission_wort(mission)} started"
-                    self._log_line(tab, start, self._theme.data)
-            else:
-                farbe = self._theme.pos if status == "completed" else self._theme.warn
-                self._log_line(tab, _mission_ende(mission), farbe)
+            laeuft = status in ("pending", "active")
+            if neu and vorher != status:
+                if laeuft:
+                    if vorher is None:
+                        self._log_line(tab, _mission_start(mission), self._theme.data)
+                else:
+                    farbe = self._theme.pos if status == "completed" else self._theme.warn
+                    self._log_line(tab, _mission_ende(mission), farbe)
+            # #486: the steps in between — the story of the mission, for every kind of it.
+            # Each step once, and only what is worth a line (not every path recomputation).
+            schritt = str(mission.get("current_step") or "").split(":", 1)[0]
+            if not laeuft:
+                self._mission_steps.pop(kennung, None)
+            elif schritt and self._mission_steps.get(kennung) != schritt:
+                text = mission_step_text(schritt)
+                if text is None:  # not worth a line, and not a new step either
+                    continue
+                self._mission_steps[kennung] = schritt
+                if neu:
+                    zeile = f"{_mission_wer(mission)}: {_mission_wort(mission)} — {text}"
+                    self._log_line(tab, zeile, "dim")
         return stand
 
     def _log_line(self, tab: str, text: str, farbe: str) -> None:
@@ -4791,12 +4840,84 @@ def _mission_zeile(mission: dict) -> str:
     return f"{_mission_wort(mission)} — {schritt}" if schritt else _mission_wort(mission)
 
 
+def _fight_who(data: dict) -> str:
+    """Which Marauder: the main one is ``Marauder``, an arena body ``Marauder 2``."""
+    if data.get("body") == "tournament":
+        return f"Marauder {int(data.get('slot') or 0) + 1}"
+    return "Marauder"
+
+
+def _fight_opponent(data: dict) -> str:
+    name = data.get("opponent")
+    return str(name) if name else f"a {data.get('opponent_kind') or 'monster'}"
+
+
+def _fight_dropped(data: dict) -> str:
+    """What fell, in words: ``1 mega bomb, 2 ammo`` — empty when nothing was carried."""
+    stuecke = data.get("dropped") or {}
+    if not isinstance(stuecke, dict):
+        return ""
+    return ", ".join(
+        f"{int(zahl)} {str(art).split(':', 1)[0].replace('_', ' ')}"
+        for art, zahl in sorted(stuecke.items())
+    )
+
+
+def _fight_lines(events: list[dict]) -> list[tuple[str, str, bool]]:
+    """The log lines for new fight events: ``(tab, text, lost)`` in the order they happened.
+
+    A lost fight is always its own line — it is the reason for what the Marauder does next.
+    Fights one Marauder won against the same opponent since the last reading are one line
+    that counts (the log would otherwise fill with wins).
+    """
+    zeilen: list[tuple[str, str, bool]] = []
+    siege: dict[tuple[str, str, str], list[float]] = {}
+    for ev in events:
+        data = ev.get("data") if isinstance(ev.get("data"), dict) else {}
+        tab = "tournament" if data.get("body") == "tournament" else "world"
+        wer, gegner = _fight_who(data), _fight_opponent(data)
+        energie = float(data.get("energy") or 0.0)
+        if ev.get("event_type") == "fight_won":
+            siege.setdefault((tab, wer, gegner), []).append(energie)
+            continue
+        teile = []
+        gefallen = _fight_dropped(data)
+        if gefallen:
+            teile.append(f"dropped {gefallen}")
+        if energie > 0:
+            teile.append(f"-{_num(round(energie))} energy")
+        teile.append("recovering")
+        zeilen.append((tab, f"✗ {wer} lost a fight against {gegner} — " + ", ".join(teile), True))
+    for (tab, wer, gegner), betraege in siege.items():
+        summe = sum(betraege)
+        wie_oft = "a fight" if len(betraege) == 1 else f"{len(betraege)} fights"
+        gewinn = f" — +{_num(round(summe))} energy" if summe > 0 else ""
+        zeilen.append((tab, f"✓ {wer} won {wie_oft} against {gegner}{gewinn}", False))
+    return zeilen
+
+
+def _mission_wer(mission: dict) -> str:
+    """Which Marauder leads the mission: ``Marauder`` in the main world, ``Marauder 2`` for an
+    arena body whose place the server names (an older server does not: then ``Marauder``)."""
+    slot = mission.get("slot")
+    if mission.get("body") == "tournament" and isinstance(slot, int):
+        return f"Marauder {slot + 1}"
+    return "Marauder"
+
+
+def _mission_start(mission: dict) -> str:
+    """One log line for a mission that begins: who, what, and what it is after."""
+    text = f"▶ {_mission_wer(mission)}: {_mission_wort(mission)} started"
+    ziel = mission_goal_text(mission)
+    return f"{text} — {ziel}" if ziel else text
+
+
 def _mission_ende(mission: dict) -> str:
     """One log line for a mission that ended: what, how, and why if the server says."""
     ausgang = str(mission.get("outcome") or "")
     grund = mission_outcome_text(ausgang)
     wie = "done" if mission.get("status") == "completed" else str(mission.get("status"))
-    text = f"Marauder: {_mission_wort(mission)} {wie}"
+    text = f"{_mission_wer(mission)}: {_mission_wort(mission)} {wie}"
     return f"{text} — {grund}" if grund else text
 
 

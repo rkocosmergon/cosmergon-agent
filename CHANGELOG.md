@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- **The dashboard log tells the Marauder's story.** Every mission now shows what it is after
+  (`▶ Marauder 2: collecting started — a mega bomb crate, for a siege (field 47bd787f)`), each
+  step once (`on the way to a crate`, `picking up`, `laying bombs`, `holding the claim`,
+  `waiting for the bus` …) and its end with the reason — for all fourteen kinds of mission, in
+  the world log and the tournament log. Arena Marauders are numbered.
+- **Fights are in the log.** A lost fight is its own line with what it cost
+  (`✗ Marauder 3 lost a fight against Fleet-160 — dropped 1 mega bomb, -8,800 energy,
+  recovering`); fights won against the same opponent since the last reading are one line that
+  counts. Needs a server that writes fight events; against an older one the log stays as it was.
+- `mission_step_text()` and `mission_goal_text()` next to `mission_word()` — the same words
+  for other clients.
+
 ### Fixed
 
 - **Dashboard: the focused panel's keys do what its hint line says.** With `Tab` on FIELDS,

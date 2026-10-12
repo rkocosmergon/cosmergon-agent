@@ -29,7 +29,51 @@ def error_text(body: Any, fallback: str = "") -> str:
 # Mission kinds and outcomes in a player's words (cos20 #468, #475). The terminal and
 # Shikigon's bar both show them, so they live here once. Anything not listed is shown as
 # the server names it, so a new outcome is still readable.
-_MISSION_WORDS = {"siege_field": "siege", "capture_field": "capture", "gather_spores": "collecting"}
+_MISSION_WORDS = {
+    "siege_field": "siege",
+    "capture_field": "capture",
+    "gather_spores": "collecting",
+    "scout_terminal": "scouting",
+    "patrol_field": "patrol",
+    "defend_field": "guard duty",
+    "heal_holes_field": "repair",
+    "cell_reseed": "reseeding",
+    "deliver_resource": "delivery",
+    "escort_marauder": "escort",
+    "hunt_thief_birds": "bird hunt",
+    "raid_marauder": "raid",
+    "recon_owner": "recon",
+    "travel_to_cube": "journey",
+}
+# What a Marauder is doing inside a mission, in a player's words (the server's
+# ``current_step``, without what follows a colon). ``None``: not worth a line. A step that
+# is not listed is shown as the server names it.
+_STEP_WORDS: dict[str, str | None] = {
+    "traveling": "on the way",
+    "recon_travel": "on the way",
+    "traveling_loot": "on the way to a crate",
+    "collecting_loot": "picking up",
+    "collecting": "picking up",
+    "retargeting": "nothing here, looking elsewhere",
+    "bombing": "laying bombs",
+    "claim_started": "the claim has started",
+    "holding_claim": "holding the claim",
+    "guarding": "on guard",
+    "patrolling": "patrolling",
+    "seeding": "seeding cells",
+    "to_source": "fetching the goods",
+    "to_target": "delivering",
+    "escorting": "escorting",
+    "following": "catching up",
+    "hunting": "hunting",
+    "closing_in": "closing in",
+    "cooldown": "waiting for the next strike",
+    "reconning": "looking around",
+    "at_stop_waiting_for_bus": "waiting for the bus",
+    "riding": "on the bus",
+    "path_unreachable": "no way through",
+    "path_recompute": None,
+}
 _OUTCOME_WORDS = {
     "out_of_mega_bombs": "out of mega bombs",
     "field_vulnerable": "the field is open, the capture follows",
@@ -47,6 +91,34 @@ _OUTCOME_WORDS = {
 def mission_word(mission_type: str) -> str:
     """A mission kind in a player's words: ``siege_field`` → ``siege``."""
     return _MISSION_WORDS.get(mission_type, mission_type.replace("_", " "))
+
+
+def mission_step_text(step: str | None) -> str | None:
+    """A mission's current step in a player's words; ``None`` when it is not worth a line.
+
+    ``collecting_loot:ammo`` → ``picking up``. An unknown step is shown as the server names
+    it, so a new one is still readable.
+    """
+    base = str(step or "").split(":", 1)[0]
+    if not base:
+        return None
+    if base in _STEP_WORDS:
+        return _STEP_WORDS[base]
+    return base.replace("_", " ")
+
+
+def mission_goal_text(mission: dict) -> str:
+    """What a mission is after, from its parameters: ``a mega bomb crate, for a siege``,
+    ``field 47bd787f``. Empty when the parameters do not say."""
+    params = mission.get("params") if isinstance(mission.get("params"), dict) else {}
+    feld = params.get("target_field_id") or params.get("field_id")
+    ort = f"field {str(feld)[:8]}" if feld else ""
+    kiste = params.get("kiste")
+    if kiste:
+        wozu = ", for a siege" if kiste == "mega_bomb" else ""
+        was = f"a {str(kiste).replace('_', ' ')} crate{wozu}"
+        return f"{was} ({ort})" if ort else was
+    return ort
 
 
 def mission_outcome_text(outcome: str) -> str:
