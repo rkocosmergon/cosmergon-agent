@@ -1687,13 +1687,12 @@ class CosmergonDashboard(App):
         self._mission: dict | None = None  # the Marauder's running mission (agent panel)
         self._missions_known: dict[str, str] | None = None  # mission id → status last seen
         self._situation_seen: dict[str, str] = {}  # kind of system line → what was last said
-        # The log has three tabs (cos20 #468): the world (``_log``), the tournament (the own
-        # Marauders' missions and the server's ticker) and the arena chat of that tournament.
+        # The log has three tabs (cos20 #468): the world (``_log``), the tournament (what the
+        # own Marauders do and what happens to them there) and that tournament's arena chat.
         self._log_tab = "world"
         self._log_tournament: list[_Eintrag] = []
         self._log_arena: list[_Eintrag] = []
         self._log_new: set[str] = set()  # tabs with lines the player has not looked at
-        self._ticker_seen: deque[tuple[Any, Any, str]] = deque(maxlen=400)
         self._arena_seen: deque[str] = deque(maxlen=400)
         self._arena_missions: dict[str, str] | None = None  # as _missions_known, arena bodies
         self._fights_seen: set[str] | None = None  # fight event ids already told (#486)
@@ -2011,7 +2010,7 @@ class CosmergonDashboard(App):
                     self._log_tab = "tournament"
                 await self._follow_missions()
                 await self._follow_fights()
-                await self._follow_tournament(state)
+                await self._follow_arena_chat(state)
                 if not self._identity_prompted and _is_auto_name(state.agent_name):
                     self._identity_prompted = True
                     self._show_identity_setup()
@@ -2026,7 +2025,7 @@ class CosmergonDashboard(App):
             await self._log_program_moves()
             await self._follow_missions()
             await self._follow_fights()
-            await self._follow_tournament(state)
+            await self._follow_arena_chat(state)
 
         @self.agent.on_error
         async def _error(result: Any) -> None:
@@ -2299,28 +2298,17 @@ class CosmergonDashboard(App):
         else:
             self._add_entry(tab, _Eintrag("", text, farbe))
 
-    async def _follow_tournament(self, state: GameState) -> None:
-        """Fill the tournament tab from the server's ticker and the arena chat tab (#468).
+    async def _follow_arena_chat(self, state: GameState) -> None:
+        """Fill the arena chat tab with what the participants of this tournament say (#468).
 
-        Both feeds are public and the server builds them: agents who did not opt in have no
-        name there. In a tournament: its ticker and its chat. In none: the ticker of all
-        open tournaments, and no chat (the chat belongs to one tournament). Two HTTP calls
-        per tick; non-fatal. What other agents say is shown, never handed to a model.
+        The feed is public and the server builds it: agents who did not opt in have no name
+        there. Outside a tournament there is no chat. One HTTP call per tick; non-fatal.
+        What other agents say is shown, never handed to a model.
+
+        The tournament tab does not show the public ticker (what other agents do): the log
+        tells what the own Marauders live through (founder, 12.10.2026).
         """
         kennung = str((state.tournament or {}).get("tournament_id") or "") or None
-        try:
-            ereignisse = await self.agent.tournament_ticker(kennung, limit=20)
-        except Exception:
-            logger.debug("tournament ticker unavailable", exc_info=True)
-            ereignisse = []
-        for ereignis in reversed(ereignisse):  # the server sends the newest first
-            if not isinstance(ereignis, dict):
-                continue
-            text = str(ereignis.get("text") or "")
-            marke = (ereignis.get("tick"), ereignis.get("ts"), text)
-            if text and marke not in self._ticker_seen:
-                self._ticker_seen.append(marke)
-                self._add_entry("tournament", _Eintrag("", text, "dim"))
         if kennung is None:
             return
         try:
@@ -4887,7 +4875,7 @@ def _fight_lines(events: list[dict]) -> list[tuple[str, str, bool]]:
             teile.append(f"dropped {gefallen}")
         if energie > 0:
             teile.append(f"-{_num(round(energie))} energy")
-        teile.append("recovering")
+        teile.append("sent back to his bunk")
         zeilen.append((tab, f"✗ {wer} lost a fight against {gegner} — " + ", ".join(teile), True))
     for (tab, wer, gegner), betraege in siege.items():
         summe = sum(betraege)
@@ -4916,7 +4904,9 @@ def _mission_start(mission: dict) -> str:
 def _mission_ende(mission: dict) -> str:
     """One log line for a mission that ended: what, how, and why if the server says."""
     ausgang = str(mission.get("outcome") or "")
-    grund = mission_outcome_text(ausgang)
+    roh = mission.get("params")
+    kiste = roh.get("kiste") if isinstance(roh, dict) else None
+    grund = mission_outcome_text(ausgang, what=str(kiste).replace("_", " ") if kiste else None)
     wie = "done" if mission.get("status") == "completed" else str(mission.get("status"))
     text = f"{_mission_wer(mission)}: {_mission_wort(mission)} {wie}"
     return f"{text} — {grund}" if grund else text

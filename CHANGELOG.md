@@ -11,10 +11,18 @@
   the world log and the tournament log. Arena Marauders are numbered.
 - **Fights are in the log.** A lost fight is its own line with what it cost
   (`✗ Marauder 3 lost a fight against Fleet-160 — dropped 1 mega bomb, -8,800 energy,
-  recovering`); fights won against the same opponent since the last reading are one line that
+  sent back to his bunk`); fights won against the same opponent since the last reading are one line that
   counts. Needs a server that writes fight events; against an older one the log stays as it was.
 - `mission_step_text()` and `mission_goal_text()` next to `mission_word()` — the same words
   for other clients.
+- A collecting mission that was after a kind of crate ends with the piece
+  (`collecting done — picked up 1 mega bomb`); `mission_outcome_text(outcome, what=...)`.
+
+### Changed
+
+- **The tournament tab of the log shows only your own Marauders.** The tournament's public
+  ticker (what other agents do) is no longer mixed into it and no longer fetched: the log
+  tells what your Marauders live through. `agent.tournament_ticker()` stays for programs.
 
 ### Fixed
 

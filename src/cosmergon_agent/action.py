@@ -122,16 +122,20 @@ def mission_goal_text(mission: dict) -> str:
     return ort
 
 
-def mission_outcome_text(outcome: str) -> str:
+def mission_outcome_text(outcome: str, what: str | None = None) -> str:
     """Why a mission ended, in a player's words: ``out_of_mega_bombs`` → ``out of mega bombs``.
 
     A collecting mission reports ``collected=N``, optionally with a reason
     (``collected=3_duration_exceeded``) — that reads ``collected 3, ran out of time``.
+    With ``what`` (the kind of crate the mission was after) it names the piece:
+    ``picked up 1 mega bomb``.
     An unknown outcome is returned as the server names it, with spaces for underscores.
     """
     if outcome.startswith("collected="):
         count, _, reason = outcome[len("collected=") :].partition("_")
         text = f"collected {count}"
+        if what:
+            text = f"picked up {count} {what}" + ("" if count == "1" else "s")
         return f"{text}, {mission_outcome_text(reason)}" if reason else text
     return _OUTCOME_WORDS.get(outcome, outcome.replace("_", " "))
 
