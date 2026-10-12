@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.2] — 2026-10-12
+
 ### Changed
 
 - **Dashboard: `[E] Evolve` explains itself and offers only fields that can evolve.** The
