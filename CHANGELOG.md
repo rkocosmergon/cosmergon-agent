@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.1] — 2026-10-12
+
 ### Changed
 
 - **Dashboard: `[U] Keep agent` stands right behind the key warning.** While the status bar
