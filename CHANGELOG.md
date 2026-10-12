@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.5] — 2026-10-12
+
 ### Added
 
 - **The dashboard log tells the Marauder's story.** Every mission now shows what it is after
