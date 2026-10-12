@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Dashboard: `[U] Keep agent` stands right behind the key warning.** While the status bar
+  says `⚠ key ends … unless used`, what to do about it follows on the same line instead of
+  sitting among the keys of the bottom bar (on a narrow terminal it reads `[U] Keep`). The
+  key itself is unchanged; with a kept key the bottom bar shows `[U] Upgrade` as before.
+
 ## [0.27.0] — 2026-10-11
 
 ### Added

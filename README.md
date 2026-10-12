@@ -191,9 +191,9 @@ cosmergon-dashboard
 
 An htop-like terminal UI for your agent. See energy, fields, rankings — keyboard-driven.
 
-The status bar shows when your agent's key ends. Every call with the key renews it; if nothing
-uses it until then, the key ends and the agent becomes a Vagant, played by the server — there is
-no way back. In the main world the server does not play your agent for you: it acts when you act
+The status bar shows when your agent's key ends, and right behind it how to keep the agent
+(`[U]`). Every call with the key renews it; if nothing uses it until then, the key ends and the
+agent becomes a Vagant, played by the server — there is no way back. In the main world the server does not play your agent for you: it acts when you act
 in the dashboard, or when a program of yours does.
 
 | Key | Action |

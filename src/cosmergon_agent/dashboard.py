@@ -2485,9 +2485,14 @@ class CosmergonDashboard(App):
         segments = [name, tier, key_masked]
         line = f"[dim]{sep.join(segments)}[/dim]"
         # #468: when the agent is lost comes FIRST, so a narrow terminal cuts the rest, not it.
+        # What to do about it stands right behind the warning, not among the keys.
         ends = _key_ends(state)
         if ends and ends[1]:
-            line = _c(self._theme.warn, f"⚠ key ends {ends[0]} unless used") + sep + line
+            warn = self._theme.warn
+            warning = f"⚠ key ends {ends[0]} unless used · "
+            word = _keep_word(len(warning), self.size.width - 2)  # the bar's padding: 0 1
+            keep = _c(self._theme.cmd, _hk("U")) + _c(warn, " " + word)
+            line = _c(warn, warning) + keep + sep + line
         elif ends:
             line = _c("dim", f"key kept until {ends[0]}") + sep + line
         self._update_panel("status-bar", line)
@@ -4184,7 +4189,8 @@ def _fix_bar_keys(
     from the server's state (``available_actions``, ``next_step``), not from a guess here.
     The bindings stay: a key that is not shown still answers with its hint. Pause ([X]) is
     deliberately absent — it is an explicit action and lives in the help. [W] carries the
-    name of the menu it opens (bus, market, combat status).
+    name of the menu it opens (bus, market, combat status). While the agent's key ends unless
+    used, [U] is absent too: it stands in the status bar, right behind that warning.
     """
     actions = (state.available_actions if state else None) or {}
     has_fields = bool(state and state.fields)
@@ -4199,13 +4205,24 @@ def _fix_bar_keys(
         keys.append(("V", "View"))
     if state and (state.tournament or _turnier_id(state.next_step)):
         keys.append(("T", "Tournament"))
-    ends = _key_ends(state)
-    upgrade = "Keep agent" if ends and ends[1] else "Upgrade"  # #468 A3: keeping comes first
     # [M] asks the advisor where one is set (the same word as in the log's frame line).
-    keys += [("W", "Marauder"), ("M", "Ask" if advisor else "Chat"), ("U", upgrade), ("K", "Key")]
+    keys += [("W", "Marauder"), ("M", "Ask" if advisor else "Chat")]
+    ends = _key_ends(state)
+    if not (ends and ends[1]):  # else [U] stands behind the key warning in the status bar
+        keys.append(("U", "Upgrade"))
+    keys.append(("K", "Key"))
     if agents:  # agent selector — only with a player token in the config
         keys.append(("A", "Agents"))
     return [*keys, ("?", "Help"), ("Q", "Quit")]
+
+
+def _keep_word(used: int, width: int) -> str:
+    """The word behind [U] in the key warning: the long one where the status bar has room.
+
+    ``used`` is the length of the warning in front of it. On a narrow terminal the short
+    word keeps the key itself on the line.
+    """
+    return "Keep agent" if used + len("[U] Keep agent") <= width else "Keep"
 
 
 _WELCOME_KEYS = ("F", "C", "P", "V", "T", "?")
