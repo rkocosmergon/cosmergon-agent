@@ -4400,9 +4400,11 @@ def _fix_bar_keys(
         keys.append(("P", "Place"))
     if (actions.get("create_field") or {}).get("available"):
         keys.append(("F", "Field"))
-    if (actions.get("evolve") or {}).get("eligible_fields"):
-        keys.append(("E", "Evolve"))
     if has_fields:
+        # [E] stays with every field owner: since 0.27.2 the dialog says what each field still
+        # lacks, so the key does something even when no field is ready. Hiding it made it
+        # vanish the moment the server stopped reporting fields of the wrong pattern type.
+        keys.append(("E", "Evolve"))
         keys.append(("V", "View"))
     if state and (state.tournament or _turnier_id(state.next_step)):
         keys.append(("T", "Tournament"))

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dashboard: `[E] Evolve` stays in the bottom bar while you own a field.** It was shown only
+  when the server reported a field as ready, so it disappeared once no field qualified — just
+  when the dialog's list of what each field still lacks is most useful.
+
 ## [0.27.2] — 2026-10-12
 
 ### Changed
