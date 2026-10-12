@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dashboard: the focused panel's keys do what its hint line says.** With `Tab` on FIELDS,
+  `1`-`5` open that field; on LOG, `↑`/`↓` (and `PgUp`/`PgDn`) scroll back and forth; `Esc`
+  leaves the focus. Until now only the AGENT panel's `1`-`7` (compass) did anything.
+- **Dashboard: a dialog's keys no longer reach the dashboard behind it.** With the AGENT panel
+  focused, choosing entry 1-7 in a dialog also set the compass.
+
 ## [0.27.4] — 2026-10-12
 
 ### Changed

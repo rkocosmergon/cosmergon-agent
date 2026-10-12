@@ -976,12 +976,17 @@ class SelectModal(ModalScreen):
                 yield Label(f"[dim]\\[Esc] close{mehr}[/dim]")
 
     def on_key(self, event: Any) -> None:
+        # The dialog's keys end here. Without the stop they went on to the dashboard behind
+        # it: with the AGENT panel focused, choosing entry 1-7 also set the compass (#484).
         if event.key == "escape":
+            event.stop()
             self.dismiss(None)
         elif event.key in ("up", "down") and self._body:
+            event.stop()
             body = self.query_one("#body", VerticalScroll)
             body.scroll_relative(y=-1 if event.key == "up" else 1, animate=False)
         elif event.key.isdigit():
+            event.stop()
             idx = int(event.key) - 1
             if 0 <= idx < len(self._options):
                 self.dismiss(idx)
@@ -1124,8 +1129,10 @@ class HelpModal(ModalScreen):
             # ── HOTKEYS ───────────────────────────────────────────────────
             "[bold]═ HOTKEYS[/bold]",
             "",
-            "[cyan]\\[Tab][/cyan]  Focus: with the AGENT panel focused, \\[1]-\\[7]",
-            "       set the compass directly. Tab again moves on.",
+            "[cyan]\\[Tab][/cyan]  Focus the next panel; \\[Esc] leaves it",
+            "       AGENT: \\[1]-\\[7] set the compass",
+            "       FIELDS: \\[1]-\\[5] open that field",
+            "       LOG: ↑/↓ scroll back and forth",
             "[cyan]\\[C][/cyan]  Set Compass direction",
             "[cyan]\\[P][/cyan]  Place a pattern on a field (two steps)",
             "[cyan]\\[F][/cyan]  Create a new field (when the server offers one)",
@@ -1690,6 +1697,7 @@ class CosmergonDashboard(App):
         self._pending_action: _PendingAction | None = None  # queued on 429, fires next tick
         self._messages: list[dict] = []  # the server chat, read when [M] opens
         self._focus: str | None = None  # None | "agent" | "fields" | "log"
+        self._log_scroll: int = 0  # lines scrolled back from the newest (log focus, ↑/↓)
         self._focus_panel_id: str | None = None  # last panel id with .panel-focused class
         self._identity_prompted: bool = False  # True after identity setup shown once per session
 
@@ -2555,7 +2563,9 @@ class CosmergonDashboard(App):
             # Learned rules — show last 2 (compact)
             learned = (state.learned_rules if state else None) or []
             lines += [_c("dim", f"  • {_roh(rule[:72])}") for rule in learned[-2:]]
-        feed = self._log_lines(self._log_tab, breite)[-max(1, panel_h - len(lines)) :]
+        alle = self._log_lines(self._log_tab, breite)
+        ende = len(alle) - min(self._log_scroll, max(0, len(alle) - 1))  # ↑/↓ with log focus
+        feed = alle[max(0, ende - max(1, panel_h - len(lines))) : ende]
         if feed:
             lines.extend(feed)
         elif self._log_tab == "world":
@@ -2598,7 +2608,8 @@ class CosmergonDashboard(App):
             else:
                 self._update_panel("context-bar", _c("dim", "No fields yet") + esc)
         elif self._focus == "log":
-            self._update_panel("context-bar", _c("dim", "[↑/↓] Scroll  [Esc] back"))
+            zurueck = f"  (-{self._log_scroll})" if self._log_scroll else ""
+            self._update_panel("context-bar", _c("dim", f"[↑/↓] Scroll{zurueck}  [Esc] back"))
         else:
             self._update_panel("context-bar", "")
 
@@ -2808,14 +2819,45 @@ class CosmergonDashboard(App):
         order: list[str | None] = [None, "agent", "fields", "log"]
         idx = order.index(self._focus)
         self._focus = order[(idx + 1) % len(order)]
+        self._log_scroll = 0
 
     def on_key(self, event: Any) -> None:
-        """Numbers 1-7 set compass preset when AGENT is focused."""
-        if self._focus == "agent" and event.key in ("1", "2", "3", "4", "5", "6", "7"):
-            idx = int(event.key) - 1
-            if idx < len(_COMPASS_PRESETS):
-                self._apply_compass_preset(_COMPASS_PRESETS[idx])
-                event.prevent_default()
+        """The keys of the focused panel: what its context bar promises (#484).
+
+        AGENT: 1-7 set the compass. FIELDS: 1-5 open that field. LOG: ↑/↓ (PgUp/PgDn) scroll
+        back and forth. Esc leaves the focus. Until 0.27.5 only the first of these did
+        anything; the bar showed the others all the same.
+        """
+        if self._focus is None or len(self.screen_stack) > 1:  # a dialog has its own keys
+            return
+        key = event.key
+        if key == "escape":
+            self._focus = None
+            self._log_scroll = 0
+        elif self._focus == "agent" and key in ("1", "2", "3", "4", "5", "6", "7"):
+            self._apply_compass_preset(_COMPASS_PRESETS[int(key) - 1])
+        elif self._focus == "fields" and key in ("1", "2", "3", "4", "5"):
+            fields = (self.agent.state.fields if self.agent.state else None) or []
+            if int(key) > len(fields):
+                return
+            self._open_field(int(key) - 1)
+        elif self._focus == "log" and key in ("up", "down", "pageup", "pagedown"):
+            step = {"up": 1, "down": -1, "pageup": 5, "pagedown": -5}[key]
+            most = max(0, len(self._log_lines(self._log_tab)) - 1)
+            self._log_scroll = max(0, min(most, self._log_scroll + step))
+        else:
+            return
+        event.prevent_default()
+        self._redraw()
+
+    @work
+    async def _open_field(self, idx: int) -> None:
+        """The Field View, opened on one field (FIELDS focus, number key)."""
+        state = self.agent.state
+        if state and state.fields:
+            await self.push_screen_wait(
+                FieldScreen(self.agent, list(state.fields), self._theme, initial_idx=idx)
+            )
 
     @work
     async def action_compass(self) -> None:
