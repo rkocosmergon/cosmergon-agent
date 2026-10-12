@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.4] — 2026-10-12
+
 ### Changed
 
 - **Dashboard: `[K] Key` stands in the status bar, in place of the shortened key.** The bottom
