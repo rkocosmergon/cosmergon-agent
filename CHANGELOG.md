@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.7] — 2026-10-13
+
 ### Changed
 
 - **The talk under `[M]` has room to breathe and scrolls with the arrow keys.** An empty line
