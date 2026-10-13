@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.6] — 2026-10-13
+
 ### Added
 
 - **The talk with the advisor shows what was said before.** Where the starter names the
