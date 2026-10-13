@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.8] — 2026-10-13
+
 ### Fixed
 
 - **The talk under `[M]`: the scrollbar stands at the right edge and the text keeps its
