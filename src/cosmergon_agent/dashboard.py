@@ -1725,7 +1725,8 @@ class CosmergonDashboard(App):
         self._log_new: set[str] = set()  # tabs with lines the player has not looked at
         self._arena_seen: deque[str] = deque(maxlen=400)
         self._arena_missions: dict[str, str] | None = None  # as _missions_known, arena bodies
-        self._fights_seen: set[str] | None = None  # fight event ids already told (#486)
+        self._story_seen: set[str] | None = None  # story event ids already told (#486)
+        self._world_fields: set[str] = set()  # main-world field ids ever seen as own (#486)
         self._mission_steps: dict[str, str] = {}  # mission id → step last told (#486)
         self._advisor: list[str] | None = _advisor_argv()  # who answers under [M], if set
         self._panel_cache: dict[str, str] = {}  # widget-id → last rendered content
@@ -2039,7 +2040,7 @@ class CosmergonDashboard(App):
                 if (state.tournament or {}).get("status") == "running":
                     self._log_tab = "tournament"
                 await self._follow_missions()
-                await self._follow_fights()
+                await self._follow_story(state)
                 await self._follow_arena_chat(state)
                 if not self._identity_prompted and _is_auto_name(state.agent_name):
                     self._identity_prompted = True
@@ -2054,7 +2055,7 @@ class CosmergonDashboard(App):
             await self._fire_pending()
             await self._log_program_moves()
             await self._follow_missions()
-            await self._follow_fights()
+            await self._follow_story(state)
             await self._follow_arena_chat(state)
 
         @self.agent.on_error
@@ -2256,33 +2257,41 @@ class CosmergonDashboard(App):
             (m for m in missionen if m.get("status") in ("pending", "active")), None
         )
 
-    async def _follow_fights(self) -> None:
-        """Tell each fight of the agent's Marauders in the log (#486).
+    async def _follow_story(self, state: GameState | None = None) -> None:
+        """Tell what happened to the agent's Marauders and fields in the log (#486).
 
-        The server writes one event per fight and side (``fight_lost``, ``fight_won``), for
-        this agent's eyes only. Until then a lost fight showed nowhere, and the next line —
-        the Marauder fetching the same thing again — made no sense. The first reading only
-        remembers; a server without these events leaves the log as it was.
+        The server writes one event per fight and side (``fight_lost``, ``fight_won``) and
+        one when a field of the agent is claimed, lost or held — for this agent's eyes only.
+        Until then a lost fight showed nowhere, and the next line — the Marauder fetching
+        the same thing again — made no sense. The first reading only remembers; a server
+        without these events leaves the log as it was.
         """
+        if state is not None:
+            # A lost field is no longer among the agent's fields: remember what was there.
+            self._world_fields |= {str(feld.id) for feld in state.fields}
         neu: list[dict] = []
         try:
-            for art in ("fight_lost", "fight_won"):
+            for art in _STORY_EVENTS:
                 # Only what was asked for: a server that ignores the filter must not turn
                 # the agent's own actions into fights.
                 antwort = await self.agent.get_events(limit=40, event_type=art)
                 neu += [e for e in antwort if isinstance(e, dict) and e.get("event_type") == art]
         except Exception:  # the log's extra lines must never stop the tick
-            logger.debug("fights unavailable", exc_info=True)
+            logger.debug("story events unavailable", exc_info=True)
             return
         kennungen = {str(e.get("id")) for e in neu}
-        if self._fights_seen is None:
-            self._fights_seen = kennungen
+        if self._story_seen is None:
+            self._story_seen = kennungen
             return
-        frisch = [e for e in neu if str(e.get("id")) not in self._fights_seen]
-        self._fights_seen |= kennungen
+        frisch = [e for e in neu if str(e.get("id")) not in self._story_seen]
+        self._story_seen |= kennungen
         frisch.sort(key=lambda e: (e.get("tick") or 0, str(e.get("created_at") or "")))
-        for tab, text, verloren in _fight_lines(frisch):
-            self._log_line(tab, text, self._theme.warn if verloren else self._theme.pos)
+        kaempfe = [e for e in frisch if str(e.get("event_type")).startswith("fight_")]
+        felder = [e for e in frisch if str(e.get("event_type")).startswith("field_")]
+        im_turnier = bool(state and state.tournament)
+        zeilen = _fight_lines(kaempfe) + _field_lines(felder, self._world_fields, im_turnier)
+        for tab, text, schlecht in zeilen:
+            self._log_line(tab, text, self._theme.warn if schlecht else self._theme.pos)
 
     def _log_mission_changes(
         self, missionen: list[dict], bekannt: dict[str, str] | None, tab: str
@@ -4980,6 +4989,38 @@ def _fight_lines(events: list[dict]) -> list[tuple[str, str, bool]]:
         wie_oft = "a fight" if len(betraege) == 1 else f"{len(betraege)} fights"
         gewinn = f" — +{_num(round(summe))} energy" if summe > 0 else ""
         zeilen.append((tab, f"✓ {wer} won {wie_oft} against {gegner}{gewinn}", False))
+    return zeilen
+
+
+#: What the server tells this agent alone (cos20 ``core/geschichte.py``).
+_STORY_EVENTS = ("fight_lost", "fight_won", "field_under_claim", "field_lost", "field_held")
+
+
+def _field_lines(
+    events: list[dict], world_fields: set[str], in_tournament: bool
+) -> list[tuple[str, str, bool]]:
+    """The log lines for what happened to the agent's own fields: ``(tab, text, bad)``.
+
+    A field of the main world goes into the world log; any other field belongs to the arena
+    of the running tournament. The server names who did it (``by``) and the field.
+    """
+    zeilen: list[tuple[str, str, bool]] = []
+    for ev in events:
+        roh = ev.get("data")
+        data: dict = roh if isinstance(roh, dict) else {}
+        kennung = str(data.get("field_id") or "")
+        tab = "tournament" if in_tournament and kennung not in world_fields else "world"
+        feld, wer = f"your field {kennung[:8]}", str(data.get("by") or "another agent")
+        art = ev.get("event_type")
+        if art == "field_under_claim":
+            zeilen.append((tab, f"⚠ {wer} has claimed {feld}", True))
+        elif art == "field_lost":
+            zeilen.append((tab, f"✗ {feld} was captured by {wer}", True))
+        elif art == "field_held":
+            wie = f"the claim of {wer} failed"
+            if data.get("given_up"):
+                wie = f"{wer} gave up the claim"
+            zeilen.append((tab, f"✓ {feld} held — {wie}", False))
     return zeilen
 
 

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **The dashboard log tells what happens to your fields.** Three new lines, for your eyes
+  only: another agent has claimed one of your fields, a field was captured, a field held
+  (the claim failed or was given up). A field of the main world shows in the world tab, a
+  field of the arena in the tournament tab. A server without these events leaves the log
+  as it was.
+
 ## [0.27.8] — 2026-10-13
 
 ### Fixed
