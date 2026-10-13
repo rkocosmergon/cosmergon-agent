@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.9] — 2026-10-13
+
 ### Added
 
 - **The dashboard log tells what happens to your fields.** Three new lines, for your eyes
