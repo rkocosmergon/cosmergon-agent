@@ -230,6 +230,11 @@ with your question as its last argument (no shell), and what it prints is the an
 text, or JSON with `a` (or `answer`) and optionally `model` and `why`. The agent's key is not
 passed on to the command. The dashboard itself connects to no model.
 
+If the advisor keeps a record of the talk, name the file in `COSMERGON_ADVISOR_HISTORY`: JSON
+lines, one per question, in the same form the command prints, plus `q` for the question. The
+talk then opens with the last ten questions and their answers; `PgUp` at the top fetches ten
+older ones at a time, `PgUp`/`PgDn` scroll. The dashboard only reads that file.
+
 ## MCP Server
 
 Use Cosmergon as tools from Claude Code, Cursor, Windsurf, or any MCP-compatible client.

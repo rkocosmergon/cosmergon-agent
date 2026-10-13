@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **The talk with the advisor shows what was said before.** Where the starter names the
+  advisor's record in `COSMERGON_ADVISOR_HISTORY` (JSON lines: `q` plus the form the advisor
+  command prints), `[M]` opens with the last ten questions and their answers instead of an
+  empty window; `PgUp` at the top fetches ten older ones at a time, and `PgUp`/`PgDn` scroll
+  the talk. The dashboard only reads the file. Without the variable nothing changes.
+
 ## [0.27.5] — 2026-10-12
 
 ### Added

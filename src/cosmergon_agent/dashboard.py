@@ -422,6 +422,10 @@ def _stimme_name(stimme: dict) -> str:
 _ADVISOR_ENV = "COSMERGON_ADVISOR_CMD"
 _ADVISOR_PATIENCE_S = 120.0
 _ADVISOR_KEPT_FROM_CHILD = ("COSMERGON_API_KEY", "COSMERGON_PLAYER_TOKEN", _ADVISOR_ENV)
+# Where the advisor keeps the talk, if the starter names the file: JSON lines, one per question,
+# in the form the command prints plus ``q`` (the question). The dashboard only reads it.
+_ADVISOR_HISTORY_ENV = "COSMERGON_ADVISOR_HISTORY"
+_ADVISOR_PAGE = 10  # exchanges shown when the talk opens, and fetched per PgUp at its top
 
 
 def _advisor_argv() -> list[str] | None:
@@ -451,6 +455,32 @@ def _advisor_answer(ausgabe: str) -> tuple[str, str, bool]:
     if antwort:
         return wer, antwort, True
     return wer, f"No answer: {daten.get('why') or 'the advisor answered nothing'}", False
+
+
+def _advisor_history() -> list[tuple[str, str, str, bool]]:
+    """The talk so far as (question, who, answer, ok), oldest first.
+
+    Read from the file the starter names in ``COSMERGON_ADVISOR_HISTORY``; empty without one.
+    A line that is not a JSON object with a question ``q`` is skipped.
+    """
+    pfad = os.environ.get(_ADVISOR_HISTORY_ENV, "")
+    if not pfad:
+        return []
+    try:
+        with open(pfad, encoding="utf-8", errors="replace") as datei:
+            zeilen = datei.read().splitlines()
+    except OSError:
+        return []
+    verlauf: list[tuple[str, str, str, bool]] = []
+    for zeile in zeilen:
+        try:
+            daten = json.loads(zeile)
+        except ValueError:
+            continue
+        frage = str(daten.get("q") or "").strip() if isinstance(daten, dict) else ""
+        if frage:
+            verlauf.append((frage, *_advisor_answer(zeile)))
+    return verlauf
 
 
 async def _ask_advisor(argv: list[str], question: str) -> tuple[str, str, bool]:
@@ -3968,6 +3998,8 @@ class ChatScreen(ModalScreen):
         self._agent_name = agent_name
         self._agent_mode = agent_mode
         self._advisor = advisor  # a command that answers a question (see _ask_advisor)
+        # Exchanges of the advisor's own record that are older than what is shown (PgUp).
+        self._earlier: list[tuple[str, str, str, bool]] = []
 
     def _header(self) -> str:
         """Who is on the other side, in one line — also when nobody is."""
@@ -3986,14 +4018,51 @@ class ChatScreen(ModalScreen):
     def _zeile(self, wer: str, text: str, farbe: str) -> Static:
         # Static, not Label: a Label is as wide as its text, and a long answer was cut off
         # at the border (seen on the device, 11.10.2026); a Static wraps.
-        return Static(_c(farbe, f"\\[{_roh(wer)}] {_roh(text)}"))
+        return Static(_c(farbe, f"\\[{_roh(wer)}] {_roh(text)}"), classes="chat-line")
+
+    def _exchange(self, wechsel: tuple[str, str, str, bool]) -> list[Static]:
+        """One question to the advisor and what came back, as two lines."""
+        frage, wer, antwort, gut = wechsel
+        farbe = self._theme.pos if gut else self._theme.warn
+        return [
+            self._zeile("You", frage, self._theme.data),
+            self._zeile(wer or "advisor", antwort, farbe),
+        ]
+
+    def _earlier_hint(self) -> str:
+        return f"[dim]↑ {len(self._earlier)} earlier · PgUp[/dim]"
+
+    def _advisor_lines(self) -> list[Static]:
+        """What the talk with the advisor opens with: its last exchanges, or the invitation."""
+        verlauf = _advisor_history()
+        if not verlauf:
+            return [Label("[dim]Ask a question about your agent or the world.[/dim]")]
+        self._earlier = verlauf[:-_ADVISOR_PAGE]
+        zeilen: list[Static] = []
+        if self._earlier:
+            zeilen.append(Label(self._earlier_hint(), id="chat-earlier"))
+        for wechsel in verlauf[-_ADVISOR_PAGE:]:
+            zeilen += self._exchange(wechsel)
+        return zeilen
+
+    def _show_earlier(self, scroll: VerticalScroll) -> None:
+        """Put the next older exchanges above the ones shown; the view stays where it was."""
+        seite, self._earlier = self._earlier[-_ADVISOR_PAGE:], self._earlier[:-_ADVISOR_PAGE]
+        hinweis = self.query_one("#chat-earlier", Label)
+        bisher_oben = scroll.query(".chat-line").first()
+        scroll.mount(*[z for wechsel in seite for z in self._exchange(wechsel)], after=hinweis)
+        if self._earlier:
+            hinweis.update(self._earlier_hint())
+        else:
+            hinweis.remove()
+        self.call_after_refresh(scroll.scroll_to_widget, bisher_oben, animate=False, top=True)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="chat-wrap"):
             yield Label(self._header(), id="chat-header")
             with VerticalScroll(id="history-scroll"):
                 if self._advisor:
-                    yield Label("[dim]Ask a question about your agent or the world.[/dim]")
+                    yield from self._advisor_lines()
                 elif self._messages:
                     for msg in self._messages:
                         von_mir = msg.get("sender", "") == "player"
@@ -4014,6 +4083,18 @@ class ChatScreen(ModalScreen):
         if event.key == "escape":
             self.dismiss(None)
             event.prevent_default()
+        elif event.key in ("pageup", "pagedown"):
+            # The input keeps the focus; these two keys move the talk above it. PgUp at the
+            # very top fetches the next older exchanges from the advisor's record.
+            scroll = self.query_one("#history-scroll", VerticalScroll)
+            if event.key == "pagedown":
+                scroll.scroll_page_down(animate=False)
+            elif self._earlier and scroll.scroll_y <= 0:
+                self._show_earlier(scroll)
+            else:
+                scroll.scroll_page_up(animate=False)
+            event.prevent_default()
+            event.stop()
 
     def on_input_submitted(self, event: Any) -> None:
         text = event.value.strip()
