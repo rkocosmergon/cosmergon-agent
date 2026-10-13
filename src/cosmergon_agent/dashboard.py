@@ -3973,14 +3973,20 @@ class ChatScreen(ModalScreen):
         padding: 0 2;
     }
     ChatScreen > #chat-wrap > #history-scroll {
-        /* Room to breathe (asked for on the device, 13.10.2026): a line above the talk,
-           four columns between the text and the scrollbar, a line above the input. */
-        padding: 1 4 0 2;
-        margin: 0 0 1 0;
+        /* Room to breathe (asked for on the device, 13.10.2026): a line above the talk and
+           above the input. The same side margins as the input, so the text starts where the
+           input starts and the scrollbar ends where the input ends. No padding on the right:
+           Textual draws the scrollbar INSIDE the padding, so padding there pushes the bar
+           away from the edge and leaves the text touching it (seen on the device with
+           0.27.7); the gap between text and bar is on the lines below. */
+        padding: 1 0 0 0;
+        margin: 0 2 1 2;
         height: 1fr;
     }
     ChatScreen .chat-line, ChatScreen #chat-earlier {
-        margin: 0 0 1 0;  /* an empty line after each: between question and answer too */
+        /* three columns between the text and the scrollbar; an empty line after each line,
+           between question and answer too */
+        margin: 0 3 1 0;
     }
     ChatScreen > #chat-wrap > #chat-input {
         height: 3;

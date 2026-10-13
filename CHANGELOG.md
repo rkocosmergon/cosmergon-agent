@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **The talk under `[M]`: the scrollbar stands at the right edge and the text keeps its
+  distance.** In 0.27.7 the space meant to separate text and scrollbar ended up behind the
+  bar: it stood four columns away from the edge with the text touching it. Now the bar ends
+  where the input ends, and the text stops three columns before it.
+
 ## [0.27.7] — 2026-10-13
 
 ### Changed
