@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The talk under `[M]` has room to breathe and scrolls with the arrow keys.** An empty line
+  between question and answer and between exchanges, more space to the scrollbar and above
+  the input. `↑`/`↓` scroll the talk by a line (next to `PgUp`/`PgDn`); going up at the top
+  fetches the older exchanges.
+
 ## [0.27.6] — 2026-10-13
 
 ### Added

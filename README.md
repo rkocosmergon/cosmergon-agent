@@ -232,8 +232,9 @@ passed on to the command. The dashboard itself connects to no model.
 
 If the advisor keeps a record of the talk, name the file in `COSMERGON_ADVISOR_HISTORY`: JSON
 lines, one per question, in the same form the command prints, plus `q` for the question. The
-talk then opens with the last ten questions and their answers; `PgUp` at the top fetches ten
-older ones at a time, `PgUp`/`PgDn` scroll. The dashboard only reads that file.
+talk then opens with the last ten questions and their answers; going up at the top (`↑` or
+`PgUp`) fetches ten older ones at a time. `↑`/`↓` and `PgUp`/`PgDn` scroll the talk. The
+dashboard only reads that file.
 
 ## MCP Server
 

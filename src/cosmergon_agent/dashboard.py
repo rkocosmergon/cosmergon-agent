@@ -3973,8 +3973,14 @@ class ChatScreen(ModalScreen):
         padding: 0 2;
     }
     ChatScreen > #chat-wrap > #history-scroll {
-        padding: 0 2;
+        /* Room to breathe (asked for on the device, 13.10.2026): a line above the talk,
+           four columns between the text and the scrollbar, a line above the input. */
+        padding: 1 4 0 2;
+        margin: 0 0 1 0;
         height: 1fr;
+    }
+    ChatScreen .chat-line, ChatScreen #chat-earlier {
+        margin: 0 0 1 0;  /* an empty line after each: between question and answer too */
     }
     ChatScreen > #chat-wrap > #chat-input {
         height: 3;
@@ -4030,7 +4036,7 @@ class ChatScreen(ModalScreen):
         ]
 
     def _earlier_hint(self) -> str:
-        return f"[dim]↑ {len(self._earlier)} earlier · PgUp[/dim]"
+        return f"[dim]↑ {len(self._earlier)} earlier · arrow up or PgUp[/dim]"
 
     def _advisor_lines(self) -> list[Static]:
         """What the talk with the advisor opens with: its last exchanges, or the invitation."""
@@ -4083,16 +4089,21 @@ class ChatScreen(ModalScreen):
         if event.key == "escape":
             self.dismiss(None)
             event.prevent_default()
-        elif event.key in ("pageup", "pagedown"):
-            # The input keeps the focus; these two keys move the talk above it. PgUp at the
-            # very top fetches the next older exchanges from the advisor's record.
+        elif event.key in ("up", "down", "pageup", "pagedown"):
+            # The input keeps the focus; these keys move the talk above it — the arrows by
+            # a line, PgUp/PgDn by a page. Going up at the very top fetches the next older
+            # exchanges from the advisor's record.
             scroll = self.query_one("#history-scroll", VerticalScroll)
-            if event.key == "pagedown":
-                scroll.scroll_page_down(animate=False)
-            elif self._earlier and scroll.scroll_y <= 0:
+            if event.key in ("up", "pageup") and self._earlier and scroll.scroll_y <= 0:
                 self._show_earlier(scroll)
-            else:
+            elif event.key == "up":
+                scroll.scroll_up(animate=False)
+            elif event.key == "down":
+                scroll.scroll_down(animate=False)
+            elif event.key == "pageup":
                 scroll.scroll_page_up(animate=False)
+            else:
+                scroll.scroll_page_down(animate=False)
             event.prevent_default()
             event.stop()
 
