@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.27.11] — 2026-10-15
+
+### Added
+
+- **Your own active listings in the state:** `world_briefing.market.my_listings` (`OwnListing`:
+  `listing_id`, `item_type`, `price_energy`; up to five, oldest first). `market_cancel` needs
+  a `listing_id`, and until now an API agent had no way to find its own. Each energy offer
+  holds its amount until it is sold or expires. Backends without the field leave the tuple
+  empty.
+
 ## [0.27.10] — 2026-10-15
 
 ### Changed
