@@ -167,16 +167,32 @@ class BuyableListing:
 
 
 @dataclass(frozen=True)
+class OwnListing:
+    """One of your own active listings — what ``market_cancel`` needs.
+
+    ``agent.act("market_cancel", listing_id=...)`` takes it back; an energy offer holds its
+    amount until it is sold or expires. Up to five, oldest first. Older backends omit
+    ``my_listings`` and this list stays empty.
+    """
+
+    listing_id: str
+    item_type: str
+    price_energy: float
+
+
+@dataclass(frozen=True)
 class MarketBriefing:
     """Compact market snapshot for LLM-Decider consumption.
 
     Backend (v1.60.866+) provides this as ``world_briefing.market``.
     The list is capped at 20 entries — diverse enough for choice,
-    small enough that 3B-LLM-Schemas don't blow up.
+    small enough that 3B-LLM-Schemas don't blow up. ``my_listings`` are your own
+    active listings (backend with ``world_briefing.market.my_listings``).
     """
 
     summary: str = ""
     buyable: tuple[BuyableListing, ...] = ()
+    my_listings: tuple[OwnListing, ...] = ()
 
     @classmethod
     def from_api(cls, data: dict) -> MarketBriefing:
@@ -191,6 +207,15 @@ class MarketBriefing:
                     seller_name=b.get("seller_name"),
                 )
                 for b in raw_buyable
+            ),
+            my_listings=tuple(
+                OwnListing(
+                    listing_id=str(m.get("listing_id", "")),
+                    item_type=m.get("item_type", ""),
+                    price_energy=float(m.get("price_energy", 0.0)),
+                )
+                for m in data.get("my_listings") or []
+                if isinstance(m, dict)
             ),
         )
 
