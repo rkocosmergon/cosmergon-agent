@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.10] — 2026-10-15
+
 ### Changed
 
 - **Security: the question under `[M]` goes to the advisor command on stdin, no longer as its
