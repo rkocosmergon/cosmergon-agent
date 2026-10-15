@@ -226,7 +226,8 @@ shown as plain text, never as markup, and the dashboard hands them to no model.
 **Ask an advisor from the dashboard.** The server chat under `m` is answered only where the
 server plays the agent — not for an agent your own program plays. If the program that starts the
 dashboard sets `COSMERGON_ADVISOR_CMD` to a command, `m` asks that command instead: it is run
-with your question as its last argument (no shell), and what it prints is the answer — plain
+without a shell and gets your question on stdin as one line (never as an argument: those
+stand in the process list for every local user), and what it prints is the answer — plain
 text, or JSON with `a` (or `answer`) and optionally `model` and `why`. The agent's key is not
 passed on to the command. The dashboard itself connects to no model.
 

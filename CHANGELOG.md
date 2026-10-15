@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Security: the question under `[M]` goes to the advisor command on stdin, no longer as its
+  last argument.** Arguments stand in `/proc/<pid>/cmdline`, which every user on the machine
+  can read while the advisor answers. A command set in `COSMERGON_ADVISOR_CMD` now reads one
+  line from stdin. One that still expects the question as an argument gets none and answers
+  with an error; Shikigon 0.1.1 reads stdin.
+
 ## [0.27.9] — 2026-10-13
 
 ### Added

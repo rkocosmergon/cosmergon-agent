@@ -484,16 +484,17 @@ def _advisor_history() -> list[tuple[str, str, str, bool]]:
 
 
 async def _ask_advisor(argv: list[str], question: str) -> tuple[str, str, bool]:
-    """Run the advisor command with the question as its last argument: (who, answer, ok).
+    """Run the advisor command with the question on stdin, one line: (who, answer, ok).
 
-    No shell; the agent's key is not passed on to the command; a failure is a sentence.
+    Not as an argument: arguments stand in /proc/<pid>/cmdline, which every local user can
+    read. No shell; the agent's key is not passed on to the command; a failure is a sentence.
     """
     umgebung = {k: v for k, v in os.environ.items() if k not in _ADVISOR_KEPT_FROM_CHILD}
+    zeile = (" ".join(question.split()) + "\n").encode("utf-8")
     try:
         prozess = await asyncio.create_subprocess_exec(
             *argv,
-            question,
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
             env=umgebung,
@@ -501,7 +502,7 @@ async def _ask_advisor(argv: list[str], question: str) -> tuple[str, str, bool]:
     except OSError as exc:
         return "", f"The advisor could not be started ({type(exc).__name__}).", False
     try:
-        ausgabe, _ = await asyncio.wait_for(prozess.communicate(), _ADVISOR_PATIENCE_S)
+        ausgabe, _ = await asyncio.wait_for(prozess.communicate(zeile), _ADVISOR_PATIENCE_S)
     except asyncio.TimeoutError:
         prozess.kill()
         await prozess.wait()
