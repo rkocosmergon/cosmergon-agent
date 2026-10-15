@@ -19,10 +19,10 @@ jobs:
       id-token: write  # Required for Trusted Publisher (OIDC)
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: "3.12"
 
@@ -65,7 +65,7 @@ jobs:
           "
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
         # No api_token needed — Trusted Publisher via OIDC
         with:
           # cos20 S360: a run whose MCP Registry step failed (registry 504, 0.21.0) must be
