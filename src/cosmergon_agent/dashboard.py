@@ -57,6 +57,8 @@ except ImportError as _exc:
 
 from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError, __version__
 from cosmergon_agent.action import (
+    action_done_word,
+    action_word,
     mission_goal_text,
     mission_outcome_text,
     mission_step_text,
@@ -1087,8 +1089,8 @@ class HelpModal(ModalScreen):
             "Your agent acts when you act here, or when a program of",
             "yours plays it with this key. In the main world the server",
             "does not play your agent for you. The log shows both:",
-            "what you do here, and as 'program: …' what a program",
-            "did with this key.",
+            "what you do here ('✓ you placed …'), and under your",
+            "agent's name what a program did with this key.",
             "",
             # ── FAQ ───────────────────────────────────────────────────────
             "[bold]═ FAQ[/bold]",
@@ -1923,7 +1925,7 @@ class CosmergonDashboard(App):
         except RateLimitError as exc:  # one action per tick and agent — queue it
             self._schedule_pending(
                 _PendingAction(
-                    kind="act", action="market_buy", params=kauf, display="buy mega bomb"
+                    kind="act", action="market_buy", params=kauf, display="buy a mega bomb"
                 ),
                 retry_after=exc.retry_after,
             )
@@ -2061,7 +2063,8 @@ class CosmergonDashboard(App):
 
         @self.agent.on_error
         async def _error(result: Any) -> None:
-            self._add_log(_c(self._theme.warn, f"✗ {result.action}: {result.error_message}"))
+            zeile = f"✗ couldn't {action_word(result.action)}: {result.error_message}"
+            self._add_log(_c(self._theme.warn, zeile))
 
     @work(exclusive=True)
     async def _run_agent(self) -> None:
@@ -2177,24 +2180,25 @@ class CosmergonDashboard(App):
             # kind → (what makes the line new, the line)
             "cells": (
                 str(ohne_zellen or ""),
-                f"{ohne_zellen} of {sit.fields_owned} fields have no cells",
+                f"{ohne_zellen} of {sit.fields_owned} fields have no cells"
+                " — they earn nothing until cells grow there",
             ),
             "benchmark": (
                 "ready" if sit.benchmark_ready else "",
-                "7-day benchmark report is ready",
+                "your 7-day benchmark report is ready",
             ),
             "spores": (
                 "there" if sit.dormant_spores_on_fields > 0 else "",
-                f"{sit.dormant_spores_on_fields} dormant spores on your fields",
+                _sporen_zeile(sit.dormant_spores_on_fields),
             ),
             "catastrophe": (
                 str(sit.active_catastrophe or ""),
-                f"Active catastrophe: {sit.active_catastrophe}",
+                f"a catastrophe is under way: {str(sit.active_catastrophe).replace('_', ' ')}",
             ),
         }
         for art, (stand, zeile) in lage.items():
             if stand and stand != self._situation_seen.get(art):
-                self._add_log(_c("dim", f"\\[SYSTEM] {_roh(zeile)}"))
+                self._add_log(_c("dim", f"· {_roh(zeile)}"))
             self._situation_seen[art] = stand
 
     async def _log_program_moves(self) -> None:
@@ -2227,7 +2231,8 @@ class CosmergonDashboard(App):
             return
         kosten = _cost_str(_cost_of(data))
         # No tick in front: the same move every minute is one line that counts up.
-        self._add_log(_c(self._theme.data, f"program: {_roh(action)}{kosten}"))
+        wer = _roh(self._agent_name_or_id())
+        self._add_log(_c(self._theme.data, f"{wer} {action_done_word(action)}{kosten}"))
 
     async def _follow_missions(self) -> None:
         """Keep the Marauder's running mission for the panel; log each start and end (#468).
@@ -2437,7 +2442,7 @@ class CosmergonDashboard(App):
             return
         pending = self._pending_action
         self._pending_action = None  # clear before firing — prevents re-queue on error
-        self._add_log(_c(self._theme.data, f"⠋ auto-retry: {pending.display}..."))
+        self._add_log(_c(self._theme.data, f"⠋ trying again: {pending.display}…"))
         try:
             if pending.kind == "compass":
                 result = await self.agent.set_compass(pending.action)
@@ -2452,13 +2457,12 @@ class CosmergonDashboard(App):
             else:
                 r = await self.agent.act(pending.action, **pending.params)
                 cs = _cost_str(_action_cost(r)) if r.success else ""
-                icon = "✓" if r.success else "✗"
                 color = self._theme.pos if r.success else self._theme.warn
                 msg = r.error_message or "failed"
                 label = (
-                    f"{icon} {pending.display}{cs}"
+                    f"✓ done: {pending.display}{cs}"
                     if r.success
-                    else f"{icon} {pending.display}: {msg}"
+                    else f"✗ couldn't {pending.display}: {msg}"
                 )
                 self._add_log(_c(color, label))
                 self._set_feedback(_c(color, label))
@@ -2468,7 +2472,7 @@ class CosmergonDashboard(App):
             wait = int(exc.retry_after)
             self._add_log(_c("dim", f"⏳ {pending.display}: still rate limited, retry ~{wait}s"))
         except CosmergonError as exc:
-            self._add_log(_c(self._theme.warn, f"✗ {pending.display}: {exc}"))
+            self._add_log(_c(self._theme.warn, f"✗ couldn't {pending.display}: {exc}"))
             self._set_feedback(_c(self._theme.warn, f"✗ {pending.display} failed"))
 
     # --- Redraw ---
@@ -2732,6 +2736,13 @@ class CosmergonDashboard(App):
         elif ends:
             text = f"key kept until {ends[0]} │ " + text
         return bool(len(text) <= self.size.width - 2)  # the bar's padding: 0 1
+
+    def _agent_name_or_id(self) -> str:
+        """The agent's name for a log line; the start of its id while the state has none."""
+        state = self.agent.state
+        return (state.agent_name if state and state.agent_name else None) or (
+            (self.agent.agent_id or "?")[:8]
+        )
 
     def _draw_status_bar(self, state: GameState | None) -> None:
         name = (state.agent_name if state and state.agent_name else None) or (
@@ -3029,11 +3040,17 @@ class CosmergonDashboard(App):
             )
             icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
             cs = _cost_str(_action_cost(r))
-            self._add_log(_c(color, f"{icon} place_cells({_PRESETS[pi]}){cs}"))
+            ziel = f"a {_PRESETS[pi]} on {state.fields[fi].id[:8]}"
+            zeile = (
+                f"✓ you placed {ziel}{cs}"
+                if r.success
+                else f"✗ couldn't place {ziel}: {r.error_message or 'refused'}"
+            )
+            self._add_log(_c(color, zeile))
             label = f"{icon} Cells placed ({_PRESETS[pi]}){cs} — evolves next tick"
             self._set_feedback(_c(color, label))
         except RateLimitError as exc:
-            display = f"place_cells({_PRESETS[pi]})"
+            display = f"place a {_PRESETS[pi]} on {state.fields[fi].id[:8]}"
             wait_str = f" ~{int(exc.retry_after)}s" if exc.retry_after > 1 else ""
             self._schedule_pending(
                 _PendingAction(
@@ -3047,7 +3064,7 @@ class CosmergonDashboard(App):
             self._add_log(_c("dim", f"⏳ {display} — queued, fires next tick{wait_str}"))
             self._set_feedback(_c("dim", f"⏳ Queued: {display} — next tick{wait_str}"))
         except CosmergonError as exc:
-            self._add_log(_c(self._theme.warn, f"✗ place_cells: {exc}"))
+            self._add_log(_c(self._theme.warn, f"✗ couldn't place cells: {exc}"))
             self._set_feedback(_c(self._theme.warn, f"✗ Place cells failed: {exc}"))
 
     @work
@@ -3067,7 +3084,12 @@ class CosmergonDashboard(App):
             r = await self.agent.act("create_field", cube_id=cubes[ci].id)
             icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
             cs = _cost_str(_action_cost(r))
-            self._add_log(_c(color, f"{icon} create_field{cs}"))
+            zeile = (
+                f"✓ you created a field in cube {cubes[ci].name}{cs}"
+                if r.success
+                else f"✗ couldn't create a field: {r.error_message or 'refused'}"
+            )
+            self._add_log(_c(color, zeile))
             self._set_feedback(_c(color, f"{icon} Field created{cs} — press \\[P] to place cells"))
         except RateLimitError as exc:
             wait_str = f" ~{int(exc.retry_after)}s" if exc.retry_after > 1 else ""
@@ -3076,14 +3098,14 @@ class CosmergonDashboard(App):
                     kind="act",
                     action="create_field",
                     params={"cube_id": cubes[ci].id},
-                    display="create_field",
+                    display="create a field",
                 ),
                 retry_after=exc.retry_after,
             )
-            self._add_log(_c("dim", f"⏳ create_field — queued, fires next tick{wait_str}"))
-            self._set_feedback(_c("dim", f"⏳ Queued: create_field — next tick{wait_str}"))
+            self._add_log(_c("dim", f"⏳ create a field — queued, fires next tick{wait_str}"))
+            self._set_feedback(_c("dim", f"⏳ Queued: create a field — next tick{wait_str}"))
         except CosmergonError as exc:
-            self._add_log(_c(self._theme.warn, f"✗ create_field: {exc}"))
+            self._add_log(_c(self._theme.warn, f"✗ couldn't create a field: {exc}"))
             self._set_feedback(_c(self._theme.warn, f"✗ Field creation failed: {exc}"))
 
     @work
@@ -3125,29 +3147,30 @@ class CosmergonDashboard(App):
             if r.success:
                 new_tier = (r.data.get("result") or {}).get("new_tier")
                 cs = _cost_str(_action_cost(r))
-                tier_str = f" → T{new_tier}" if new_tier else ""
-                self._add_log(_c(color, f"{icon} evolve{tier_str}{cs}"))
+                tier_str = f" to T{new_tier}" if new_tier else ""
+                self._add_log(_c(color, f"✓ you evolved {ready[fi].id[:8]}{tier_str}{cs}"))
                 label = f"T{new_tier}" if new_tier else "ok"
                 self._set_feedback(_c(color, f"{icon} Evolved: {label}{cs}"))
             else:
                 msg = r.error_message or "failed"
-                self._add_log(_c(color, f"{icon} evolve → {msg}"))
+                self._add_log(_c(color, f"✗ couldn't evolve {ready[fi].id[:8]}: {msg}"))
                 self._set_feedback(_c(color, f"{icon} Evolve: {msg}"))
         except RateLimitError as exc:
+            was = f"evolve {ready[fi].id[:8]}"
             wait_str = f" ~{int(exc.retry_after)}s" if exc.retry_after > 1 else ""
             self._schedule_pending(
                 _PendingAction(
                     kind="act",
                     action="evolve",
                     params={"field_id": ready[fi].id},
-                    display="evolve",
+                    display=was,
                 ),
                 retry_after=exc.retry_after,
             )
-            self._add_log(_c("dim", f"⏳ evolve — queued, fires next tick{wait_str}"))
-            self._set_feedback(_c("dim", f"⏳ Queued: evolve — next tick{wait_str}"))
+            self._add_log(_c("dim", f"⏳ {was} — queued, fires next tick{wait_str}"))
+            self._set_feedback(_c("dim", f"⏳ Queued: {was} — next tick{wait_str}"))
         except CosmergonError as exc:
-            self._add_log(_c(self._theme.warn, f"✗ evolve: {exc}"))
+            self._add_log(_c(self._theme.warn, f"✗ couldn't evolve: {exc}"))
             self._set_feedback(_c(self._theme.warn, f"✗ Evolve failed: {exc}"))
 
     @work
@@ -3552,7 +3575,7 @@ class CosmergonDashboard(App):
         try:
             r = await self.agent.act(action)
         except CosmergonError as exc:
-            self._add_log(_c(self._theme.warn, f"✗ {action}: {exc}"))
+            self._add_log(_c(self._theme.warn, f"✗ couldn't {action}: {exc}"))
             self._set_feedback(_c(self._theme.warn, f"✗ {action} failed: {exc}"))
             return
         # Only a confirmed server change flips the local state (a refused resume left the
@@ -3560,7 +3583,12 @@ class CosmergonDashboard(App):
         if r.success:
             self._paused = action == "pause"
         icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
-        self._add_log(_c(color, f"{icon} {action}"))
+        zeile = (
+            f"✓ {action_done_word(action)}"
+            if r.success
+            else f"✗ couldn't {action}: {r.error_message or 'refused'}"
+        )
+        self._add_log(_c(color, zeile))
         label = "⏸ Agent paused" if action == "pause" else "▶ Agent resumed"
         self._set_feedback(_c(color, f"{icon} {label}" if r.success else f"✗ {r.error_message}"))
 
@@ -5023,6 +5051,23 @@ def _field_lines(
                 wie = f"{wer} gave up the claim"
             zeilen.append((tab, f"✓ {feld} held — {wie}", False))
     return zeilen
+
+
+def _sporen_zeile(anzahl: int) -> str:
+    """Dormant spores on the agent's fields, with what follows (spore rule, cos20 #486).
+
+    A planted spore wakes as cells when its dormancy ends; one that holds loot vanishes
+    unless a Marauder collects it first (``spore_engine``).
+    """
+    if anzahl == 1:
+        return (
+            "1 dormant spore lies on your fields — it wakes as cells,"
+            " or vanishes uncollected if it holds loot"
+        )
+    return (
+        f"{anzahl} dormant spores lie on your fields — they wake as cells;"
+        " those holding loot vanish unless collected"
+    )
 
 
 def _mission_wer(mission: dict) -> str:

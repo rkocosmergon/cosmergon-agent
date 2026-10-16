@@ -88,6 +88,84 @@ _OUTCOME_WORDS = {
 }
 
 
+# Every move of the world in a player's words: what to do, and what was done (cos20 #486).
+# The terminal's log and Shikigon say a move this way, never by its function name
+# (``market_list``). A move that is not listed is said with spaces for underscores.
+_ACTION_WORDS: dict[str, tuple[str, str]] = {
+    "abandon_field": ("give up a field", "gave up a field"),
+    "accept_contract": ("accept a contract", "accepted a contract"),
+    "activate_voucher": ("redeem a voucher", "redeemed a voucher"),
+    "apply_to_contract": ("apply for a contract", "applied for a contract"),
+    "breach_contract": ("break a contract", "broke a contract"),
+    "burn_plague": ("burn a plague", "burned a plague"),
+    "buy_intelligence": ("buy a report", "bought a report"),
+    "buy_shield": ("buy a shield", "bought a shield"),
+    "cancel_mission": ("call off a mission", "called off a mission"),
+    "claim_field": ("claim a field", "claimed a field"),
+    "create_cube": ("create a cube", "created a cube"),
+    "create_field": ("create a field", "created a field"),
+    "decide_application": ("decide on an application", "decided on an application"),
+    "evolve": ("evolve a field", "evolved a field"),
+    "heal_holes": ("heal holes in a field", "healed holes in a field"),
+    "list_intelligence": ("offer a report", "offered a report"),
+    "market_buy": ("buy on the market", "bought on the market"),
+    "market_cancel": ("take back an offer", "took back an offer"),
+    "market_list": ("sell on the market", "put an offer on the market"),
+    "pause": ("pause", "paused"),
+    "pickup_drop": ("pick up loot", "picked up loot"),
+    "place_cells": ("place cells", "placed cells"),
+    "place_deployable": ("place a device", "placed a device"),
+    "propose_contract": ("offer a contract", "offered a contract"),
+    "propose_counter": ("make a counter-offer", "made a counter-offer"),
+    "propose_from_template": ("offer a contract", "offered a contract"),
+    "reject_contract": ("turn down a contract", "turned down a contract"),
+    "remit_to_owner": ("pay tribute", "paid tribute"),
+    "resume": ("resume", "resumed"),
+    "say": ("say something", "said something"),
+    "set_compass": ("set the compass", "set the compass"),
+    "set_tournament_compass": ("set the tournament compass", "set the tournament compass"),
+    "shoot_spore": ("shoot a spore", "shot a spore"),
+    "start_mission": ("start a mission", "started a mission"),
+    "terminal_query": ("ask a terminal", "asked a terminal"),
+    "transfer_energy": ("send energy", "sent energy"),
+    "transfer_inventory": ("hand over goods", "handed over goods"),
+    "wait": ("wait", "waited"),
+}
+# What a Marauder brings back from a terminal (``intel_acquired:<kind>``, cos20 #486), and
+# what it found nothing about (``nothing_found:<kind>``, cos20 #494).
+_INTEL_WORDS = {
+    "field_lookup": "a look at a field",
+    "recon_field": "a look at a field",
+    "wealth_estimate": "who is rich",
+    "reputation": "a reputation",
+    "public_alliances": "the alliances",
+    "marketplace_listings": "the market's offers",
+    "catastrophe_warnings": "catastrophe warnings",
+    "active_thief_birds": "where thief birds fly",
+}
+
+
+def action_word(action: str) -> str:
+    """A move in a player's words, as something to do: ``market_list`` → ``sell on the market``."""
+    words = _ACTION_WORDS.get(action)
+    return words[0] if words else action.replace("_", " ")
+
+
+def action_done_word(action: str) -> str:
+    """A move in a player's words, as done: ``place_cells`` → ``placed cells``."""
+    words = _ACTION_WORDS.get(action)
+    return words[1] if words else action.replace("_", " ")
+
+
+def _intel_text(outcome: str) -> str | None:
+    """``intel_acquired:wealth_estimate`` → ``brought back who is rich``; else ``None``."""
+    art, _, kind = outcome.partition(":")
+    if art not in ("intel_acquired", "nothing_found") or not kind:
+        return None
+    what = _INTEL_WORDS.get(kind, kind.replace("_", " "))
+    return f"brought back {what}" if art == "intel_acquired" else f"found nothing about {what}"
+
+
 def mission_word(mission_type: str) -> str:
     """A mission kind in a player's words: ``siege_field`` → ``siege``."""
     return _MISSION_WORDS.get(mission_type, mission_type.replace("_", " "))
@@ -137,6 +215,9 @@ def mission_outcome_text(outcome: str, what: str | None = None) -> str:
         if what:
             text = f"picked up {count} {what}" + ("" if count == "1" else "s")
         return f"{text}, {mission_outcome_text(reason)}" if reason else text
+    intel = _intel_text(outcome)
+    if intel is not None:
+        return intel
     return _OUTCOME_WORDS.get(outcome, outcome.replace("_", " "))
 
 
