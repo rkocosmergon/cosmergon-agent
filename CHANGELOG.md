@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [0.27.12] — 2026-10-16
+
+### Changed
+
+- **The dashboard's log speaks a player's words** (cos20 #486). A move another program made
+  with the agent's key reads `Root-storm placed cells (-10 E)` instead of
+  `program: place_cells (-10 E)`. Your own moves read `✓ you placed a glider on 1d3c2972`,
+  `✗ couldn't create a field: …`. What the world reports starts with `·` instead of `[SYSTEM]`
+  and says what follows: `· 2 of 8 fields have no cells — they earn nothing until cells grow
+  there`.
+- **A scouting trip says what it brought back:** `brought back who is rich`, or
+  `found nothing about who is rich` when the terminal had nothing (the server says so from
+  cos20 #494 on). Before, both read `intel acquired:wealth estimate`.
+
+### Added
+
+- `cosmergon_agent.action.action_word` / `action_done_word`: every move of the world in words,
+  as something to do (`sell on the market`) and as done (`put an offer on the market`). A move
+  that is not listed reads with spaces for underscores.
+
 ## [0.27.11] — 2026-10-15
 
 ### Added
