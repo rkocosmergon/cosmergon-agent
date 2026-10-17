@@ -2,10 +2,25 @@
 
 ## [Unreleased]
 
-## [0.27.14] — 2026-10-17
+## [0.27.15] — 2026-10-17
+
+0.27.14 was not published; its changes are part of this release.
+
+### Changed
+
+- **The main view behaves like htop and btop in a small or tiled window** (cos20 #508). Panels
+  do not scroll and do not wrap: a line that does not fit ends in "…" at the frame. Names are
+  shortened, numbers never — `Top: Sock… (33.6M E)`, `Rank #84/380 · 1.0M E`. The field list
+  shows as many fields as fit, then `(+N more) [V]`. Below 54×27 the dashboard says
+  `Window too small — needs at least 54x27, now 40x12` instead of drawing a cut picture.
+- Requires `textual>=2.0.0` (text-wrap and text-overflow for the panels).
 
 ### Fixed
 
+- **Long dialog content scrolls in small or tiled windows** (cos20 #508): key, onboarding,
+  pause, reconnect, identity, selection and agent list. The agent list keeps its cursor in view.
+- A field type is no longer cut to eight letters (`spaceshi`), and learned rules and error
+  messages are no longer cut at a fixed length.
 - **Every dialog fits the window.** Frames had fixed widths of 52 to 76 columns and fixed
   heights; in a narrow or short terminal parts of them fell outside, and header or footer lines
   longer than their frame were cut off. Now no frame is larger than the window, and a line wraps
