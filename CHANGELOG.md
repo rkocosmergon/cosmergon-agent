@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.27.14] — 2026-10-17
+
+### Fixed
+
+- **Every dialog fits the window.** Frames had fixed widths of 52 to 76 columns and fixed
+  heights; in a narrow or short terminal parts of them fell outside, and header or footer lines
+  longer than their frame were cut off. Now no frame is larger than the window, and a line wraps
+  instead of being cut. A test opens all twelve dialogs in nine window sizes.
+- **The showcase dialog [S] scrolls.** With the longer consent text the switch line fell out of
+  the frame, and Space toggled where nobody could see it. The text now scrolls (↑ ↓ PgUp PgDn);
+  the Terms note, the switch and the keys stay below it. The switch line reads in English like
+  the rest of the dashboard.
+
 ## [0.27.13] — 2026-10-17
 
 ### Added
