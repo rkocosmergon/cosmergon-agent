@@ -74,7 +74,7 @@ from cosmergon_agent.config import (
 )
 from cosmergon_agent.exceptions import ConnectionError as CsgConnectionError
 from cosmergon_agent.exceptions import RateLimitError
-from cosmergon_agent.state import AgentSituation, Field, GameState
+from cosmergon_agent.state import AgentSituation, Field, GameState, Ranking
 
 logger = logging.getLogger(__name__)
 
@@ -1551,6 +1551,10 @@ class ShowcaseModal(ModalScreen):
     def compose(self) -> ComposeResult:
         with Vertical(id="sc-wrap"):
             yield Label(self._consent_text, id="sc-text")
+            yield Label(
+                "[dim]Turning it on also accepts the Terms: cosmergon.com/agb.html[/dim]",
+                id="sc-terms",
+            )
             yield Label(self._switch_line(), id="sc-switch")
             yield Label(
                 "[dim]Space toggle · Enter submit · Esc cancel[/dim]",
@@ -2544,13 +2548,7 @@ class CosmergonDashboard(App):
         )
 
         if state.ranking:
-            score_part = (
-                f"  Score: {state.ranking.player_score:,.0f}"
-                if state.ranking.player_score > 0
-                else ""
-            )
-            tier_line = f"T{state.ranking.player_tier} {state.ranking.tier_name}{score_part}"
-            lines.append(_c(t.data, tier_line))
+            lines.append(_c(t.data, _rang_zeile(state.ranking)))
         # What the main-world Marauder does, while a mission runs (#468) — in the place of
         # the blank line, the panel has a fixed height.
         lines.append(
@@ -3378,11 +3376,7 @@ class CosmergonDashboard(App):
         if not result:
             return
 
-        payload = {
-            "public_showcase": result["desired"],
-            "consent_text_hash": result["consent_text_hash"],
-            "request_id": str(_uuid.uuid4()),
-        }
+        payload = _showcase_payload(result, str(_uuid.uuid4()))
         try:
             async with _httpx.AsyncClient(timeout=15.0, verify=True) as client:
                 r = await client.patch(f"{base}/api/v1/players/me", json=payload, headers=headers)
@@ -4852,6 +4846,40 @@ _TURNIER_WERTUNG: tuple[tuple[str, str], ...] = (
     ("fields", "territory"),
     ("vitality", "vitality"),
 )
+
+
+def _showcase_payload(result: dict, request_id: str) -> dict:
+    """``PATCH /players/me`` body for the showcase switch.
+
+    Turning it on also accepts the Terms (cos20 #504): the server records that acceptance with
+    time and version, and the consent screen says so above the switch. Turning it off sends no
+    acceptance.
+    """
+    payload = {
+        "public_showcase": result["desired"],
+        "consent_text_hash": result["consent_text_hash"],
+        "request_id": request_id,
+    }
+    if result["desired"]:
+        payload["accept_terms"] = True
+    return payload
+
+
+def _rang_zeile(ranking: Ranking) -> str:
+    """Your place in the one ranking (cos20 #504): ``Rank #12 of 380 · total 4.8M E``.
+
+    The total is your own, shown only to you, and only while the ranking counts it. Older
+    backends send no ``rang``; then the line keeps the tier and score it showed before.
+    """
+    if ranking.rang > 0:
+        zeile = f"Rank #{ranking.rang}"
+        if ranking.rang_von:
+            zeile += f" of {ranking.rang_von}"
+        if ranking.gesamtenergie is not None:
+            zeile += f"  ·  total {_kurz(ranking.gesamtenergie)} E"
+        return zeile
+    score = f"  Score: {ranking.player_score:,.0f}" if ranking.player_score > 0 else ""
+    return f"T{ranking.player_tier} {ranking.tier_name}{score}"
 
 
 def _kurz(wert: float) -> str:

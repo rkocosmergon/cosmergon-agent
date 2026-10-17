@@ -21,6 +21,18 @@ def _safe_construct(cls: type, data: dict) -> Any:
     return cls(**filtered)
 
 
+def _dict_or_none(data: dict, key: str) -> dict | None:
+    """``data[key]`` when the server sent an object there, else ``None`` (C3)."""
+    wert = data.get(key)
+    return wert if isinstance(wert, dict) else None
+
+
+def _typed_or_none(cls: type, data: dict, key: str) -> Any:
+    """``data[key]`` as ``cls`` when the server sent an object there, else ``None`` (C3)."""
+    roh = _dict_or_none(data, key)
+    return _safe_construct(cls, roh) if roh is not None else None
+
+
 @dataclass(frozen=True)
 class Field:
     """A Conway game field owned by this agent."""
@@ -90,6 +102,16 @@ class Ranking:
     champion_rang: int = 0
     champion_score: float = 0.0
     ziel: str = ""
+    # The ONE ranking (cos20 #504). ``wertung`` says what it counts — ``"champion"`` or
+    # ``"total_energy"`` (your energy plus what your fields, cubes, rooms and items are worth).
+    # Branch on ``wertung``, never on the sentence ``ziel``. ``rang`` of ``rang_von`` is your
+    # place (1 = best, 0 = unrated). ``gesamtenergie`` and its parts are yours alone and only
+    # set while the ranking counts total energy; ``None`` otherwise or on older backends.
+    wertung: str = "champion"
+    rang: int = 0
+    rang_von: int = 0
+    gesamtenergie: float | None = None
+    gesamtenergie_teile: dict[str, float] | None = None
 
     @classmethod
     def from_api(cls, data: dict) -> Ranking:
@@ -103,6 +125,20 @@ class Ranking:
         known = {f.name for f in dc_fields(cls)} - {"facetten"}
         gefiltert = {k: v for k, v in data.items() if k in known}
         return cls(**gefiltert, facetten=facetten)
+
+
+@dataclass(frozen=True)
+class ShowcaseStand:
+    """Your public showcase (cos20 #504): which consent text is current, which one you gave.
+
+    ``consented_version`` is ``None`` without a consent or after you withdrew it. From ``"v2"``
+    on a consent also covers your place in the ranking and your total energy;
+    ``total_energy_public`` says whether that number is shown publicly right now.
+    """
+
+    current_version: str = ""
+    consented_version: str | None = None
+    total_energy_public: bool = False
 
 
 @dataclass(frozen=True)
@@ -350,6 +386,9 @@ class GameState:
     # also ``my_score``, ``leader`` and ``bodies``. ``None``: in no tournament, or an older
     # backend (forward-compatibility, C3).
     tournament: dict | None = None
+    # Your public showcase (cos20 #504): consent versions and whether your total energy is
+    # public. ``None`` on older backends (forward-compatibility, C3).
+    showcase: ShowcaseStand | None = None
 
     @classmethod
     def from_api(cls, data: dict) -> GameState:
@@ -397,11 +436,8 @@ class GameState:
                 for k, v in ((data.get("inventory") or {}).get("items") or {}).items()
                 if isinstance(v, int | float)
             },
-            next_step=data.get("next_step") if isinstance(data.get("next_step"), dict) else None,
-            key_expiry=(
-                data.get("key_expiry") if isinstance(data.get("key_expiry"), dict) else None
-            ),
-            tournament=(
-                data.get("tournament") if isinstance(data.get("tournament"), dict) else None
-            ),
+            next_step=_dict_or_none(data, "next_step"),
+            key_expiry=_dict_or_none(data, "key_expiry"),
+            tournament=_dict_or_none(data, "tournament"),
+            showcase=_typed_or_none(ShowcaseStand, data, "showcase"),
         )
