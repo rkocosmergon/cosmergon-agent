@@ -1045,7 +1045,7 @@ class HelpModal(ModalScreen):
         background: $surface;
     }
     HelpModal > #guide-wrap > #guide-header {
-        height: 1;
+        height: auto;
         padding: 0 2;
     }
     HelpModal > #guide-wrap > VerticalScroll {
@@ -1235,7 +1235,7 @@ class KeyModal(ModalScreen):
         padding: 1 2;
     }
     KeyModal > #key-wrap > #key-header {
-        height: 1;
+        height: auto;
         padding: 0 0 1 0;
     }
     """
@@ -1495,7 +1495,11 @@ class ShowcaseModal(ModalScreen):
     """Public-Showcase Opt-in/Opt-out toggle screen.
 
     Displays the canonical consent text and lets the user flip the switch.
-    Keyboard-only: Space toggles the state, Enter submits, Esc cancels.
+    Keyboard-only: Space toggles the state, Enter submits, Esc cancels, ↑ ↓ PgUp PgDn scroll.
+
+    The text scrolls; the Terms note, the switch and the keys stay below it in every window
+    (cos20 #504: with the longer text v2 the switch line fell out of the frame, and Space
+    toggled where nobody could see it).
 
     Dismissed with:
       {"desired": True|False, "consent_text_hash": "..."} — apply change
@@ -1504,8 +1508,8 @@ class ShowcaseModal(ModalScreen):
 
     BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
         Binding("escape", "cancel", "Cancel", show=False),
-        Binding("space", "toggle_switch", "Toggle", show=False),
-        Binding("enter", "submit", "Submit", show=False),
+        Binding("space", "toggle_switch", "Toggle", show=False, priority=True),
+        Binding("enter", "submit", "Submit", show=False, priority=True),
     ]
 
     DEFAULT_CSS = """
@@ -1514,24 +1518,23 @@ class ShowcaseModal(ModalScreen):
     }
     ShowcaseModal > #sc-wrap {
         width: 72;
-        height: auto;
-        max-height: 32;
+        height: 85vh;
+        max-height: 40;
         border: solid $accent;
         background: $surface;
-        padding: 1 2;
     }
-    ShowcaseModal #sc-text {
+    ShowcaseModal #sc-scroll {
+        height: 1fr;
+        padding: 1 2 0 2;
+    }
+    ShowcaseModal #sc-terms, ShowcaseModal #sc-switch, ShowcaseModal #sc-footer {
         height: auto;
-        max-height: 22;
-        overflow-y: auto;
-        padding: 0 0 1 0;
+        padding: 0 2;
     }
-    ShowcaseModal #sc-switch {
-        height: 1;
-        padding: 0 0 1 0;
+    ShowcaseModal #sc-terms {
+        padding: 1 2 0 2;
     }
     ShowcaseModal #sc-footer {
-        height: 1;
         color: $text-muted;
     }
     """
@@ -1550,29 +1553,30 @@ class ShowcaseModal(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="sc-wrap"):
-            yield Label(self._consent_text, id="sc-text")
+            with VerticalScroll(id="sc-scroll"):
+                yield Label(self._consent_text, id="sc-text")
             yield Label(
                 "[dim]Turning it on also accepts the Terms: cosmergon.com/agb.html[/dim]",
                 id="sc-terms",
             )
             yield Label(self._switch_line(), id="sc-switch")
             yield Label(
-                "[dim]Space toggle · Enter submit · Esc cancel[/dim]",
+                "[dim]Space toggle · Enter submit · Esc cancel · ↑ ↓ scroll[/dim]",
                 id="sc-footer",
             )
 
     def on_mount(self) -> None:
-        self.query_one("#sc-wrap").focus()
+        self.query_one("#sc-scroll", VerticalScroll).focus()
 
     def _switch_line(self) -> str:
         if self._desired_state:
-            state = "[green]\\[x] ja — öffentlich sichtbar[/green]"
+            state = "[green]\\[x] yes — public[/green]"
         else:
-            state = "[\\[ ] nein — privat"
+            state = "\\[ ] no — private"
         changed = (
-            " [yellow](geändert)[/yellow]" if self._desired_state != self._initial_state else ""
+            " [yellow](changed)[/yellow]" if self._desired_state != self._initial_state else ""
         )
-        return f"Agent öffentlich zeigen: {state}{changed}"
+        return f"Show this agent publicly: {state}{changed}"
 
     def action_toggle_switch(self) -> None:
         self._desired_state = not self._desired_state
@@ -1608,6 +1612,17 @@ class CosmergonDashboard(App):
     Screen {
         background: $csg-bg;
         layout: vertical;
+    }
+
+    /* Every dialog fits the window (cos20 #504, test_dialoge_passen_504): the frame is never
+       larger than the window, and a line of text is never wider than its frame - it wraps
+       instead of being cut. Fixed widths (52-76) and heights stay the target size. */
+    ModalScreen > Vertical {
+        max-width: 100%;
+        max-height: 100%;
+    }
+    ModalScreen Label {
+        max-width: 100%;
     }
 
     #hint-bar {
@@ -3931,7 +3946,7 @@ class LogScreen(ModalScreen):
         background: $surface;
     }
     LogScreen > #log-wrap > #log-header {
-        height: 1;
+        height: auto;
         padding: 0 2;
     }
     LogScreen > #log-wrap > VerticalScroll {
@@ -4001,7 +4016,7 @@ class ChatScreen(ModalScreen):
         background: $surface;
     }
     ChatScreen > #chat-wrap > #chat-header {
-        height: 1;
+        height: auto;
         padding: 0 2;
     }
     ChatScreen > #chat-wrap > #history-scroll {
@@ -4226,7 +4241,7 @@ class FieldScreen(ModalScreen):
         overflow: hidden hidden;
     }
     FieldScreen > #fv-wrap > #fv-footer {
-        height: 1;
+        height: auto;
         padding: 0 1;
     }
     """
@@ -4498,7 +4513,7 @@ class IdentitySetupScreen(ModalScreen):
         padding: 1 2;
     }
     IdentitySetupScreen > #setup-wrap > #setup-header {
-        height: 1;
+        height: auto;
         margin-bottom: 1;
     }
     IdentitySetupScreen > #setup-wrap > #setup-intro {
@@ -5339,7 +5354,7 @@ class OnboardingModal(ModalScreen):
         padding: 1 2;
     }
     OnboardingModal > #onboard-wrap > #onboard-title {
-        height: 1;
+        height: auto;
         margin-bottom: 1;
         text-style: bold;
     }
@@ -5348,7 +5363,7 @@ class OnboardingModal(ModalScreen):
         margin-bottom: 1;
     }
     OnboardingModal > #onboard-wrap > #onboard-footer {
-        height: 1;
+        height: auto;
         content-align: center middle;
     }
     """
