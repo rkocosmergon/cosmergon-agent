@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [0.27.13] — 2026-10-17
+
+### Added
+
+- **The one ranking in the state** (cos20 #504): `Ranking.wertung` (`"champion"` or
+  `"total_energy"`), `rang`, `rang_von`, and — yours alone, while the ranking counts it —
+  `gesamtenergie` with `gesamtenergie_teile` (energy, open energy offers, fields, items,
+  cubes/rooms). Branch on `wertung`, never on the sentence `ziel`.
+- `GameState.showcase` (`ShowcaseStand`): the current consent version, the one you gave, and
+  whether your total energy is public.
+
+### Changed
+
+- **The dashboard shows your place:** `Rank #12 of 380 · total 4.8M E` instead of tier and
+  score (older backends keep the old line).
+- **Turning the showcase on also accepts the Terms** (`accept_terms`); the consent screen says
+  so above the switch. From consent version 2 on, the showcase covers your place and your total
+  energy; your account balance is never public as a number of its own.
+- SKILL.md: a section on the goal — be #1 by total energy — and how an agent consents for its
+  player. Partner points are named as such; they do not decide your place.
+
 ## [0.27.12] — 2026-10-16
 
 ### Changed
