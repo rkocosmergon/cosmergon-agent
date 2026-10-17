@@ -80,6 +80,11 @@ logger = logging.getLogger(__name__)
 
 _MAX_LOG = 80
 _MAX_FIELDS = 5
+# The smallest window the main view fits whole (cos20 #508, test_anzeige_passt_508): below it the
+# dashboard says so instead of drawing a cut picture, like btop. Height = hint 1 + top row 14 +
+# log 6 + context 1 + keys 4 + status 1.
+_MIN_COLS = 54
+_MIN_ROWS = 27
 _PRESETS = ["block", "blinker", "toad", "glider", "r_pentomino", "pentadecathlon", "pulsar"]
 _COMPASS_PRESETS = ["attack", "defend", "grow", "trade", "cooperate", "explore", "autonomous"]
 _COMPASS_DISPLAY = {
@@ -371,7 +376,7 @@ class _Eintrag(NamedTuple):
 
 def _eintrag_anfuegen(log: list[_Eintrag], neu: _Eintrag) -> None:
     """Append an entry — or count the last one up when it says the same."""
-    if log and log[-1][:3] == neu[:3]:
+    if log and log[-1][:3] == neu[:3]:  # kuerzen-ok: compares the first three fields
         log[-1] = log[-1]._replace(mal=log[-1].mal + neu.mal)
         return
     log.append(neu)
@@ -934,11 +939,21 @@ def _evolve_body(fields: list[Field], ready: list[Field], info: dict, energy: fl
         teile.append("No field can evolve right now.")
     if wartend:
         zeilen = ["Not ready:"]
-        for f in wartend[:9]:
+        for f in wartend[:9]:  # kuerzen-ok: keys 1-9
             stufe = f"T{f.entity_tier or 0}"
             zeilen.append(f"  {f.id[:8]}  {stufe}  {_evolve_blocker(f, info, energy)}")
         teile.append("\n".join(zeilen))
     return "\n\n".join(teile)
+
+
+class _ScrollOhneFokus(VerticalScroll):
+    """A scroll area that takes no focus: for dialogs whose arrow keys move a cursor (cos20 #508).
+
+    A focused ``VerticalScroll`` binds ↑ ↓ to scrolling and the dialog never sees them; the
+    dialog scrolls this one itself to keep its cursor in view.
+    """
+
+    can_focus = False
 
 
 class SelectModal(ModalScreen):
@@ -980,7 +995,7 @@ class SelectModal(ModalScreen):
     ) -> None:
         super().__init__()
         self._title = title
-        self._options = options[:9]
+        self._options = options[:9]  # kuerzen-ok: keys 1-9
         self._body = body
         # Where the viewer is in a dialog of several steps, e.g. (1, ("Field", "Pattern")).
         self._steps = steps
@@ -990,7 +1005,7 @@ class SelectModal(ModalScreen):
             self.add_class("-tall")
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="dialog"):
+        with VerticalScroll(id="dialog"):
             if self._steps:
                 yield Static(_step_line(*self._steps), markup=True)
                 yield Static("")
@@ -1229,7 +1244,7 @@ class KeyModal(ModalScreen):
     KeyModal > #key-wrap {
         width: 64;
         height: auto;
-        max-height: 20;
+        max-height: 100%;  /* cos20 #508: never taller than the window */
         border: solid $accent;
         background: $surface;
         padding: 1 2;
@@ -1272,7 +1287,7 @@ class KeyModal(ModalScreen):
         ]
         # Paket 4.6b: Post-Cancel grace period notice
         if self._downgrade_at:
-            date_part = self._downgrade_at[:10]  # YYYY-MM-DD from ISO
+            date_part = self._downgrade_at[:10]  # kuerzen-ok: YYYY-MM-DD from ISO
             lines += [
                 "",
                 f"[yellow]Plan cancelled. Access continues until {date_part}.[/yellow]",
@@ -1296,7 +1311,7 @@ class KeyModal(ModalScreen):
             footer += " · R rotate Master Key"
         footer += "[/dim]"
         lines += ["", footer]
-        with Vertical(id="key-wrap"):
+        with VerticalScroll(id="key-wrap"):
             for line in lines:
                 yield Label(line)
 
@@ -1341,7 +1356,7 @@ class AgentSelectorModal(ModalScreen):
     AgentSelectorModal > #as-wrap {
         width: 58;
         height: auto;
-        max-height: 20;
+        max-height: 100%;  /* cos20 #508: never taller than the window */
         border: solid $accent;
         background: $surface;
         padding: 1 2;
@@ -1375,7 +1390,7 @@ class AgentSelectorModal(ModalScreen):
                 break
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="as-wrap"):
+        with _ScrollOhneFokus(id="as-wrap"):
             yield Label("[bold]Your Agents[/bold]", id="as-title")
             yield Label("", id="as-list")
             yield Label(
@@ -1385,7 +1400,6 @@ class AgentSelectorModal(ModalScreen):
 
     def on_mount(self) -> None:
         self._render_list()
-        self.query_one("#as-wrap").focus()
 
     def _render_list(self) -> None:
         lines: list[str] = []
@@ -1403,6 +1417,9 @@ class AgentSelectorModal(ModalScreen):
         marker = "[bold cyan]▸[/bold cyan]" if is_new else " "
         lines.append(f" {marker} [cyan]+ New Agent[/cyan]")
         self.query_one("#as-list", Label).update("\n".join(lines))
+        # In a small window the list scrolls (cos20 #508); the arrows move the cursor, so the
+        # frame keeps the cursor line in view itself.
+        self.query_one("#as-wrap").scroll_to(y=max(self._cursor - 2, 0), animate=False)
 
     def on_key(self, event: Key) -> None:
         total = len(self._agents) + 1  # +1 for "New Agent"
@@ -1466,7 +1483,7 @@ class ReconnectScreen(ModalScreen):
     """
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="rc-wrap"):
+        with VerticalScroll(id="rc-wrap"):
             yield Label("")
             yield Label("  Your agent is active on another device.")
             yield Label("")
@@ -1569,10 +1586,7 @@ class ShowcaseModal(ModalScreen):
         self.query_one("#sc-scroll", VerticalScroll).focus()
 
     def _switch_line(self) -> str:
-        if self._desired_state:
-            state = "[green]\\[x] yes — public[/green]"
-        else:
-            state = "\\[ ] no — private"
+        state = "[green]\\[x] yes — public[/green]" if self._desired_state else "\\[ ] no — private"
         changed = (
             " [yellow](changed)[/yellow]" if self._desired_state != self._initial_state else ""
         )
@@ -1617,7 +1631,7 @@ class CosmergonDashboard(App):
     /* Every dialog fits the window (cos20 #504, test_dialoge_passen_504): the frame is never
        larger than the window, and a line of text is never wider than its frame - it wraps
        instead of being cut. Fixed widths (52-76) and heights stay the target size. */
-    ModalScreen > Vertical {
+    ModalScreen > Vertical, ModalScreen > VerticalScroll {
         max-width: 100%;
         max-height: 100%;
     }
@@ -1636,6 +1650,19 @@ class CosmergonDashboard(App):
         min-height: 14;
     }
 
+    /* Like htop: a line that does not fit ends in "…" at the frame - it never wraps and pushes
+       the lines below out of the panel (cos20 #508). */
+    #agent-panel, #economy-panel, #log-panel, #hint-bar, #context-bar, #status-bar {
+        text-wrap: nowrap;
+        text-overflow: ellipsis;
+    }
+    #too-small {
+        display: none;
+        height: 1fr;
+        content-align: center middle;
+        text-align: center;
+        padding: 1 2;
+    }
     #agent-panel, #economy-panel, #log-panel {
         background: $csg-bg;
         padding: 0 1;
@@ -1769,6 +1796,31 @@ class CosmergonDashboard(App):
         yield Static("", id="context-bar")
         yield Static("", id="fix-bar")
         yield Static("", id="status-bar")
+        yield Static("", id="too-small")
+
+    _HAUPTBILD: ClassVar[tuple[str, ...]] = (
+        "#hint-bar",
+        "#top-row",
+        "#log-panel",
+        "#context-bar",
+        "#fix-bar",
+        "#status-bar",
+    )
+
+    def on_resize(self, event: Any) -> None:
+        """Below the smallest size the main view fits, say so instead of a cut picture (#508)."""
+        breite, hoehe = event.size.width, event.size.height
+        zu_klein = breite < _MIN_COLS or hoehe < _MIN_ROWS
+        for sel in self._HAUPTBILD:
+            for w in self.query(sel):
+                w.display = not zu_klein
+        hinweis = self.query_one("#too-small", Static)
+        hinweis.display = zu_klein
+        if zu_klein:
+            hinweis.update(
+                f"Window too small — needs at least {_MIN_COLS}x{_MIN_ROWS}, "
+                f"now {breite}x{hoehe}.\n\n[dim]Make the window larger, or Q to quit.[/dim]"
+            )
 
     def get_css_variables(self) -> dict[str, str]:
         """The theme's surfaces and frames as CSS variables; dialogs follow via accent/surface."""
@@ -2010,7 +2062,7 @@ class CosmergonDashboard(App):
 
     async def _mar_market_listings(self) -> None:
         listings = await self.agent.market_listings()
-        for ml in listings[:8]:
+        for ml in listings[:8]:  # kuerzen-ok: list length
             self._add_log(f"🏪 {ml.get('item_type', '?')} · {ml.get('price_energy', '?')} E")
         self._set_feedback(f"{len(listings)} listing(s) — see log")
 
@@ -2496,6 +2548,16 @@ class CosmergonDashboard(App):
 
     # --- Redraw ---
 
+    def _panel_breite(self, widget_id: str) -> int:
+        """Usable columns of a panel; 32 before the first layout (the old fixed width)."""
+        breite = self.query_one(f"#{widget_id}", Static).content_region.width
+        return breite if breite > 0 else 32
+
+    def _panel_hoehe(self, widget_id: str) -> int:
+        """Usable rows of a panel; 12 before the first layout (top row 14 minus the frame)."""
+        hoehe = self.query_one(f"#{widget_id}", Static).content_region.height
+        return hoehe if hoehe > 0 else 12
+
     def _update_panel(self, widget_id: str, content: str) -> None:
         """Call Static.update() only when content changed — prevents unnecessary repaints."""
         if self._panel_cache.get(widget_id) != content:
@@ -2563,7 +2625,7 @@ class CosmergonDashboard(App):
         )
 
         if state.ranking:
-            lines.append(_c(t.data, _rang_zeile(state.ranking)))
+            lines.append(_c(t.data, _rang_zeile(state.ranking, self._panel_breite("agent-panel"))))
         # What the main-world Marauder does, while a mission runs (#468) — in the place of
         # the blank line, the panel has a fixed height.
         lines.append(
@@ -2587,23 +2649,28 @@ class CosmergonDashboard(App):
             if not turnier_kompass:
                 lines.append("")
             lines.append(_c(t.struct, "[bold]═ FIELDS[/bold]"))
-            narrow = self.app.size.width < 70
-            for f in state.fields[:_MAX_FIELDS]:
-                tier = f"T{f.entity_tier or 0}"
-                etype = (f.entity_type or "novice")[:8]
-                ncells = f.active_cell_count
-                if narrow:
-                    lines.append(_c(t.data, f"  {f.id[:8]} {tier} {etype} {ncells} cells"))
-                else:
-                    bar_f = _energy_bar(ncells, 200, 6)
-                    lines.append(
-                        _c(t.data, f"  {f.id[:8]} {tier} {etype:8s} {bar_f} {ncells} cells")
-                    )
-            hidden = len(state.fields) - _MAX_FIELDS
-            if hidden > 0:
-                lines.append(_c("dim", f"  ... (+{hidden} more)  \\[V] to browse"))
+            lines += self._feld_zeilen(state.fields, self._panel_hoehe("agent-panel") - len(lines))
 
         self._update_panel("agent-panel", "\n".join(lines))
+
+    def _feld_zeilen(self, fields: list[Field], zeilen_frei: int) -> list[str]:
+        """As many field lines as fit, then "+N more" — like htop's list at the frame (#508)."""
+        t = self._theme
+        narrow = self.app.size.width < 70
+        zeigen = _felder_die_passen(len(fields), zeilen_frei)
+        lines: list[str] = []
+        for f in fields[:zeigen]:
+            tier = f"T{f.entity_tier or 0}"
+            etype = f.entity_type or "novice"  # the frame ends a long line in "…" (#508)
+            ncells = f.active_cell_count
+            if narrow:
+                lines.append(_c(t.data, f"  {f.id[:8]} {tier} {etype} {ncells} cells"))
+            else:
+                bar_f = _energy_bar(ncells, 200, 6)
+                lines.append(_c(t.data, f"  {f.id[:8]} {tier} {etype:8s} {bar_f} {ncells} cells"))
+        if len(fields) > zeigen:
+            lines.append(_c("dim", f"  ... (+{len(fields) - zeigen} more)  \\[V] to browse"))
+        return lines
 
     def _draw_economy_panel(self, state: GameState | None) -> None:
         t = self._theme
@@ -2612,11 +2679,13 @@ class CosmergonDashboard(App):
         if state and state.world_briefing:
             wb = state.world_briefing
             lines.append(_c(t.data, f"Rank:   #{wb.your_rank} / {wb.total_agents}"))
+            breite = self._panel_breite("economy-panel") - len("Top:    ")
             if wb.top_agent:
-                lines.append(_c(t.data, f"Top:    {wb.top_agent[:32]}"))
-            lines.append(_c(t.data, f"Market: {wb.market_summary[:32]}"))
+                lines.append(_c(t.data, f"Top:    {_roh(_name_vor_zahl(wb.top_agent, breite))}"))
+            # The frame ends a long line in "…" (CSS, #508) — no cut in the middle of a word here.
+            lines.append(_c(t.data, f"Market: {_roh(wb.market_summary)}"))
             if wb.last_event:
-                lines.append(_c("dim", f"Last:   {wb.last_event[:32]}"))
+                lines.append(_c("dim", f"Last:   {_roh(wb.last_event)}"))
         elif state:
             # No world briefing yet — show basic state so panel isn't empty
             lines.append(_c("dim", "Joining universe..."))
@@ -2656,7 +2725,7 @@ class CosmergonDashboard(App):
         if self._log_tab == "world":
             # Learned rules — show last 2 (compact)
             learned = (state.learned_rules if state else None) or []
-            lines += [_c("dim", f"  • {_roh(rule[:72])}") for rule in learned[-2:]]
+            lines += [_c("dim", f"  • {_roh(rule)}") for rule in learned[-2:]]
         alle = self._log_lines(self._log_tab, breite)
         ende = len(alle) - min(self._log_scroll, max(0, len(alle) - 1))  # ↑/↓ with log focus
         feed = alle[max(0, ende - max(1, panel_h - len(lines))) : ende]
@@ -2695,9 +2764,8 @@ class CosmergonDashboard(App):
         elif self._focus == "fields":
             fields = (state.fields if state else None) or []
             if fields:
-                parts = [
-                    f"{_c(t.cmd, _hk(str(i + 1)))}{f.id[:8]}" for i, f in enumerate(fields[:5])
-                ]
+                zeigen = fields[:5]  # kuerzen-ok: keys 1-5
+                parts = [f"{_c(t.cmd, _hk(str(i + 1)))}{f.id[:8]}" for i, f in enumerate(zeigen)]
                 self._update_panel("context-bar", _c("dim", "  ".join(parts)) + esc)
             else:
                 self._update_panel("context-bar", _c("dim", "No fields yet") + esc)
@@ -3483,7 +3551,7 @@ class CosmergonDashboard(App):
             return
         if "error" in antwort:
             self._add_log(_c(warn, "✗ tournament registration refused"))
-            self._set_feedback(_c(warn, f"✗ {str(antwort['error'])[:120]}"))
+            self._set_feedback(_c(warn, f"✗ {antwort['error']}"))
             return
         self._add_log(_c(self._theme.pos, "✓ registered for the tournament"))
         await self._turnier_kompass_setzen(kompass)
@@ -3706,7 +3774,7 @@ class CosmergonDashboard(App):
         from cosmergon_agent.config import save_token
 
         save_token(new_token, base_url=self.agent.base_url)
-        self._set_feedback(f"Master Key rotated. New: {new_token[:15]}...")
+        self._set_feedback(f"Master Key rotated. New: {new_token[:15]}...")  # kuerzen-ok: masked
 
     async def _revoke_agent_key(self, agent_data: dict, active_name: str, token: str) -> None:
         """Paket 4.2: Revoke all active API keys for an agent.
@@ -3849,7 +3917,7 @@ class CosmergonDashboard(App):
             self._set_feedback("Too many requests — try again later.")
             return
         if resp.status_code != 200:
-            self._set_feedback(f"Error ({resp.status_code}): {resp.text[:100]}")
+            self._set_feedback(f"Error ({resp.status_code}): {resp.text}")
             return
 
         data = resp.json()
@@ -4180,7 +4248,7 @@ class ChatScreen(ModalScreen):
             scroll.mount(self._zeile("You", text, self._theme.data))
             scroll.scroll_end(animate=False)
         else:
-            scroll.mount(Static(_c(self._theme.warn, f"✗ {_roh(str(result['error'])[:200])}")))
+            scroll.mount(Static(_c(self._theme.warn, f"✗ {_roh(str(result['error']))}")))
         # Stay open — user closes with Esc
         self.query_one(Input).focus()
 
@@ -4552,7 +4620,7 @@ class IdentitySetupScreen(ModalScreen):
         self._theme = theme
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="setup-wrap"):
+        with VerticalScroll(id="setup-wrap"):
             yield Label(
                 "[dim]// Identity Setup · Enter in name field: save · Esc: skip[/dim]",
                 id="setup-header",
@@ -4613,7 +4681,7 @@ class IdentitySetupScreen(ModalScreen):
             if status == 409:
                 self._set_error(f"Name '{name}' is already taken — choose another.")
             else:
-                self._set_error(f"Error: {str(result['error'])[:80]}")
+                self._set_error(f"Error: {str(result['error'])[:80]}")  # kuerzen-ok: one-line label
             self.query_one("#name-input", Input).focus()
         else:
             self.dismiss({"agent_name": result.get("username", name), "persona": persona})
@@ -4880,19 +4948,50 @@ def _showcase_payload(result: dict, request_id: str) -> dict:
     return payload
 
 
-def _rang_zeile(ranking: Ranking) -> str:
+def _name_vor_zahl(text: str, breite: int) -> str:
+    """``Name (Zahl)`` in ``breite`` columns: the name is cut with "…", the number never (#508).
+
+    The server writes ``top_agent`` as ``Socket-hand (33.6M E)``. Cut at a fixed length, the
+    terminal showed ``Socket-hand (total_energy 336313`` — a wrong number. Text without a number
+    in brackets is cut at the end like any other line.
+    """
+    if len(text) <= breite:
+        return text
+    name, sep, zahl = text.rpartition(" (")
+    if not sep or not zahl.endswith(")"):
+        return text[: max(breite - 1, 1)] + "…"
+    platz = breite - len(zahl) - len(sep) - 1
+    return (name[:platz] + "…" if platz > 0 else "…") + sep + zahl
+
+
+def _felder_die_passen(anzahl: int, zeilen_frei: int) -> int:
+    """How many field lines fit (#508): at most ``_MAX_FIELDS``, and one row stays free for the
+    "+N more" line when not all fit — like htop's list, which ends at the frame."""
+    zeigen = min(anzahl, _MAX_FIELDS, max(zeilen_frei, 0))
+    if zeigen < anzahl:
+        zeigen = max(min(zeigen, zeilen_frei - 1), 0)
+    return zeigen
+
+
+def _rang_zeile(ranking: Ranking, breite: int | None = None) -> str:
     """Your place in the one ranking (cos20 #504): ``Rank #12 of 380 · total 4.8M E``.
 
     The total is your own, shown only to you, and only while the ranking counts it. Older
     backends send no ``rang``; then the line keeps the tier and score it showed before.
+    With ``breite`` the words go first, never the numbers (#508): ``#12/380 4.8M E``.
     """
     if ranking.rang > 0:
-        zeile = f"Rank #{ranking.rang}"
-        if ranking.rang_von:
-            zeile += f" of {ranking.rang_von}"
-        if ranking.gesamtenergie is not None:
-            zeile += f"  ·  total {_kurz(ranking.gesamtenergie)} E"
-        return zeile
+        von = f"/{ranking.rang_von}" if ranking.rang_von else ""
+        summe = f"{_kurz(ranking.gesamtenergie)} E" if ranking.gesamtenergie is not None else ""
+        formen = [
+            f"Rank #{ranking.rang}"
+            + (f" of {ranking.rang_von}" if von else "")
+            + (f"  ·  total {summe}" if summe else ""),
+            f"Rank #{ranking.rang}{von}" + (f" · {summe}" if summe else ""),
+            f"#{ranking.rang}{von}" + (f" {summe}" if summe else ""),
+        ]
+        passend = [f for f in formen if breite is None or len(f) <= breite]
+        return passend[0] if passend else formen[-1]
     score = f"  Score: {ranking.player_score:,.0f}" if ranking.player_score > 0 else ""
     return f"T{ranking.player_tier} {ranking.tier_name}{score}"
 
@@ -5161,7 +5260,7 @@ def _eroberung_lage(state: GameState | None) -> dict | None:
         "bomben": int(start.get("mega_bombs") or 0),
         "schwelle": start.get("holes_threshold"),
         "halten": claim.get("claim_ticks"),
-        "ziele": ziele[:3],
+        "ziele": ziele[:3],  # kuerzen-ok: list length
         "beute": beute.get("field_id") if isinstance(beute, dict) else None,
     }
 
@@ -5284,7 +5383,7 @@ class PauseConfirmModal(ModalScreen):
         self._step = 1
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="pause-wrap"):
+        with VerticalScroll(id="pause-wrap"):
             yield Label(_c(self._theme.warn, f"Pause {self._agent_name}?"), id="pause-title")
             yield Label(
                 "Your agent leaves the game: its body becomes a ghost and takes no\n"
@@ -5389,7 +5488,7 @@ class OnboardingModal(ModalScreen):
         return "\n".join(zeilen)
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="onboard-wrap"):
+        with VerticalScroll(id="onboard-wrap"):
             yield Label(
                 _c(self._theme.guide, "Welcome to Cosmergon."),
                 id="onboard-title",

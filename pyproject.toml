@@ -41,7 +41,7 @@ cosmergon-mcp = "cosmergon_agent.mcp:run"
 
 [project.optional-dependencies]
 dashboard = [
-    "textual>=0.70.0",
+    "textual>=2.0.0",  # text-wrap/text-overflow (cos20 #508)
 ]
 # U5 (#232 K4, 2026-09-05): every product beyond the client is an extra.
 # `pip install cosmergon-agent` imports client + MCP server with httpx alone.
@@ -58,7 +58,7 @@ dev = [
     "ruff>=0.3",
     "mypy>=1.9",
     "pre-commit>=3.6",
-    "textual>=0.70.0",  # für lokale Dashboard-Entwicklung und Tests
+    "textual>=2.0.0",  # für lokale Dashboard-Entwicklung und Tests (#508: text-wrap)
 ]
 
 [project.urls]
