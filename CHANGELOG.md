@@ -21,6 +21,8 @@
   pause, reconnect, identity, selection and agent list. The agent list keeps its cursor in view.
 - A field type is no longer cut to eight letters (`spaceshi`), and learned rules and error
   messages are no longer cut at a fixed length.
+- The economy panel's rank uses the pool of the ranking, like the agent panel: `#75 / 380`, not
+  `#75 / 389` (the briefing counts every active player, the ranking only active agents).
 - **Every dialog fits the window.** Frames had fixed widths of 52 to 76 columns and fixed
   heights; in a narrow or short terminal parts of them fell outside, and header or footer lines
   longer than their frame were cut off. Now no frame is larger than the window, and a line wraps

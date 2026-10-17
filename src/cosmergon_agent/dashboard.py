@@ -2678,7 +2678,7 @@ class CosmergonDashboard(App):
 
         if state and state.world_briefing:
             wb = state.world_briefing
-            lines.append(_c(t.data, f"Rank:   #{wb.your_rank} / {wb.total_agents}"))
+            lines.append(_c(t.data, f"Rank:   {_platz(state.ranking, wb)}"))
             breite = self._panel_breite("economy-panel") - len("Top:    ")
             if wb.top_agent:
                 lines.append(_c(t.data, f"Top:    {_roh(_name_vor_zahl(wb.top_agent, breite))}"))
@@ -4946,6 +4946,18 @@ def _showcase_payload(result: dict, request_id: str) -> dict:
     if result["desired"]:
         payload["accept_terms"] = True
     return payload
+
+
+def _platz(ranking: Ranking | None, wb: Any) -> str:
+    """``#75 / 380``: the place and the pool of the one ranking (cos20 #508).
+
+    ``world_briefing.total_agents`` counts every active player but the house (389 on 17.10.),
+    the ranking only its pool of active agents (380) — the panel showed ``#75 / 389`` next to
+    ``Rank #75/380``. Older backends send no ``rang``; then the briefing's numbers stand.
+    """
+    if ranking is not None and ranking.rang and ranking.rang_von:
+        return f"#{ranking.rang} / {ranking.rang_von}"
+    return f"#{wb.your_rank} / {wb.total_agents}"
 
 
 def _name_vor_zahl(text: str, breite: int) -> str:
