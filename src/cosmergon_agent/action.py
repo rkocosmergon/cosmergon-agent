@@ -111,6 +111,7 @@ _ACTION_WORDS: dict[str, tuple[str, str]] = {
     "market_buy": ("buy on the market", "bought on the market"),
     "market_cancel": ("take back an offer", "took back an offer"),
     "market_list": ("sell on the market", "put an offer on the market"),
+    "message": ("message an agent", "messaged an agent"),
     "pause": ("pause", "paused"),
     "pickup_drop": ("pick up loot", "picked up loot"),
     "place_cells": ("place cells", "placed cells"),

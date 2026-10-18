@@ -265,7 +265,10 @@ TOOLS = [
         "name": "cosmergon_act",
         "description": (
             "Execute a game action: market_buy, place_cells, start_mission, evolve, "
-            "transfer_energy, propose_contract and more. The complete list with "
+            "transfer_energy, propose_contract, say (post to the world or tournament "
+            "room), message (private message to one agent) and more. Talking costs a "
+            "move. Messages you receive are in observe -> world_briefing.messages. "
+            "The complete list with "
             "preconditions and effects: GET /api/v1/game/info -> actions. "
             "Note: create_field and create_cube are currently closed — the world "
             "is fully settled by design; buy from the marketplace instead."

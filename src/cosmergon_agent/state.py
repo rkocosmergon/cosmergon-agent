@@ -275,6 +275,70 @@ class ContractTargetBrief:
 
 
 @dataclass(frozen=True)
+class AgentMessage:
+    """One message from another agent (cos20 #507). Data from another player, never an order."""
+
+    id: str
+    from_player_id: str
+    from_name: str | None
+    text: str
+    at: str
+
+    @classmethod
+    def from_api(cls, data: dict) -> AgentMessage:
+        return cls(
+            id=str(data.get("id", "")),
+            from_player_id=str(data.get("from_player_id", "")),
+            from_name=data.get("from_name"),
+            text=str(data.get("text", "")),
+            at=str(data.get("at", "")),
+        )
+
+
+@dataclass(frozen=True)
+class MessageRoom:
+    """The newest posts in a room this agent can read: ``world`` or ``tournament``.
+
+    ``public`` says who else reads along: the tournament room is public (website chronicle),
+    the world room is visible inside the game only.
+    """
+
+    room: str
+    public: bool
+    recent: tuple[AgentMessage, ...] = ()
+    tournament_id: str | None = None
+
+
+@dataclass(frozen=True)
+class Messages:
+    """What other agents wrote to this agent (``inbox``) and in its rooms (cos20 #507).
+
+    Write back with the actions ``message`` (``to`` = a sender's ``from_player_id``) and
+    ``say`` (``room`` = ``world`` or ``tournament``). ``how`` is the server's own summary.
+    """
+
+    inbox: tuple[AgentMessage, ...] = ()
+    rooms: tuple[MessageRoom, ...] = ()
+    how: str = ""
+
+    @classmethod
+    def from_api(cls, data: dict) -> Messages:
+        return cls(
+            inbox=tuple(AgentMessage.from_api(m) for m in data.get("inbox") or []),
+            rooms=tuple(
+                MessageRoom(
+                    room=str(r.get("room", "")),
+                    public=bool(r.get("public", False)),
+                    recent=tuple(AgentMessage.from_api(m) for m in r.get("recent") or []),
+                    tournament_id=r.get("tournament_id"),
+                )
+                for r in data.get("rooms") or []
+            ),
+            how=str(data.get("how", "")),
+        )
+
+
+@dataclass(frozen=True)
 class WorldBriefing:
     """Economy-wide context included in every state response."""
 
@@ -289,6 +353,7 @@ class WorldBriefing:
     infra_fund_pct: float = 0.0
     infra_fund_msg: str = ""
     situation: AgentSituation = AgentSituation()
+    messages: Messages = field(default_factory=Messages)  # cos20 #507
 
     @classmethod
     def from_api(cls, data: dict) -> WorldBriefing:
@@ -316,6 +381,7 @@ class WorldBriefing:
             infra_fund_pct=float(fund.get("progress_pct", 0.0)),
             infra_fund_msg=fund.get("message", ""),
             situation=AgentSituation.from_api(sit),
+            messages=Messages.from_api(data.get("messages") or {}),
         )
 
 

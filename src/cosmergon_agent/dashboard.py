@@ -342,7 +342,10 @@ def _roh(text: object) -> str:
 _LOG_TABS: tuple[tuple[str, str], ...] = (
     ("world", "world"),
     ("tournament", "tournament"),
-    ("arena", "arena chat"),
+    # cos20 #507: one tab for all talk — the tournament's arena chat (public), the world room
+    # (inside the game only) and messages to this agent. A fourth tab did not fit the frame
+    # line at 5 of 9 sizes. ~~("arena", "arena chat")~~ — the word is "chat" now.
+    ("arena", "chat"),
 )
 _TIMES = chr(0xD7)  # the multiplication sign: Shikigon's journal counts repeats the same way
 _MAL = re.compile(rf"  \[dim\]{_TIMES}(\d+)\[/dim\]$")
@@ -408,10 +411,10 @@ def _leerer_reiter(tab: str, state: GameState | None) -> str:
     """What an empty tournament or arena tab says instead of nothing."""
     if state is not None and state.tournament:
         if tab == "arena":
-            return "Nobody has spoken in this tournament's arena chat yet."
+            return "Nobody has spoken yet — in this tournament's arena, the world room or to you."
         return "Nothing has happened in this tournament yet."
     if tab == "arena":
-        return "Not in a tournament — the arena chat is the talk inside one."
+        return "No messages yet — the world room and messages to this agent show here."
     return "Not in a tournament — \\[T] takes a free slot when the server offers one."
 
 
@@ -1194,7 +1197,7 @@ class HelpModal(ModalScreen):
             "[cyan]\\[T][/cyan]  Tournament: join with a compass, or change it",
             "[cyan]\\[W][/cyan]  Marauder: bus, market, combat status",
             "[cyan]\\[M][/cyan]  Chat — or ask your advisor, where one is set up",
-            "[cyan]\\[L][/cyan]  Log: next tab (world, tournament, arena chat)",
+            "[cyan]\\[L][/cyan]  Log: next tab (world, tournament, chat)",
             "[cyan]\\[Shift+L][/cyan]  Log on the full screen",
             "[cyan]\\[X][/cyan]  Pause / Resume agent (asks twice; resume only after a wait)",
             "[cyan]\\[U][/cyan]  Keep this agent / upgrade (checkout in browser)",
@@ -1771,6 +1774,7 @@ class CosmergonDashboard(App):
         self._log_tab = "world"
         self._log_tournament: list[_Eintrag] = []
         self._log_arena: list[_Eintrag] = []
+        self._talk_seen: deque[str] = deque(maxlen=400)  # cos20 #507: ids already in "chat"
         self._log_new: set[str] = set()  # tabs with lines the player has not looked at
         self._arena_seen: deque[str] = deque(maxlen=400)
         self._arena_missions: dict[str, str] | None = None  # as _missions_known, arena bodies
@@ -2116,6 +2120,7 @@ class CosmergonDashboard(App):
                 await self._follow_missions()
                 await self._follow_story(state)
                 await self._follow_arena_chat(state)
+                self._follow_talk(state)
                 if not self._identity_prompted and _is_auto_name(state.agent_name):
                     self._identity_prompted = True
                     self._show_identity_setup()
@@ -2131,6 +2136,7 @@ class CosmergonDashboard(App):
             await self._follow_missions()
             await self._follow_story(state)
             await self._follow_arena_chat(state)
+            self._follow_talk(state)
 
         @self.agent.on_error
         async def _error(result: Any) -> None:
@@ -2434,6 +2440,26 @@ class CosmergonDashboard(App):
             return
         self._log_arena_voices(stimmen)
 
+    def _follow_talk(self, state: GameState) -> None:
+        """Add the world room and messages to this agent to the chat tab (cos20 #507).
+
+        Read only — the player reads along, the agent writes (founder, 18.10.2026). What other
+        agents write is shown, never handed to a model. No extra call: the state carries it.
+        """
+        nachrichten = state.world_briefing.messages if state.world_briefing else None
+        if nachrichten is None:
+            return
+        welt = [r for r in nachrichten.rooms if r.room == "world"]
+        neu = [(m, " (world)") for r in welt for m in r.recent]
+        neu += [(m, " → you") for m in nachrichten.inbox]
+        for nachricht, an_mich in sorted(neu, key=lambda paar: paar[0].at):
+            if not nachricht.id or nachricht.id in self._talk_seen:
+                continue
+            self._talk_seen.append(nachricht.id)
+            wer = f"{nachricht.from_name or 'an agent'}{an_mich}"
+            farbe = self._theme.pos if an_mich else self._theme.data
+            self._add_entry("arena", _Eintrag(wer, nachricht.text, farbe))
+
     def _log_arena_voices(self, stimmen: list[dict]) -> None:
         """New arena chat messages into their tab; the same sentence from many is one line.
 
@@ -2471,8 +2497,8 @@ class CosmergonDashboard(App):
         self._mark_new("world")
 
     def _add_entry(self, tab: str, eintrag: _Eintrag) -> None:
-        """An entry into the tournament or the arena log."""
-        _eintrag_anfuegen(self._log_tournament if tab == "tournament" else self._log_arena, eintrag)
+        """An entry into the tournament or the chat log."""
+        _eintrag_anfuegen(self._tab_log(tab), eintrag)
         self._mark_new(tab)
 
     def _mark_new(self, tab: str) -> None:
@@ -2495,8 +2521,11 @@ class CosmergonDashboard(App):
         """A tab's lines as markup; ``breite`` cuts long entries for the panel."""
         if tab == "world":
             return list(self._log)
-        log = self._log_tournament if tab == "tournament" else self._log_arena
-        return [_eintrag_zeile(eintrag, breite) for eintrag in log]
+        return [_eintrag_zeile(eintrag, breite) for eintrag in self._tab_log(tab)]
+
+    def _tab_log(self, tab: str) -> list[_Eintrag]:
+        """The entries behind a tab other than the world log."""
+        return self._log_tournament if tab == "tournament" else self._log_arena
 
     def _schedule_pending(self, pending: _PendingAction, retry_after: float = 65.0) -> None:
         """Queue a pending action and schedule a timer-based retry.
@@ -3937,7 +3966,7 @@ class CosmergonDashboard(App):
         await self.push_screen_wait(HelpModal(self._theme.name))
 
     def action_log_next(self) -> None:
-        """Show the log's next tab: world → tournament → arena chat → world."""
+        """Show the log's next tab: world → tournament → chat → world."""
         schirm = self.screen
         if isinstance(schirm, LogScreen):
             schirm.next_tab()  # this binding has priority: it fires under the full screen too
