@@ -134,6 +134,19 @@ def params_from(pairs: list[str], raw: str | None) -> dict[str, Any]:
     return params
 
 
+def body_for(action: str, params: dict[str, Any]) -> dict[str, Any]:
+    """The request body, whichever way the move was written.
+
+    Some actions read their fields at the top level (``field_id``, ``preset``), others from
+    ``params`` (``start_mission``: ``params.mission_type``, ``message``: ``params.to``). A model
+    writing ``{"mission_type": …, "params": {…}}`` got 422 „mission_type required“ (device run,
+    18.10.2026). So the fields go both ways; written already as ``{"params": {…}}``, as is.
+    """
+    if set(params) == {"params"}:
+        return {"action": action, **params}
+    return {"action": action, **params, "params": params}
+
+
 def act(name: str, action: str, params: dict[str, Any], base_url: str) -> None:
     """One move. The world takes one per tick; in a named turn the CLI takes one per turn."""
     if action in play_turn.OPERATOR_SWITCHES:
@@ -144,7 +157,7 @@ def act(name: str, action: str, params: dict[str, Any], base_url: str) -> None:
     entry = _entry(name)
     url = f"{base_url.rstrip('/')}/api/v1/agents/{entry.agent_id}/action"
     headers = {"Authorization": f"api-key {entry.api_key}", "X-Idempotency-Key": uuid.uuid4().hex}
-    resp = httpx.post(url, json={"action": action, **params}, headers=headers, timeout=TIMEOUT_S)
+    resp = httpx.post(url, json=body_for(action, params), headers=headers, timeout=TIMEOUT_S)
     result = _answer(resp)
     if run:
         _remember(name, played_in=run)

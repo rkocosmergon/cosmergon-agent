@@ -147,8 +147,9 @@ def conquest(state: dict[str, Any], name: str) -> list[str]:
     )
     lines.append(
         f"  Form: cosmergon-agent act start_mission --agent {name} --json "
-        '\'{"mission_type": "gather_spores", "params": {"field_id": "..."}}\' — '
-        "all mission types and their params: cosmergon-agent help-action start_mission"
+        '\'{"mission_type": "gather_spores", "params": {"field_id": "<field>"}}\' — the '
+        "mission's own parameters go inside params; all mission types and their parameters: "
+        f"cosmergon-agent help-action start_mission --agent {name}"
     )
     return lines
 
@@ -169,7 +170,10 @@ def possible(action: str, facts: Any, state: dict[str, Any]) -> bool:
 
 def moves(state: dict[str, Any], name: str) -> list[str]:
     """The moves it can make now, with what the server says about each; never operator switches."""
-    lines = ["MOVES YOU CAN MAKE NOW (details and parameters: cosmergon-agent help-action ACTION):"]
+    lines = [
+        "MOVES YOU CAN MAKE NOW (details and parameters: "
+        f"cosmergon-agent help-action ACTION --agent {name}):"
+    ]
     for action, facts in (state.get("available_actions") or {}).items():
         if not possible(action, facts, state):
             continue
@@ -203,7 +207,7 @@ def render(state: dict[str, Any], memory: str, name: str, previous_total: float 
     else:
         task = (
             "THIS TURN: choose exactly ONE move, play it with `act`, then write one line into "
-            "your notes (time, move, result, what you learned) and stop."
+            f"your notes file {name}.md (time, move, result, what you learned) and stop."
         )
     head = f"TURN for {name} ({state.get('persona_type', '')}) · tick {state.get('tick', '?')}"
     parts = [
