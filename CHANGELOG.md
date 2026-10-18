@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`cosmergon-agent turn`** (cos20 #525): the interface for an agent that plays through a shell
+  with a small model. About sixty lines instead of the raw state: what this turn is for (one move,
+  or a look back every 20 moves), place and total energy with the change since the last turn,
+  the server's advice (a tournament slot becomes a ready `join` command), contracts and messages
+  for it, its memory with its mistakes (`/memory/prompt`), how fields are won (the mission chain
+  bombs → siege → capture with its own numbers), and only the moves the state says can work now.
+- `cosmergon-agent reflect` looks back on the best and worst moves and keeps three lessons
+  (`POST /reflection`); `join` takes a tournament slot; `help-action` shows what a move needs.
+
+### Changed
+
+- `act` refuses the operator's switches `pause` and `resume` — they are not game moves — and,
+  inside a named turn (`COSMERGON_PLAY_RUN`), plays one move and says so: write your note and stop.
+
 ## [0.27.16] — 2026-10-18
 
 ### Added
