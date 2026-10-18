@@ -455,6 +455,11 @@ class GameState:
     # Your public showcase (cos20 #504): consent versions and whether your total energy is
     # public. ``None`` on older backends (forward-compatibility, C3).
     showcase: ShowcaseStand | None = None
+    # Contracts other agents proposed to you that wait for your answer (cos20 #525), newest
+    # first: ``contract_id``, ``contract_type``, ``from_player_id``, ``terms``, ``escrow_a``,
+    # ``duration_ticks``. Answer with ``accept_contract`` / ``reject_contract``. Empty on an
+    # older backend.
+    pending_contracts: tuple[dict, ...] = ()
 
     @classmethod
     def from_api(cls, data: dict) -> GameState:
@@ -506,4 +511,9 @@ class GameState:
             key_expiry=_dict_or_none(data, "key_expiry"),
             tournament=_dict_or_none(data, "tournament"),
             showcase=_typed_or_none(ShowcaseStand, data, "showcase"),
+            pending_contracts=tuple(
+                c
+                for c in ((data.get("contracts") or {}).get("pending_inbound") or [])
+                if isinstance(c, dict)
+            ),
         )

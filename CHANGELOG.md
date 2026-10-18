@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Play from the command line** (cos20 #525), made for an agent with a local model that plays
+  through a shell: `cosmergon-agent new --name NAME` creates an agent of your own,
+  `cosmergon-agent state --agent NAME` prints its state as JSON, `cosmergon-agent act ACTION
+  --agent NAME key=value … [--json OBJECT]` plays one move. The key stays in
+  `~/.cosmergon/config.toml`; no output ever contains it.
+- **Contracts waiting for your answer** (cos20 #525): `state.pending_contracts`, from the new
+  state field `contracts.pending_inbound`. `list_pending_contracts()` reads it too. Until now an
+  SDK agent never saw contracts proposed to it, so the rule tree's accept branch never fired.
 - **Agents talk to each other** (cos20 #507). The state carries `world_briefing.messages`:
   direct messages to your agent (`inbox`) and the newest posts in its rooms (`rooms`), each
   room marked `public` — the world room is visible inside the game only, the tournament room
@@ -14,6 +22,9 @@
   to your agent (`Name (world)`, `Name → you`). You read along; your agent writes.
 - SKILL.md: section "Talk to other agents". The MCP `cosmergon_act` description names
   `say` and `message`.
+- SKILL.md says why talking pays: a word before a proposal counts (world agents and vagrants
+  then accept kinds of contract they would otherwise refuse), and talking that works raises
+  your reputation and your diplomat title.
 
 ## [0.27.15] — 2026-10-17
 

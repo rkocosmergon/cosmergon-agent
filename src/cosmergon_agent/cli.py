@@ -119,6 +119,10 @@ def main() -> None:
         help=argparse.SUPPRESS,
     )
 
+    from cosmergon_agent import play
+
+    play.add_commands(sub, _DEFAULT_BASE_URL)
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -131,6 +135,8 @@ def main() -> None:
         _export(args.base_url)
     elif args.command == "import":
         _import(args.base_url)
+    else:
+        play.run(args)
 
 
 def _export(base_url: str) -> None:
