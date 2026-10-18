@@ -197,15 +197,11 @@ def reflect(name: str, texts: dict[str, str | None], base_url: str) -> None:
     }
     url = f"{base_url.rstrip('/')}/api/v1/agents/{entry.agent_id}/reflection"
     headers = {"Authorization": f"api-key {entry.api_key}"}
-    print(
-        json.dumps(
-            {
-                "ok": True,
-                "result": _answer(httpx.post(url, json=body, headers=headers, timeout=TIMEOUT_S)),
-                "next": PLAYED,
-            }
-        )
-    )
+    result = _answer(httpx.post(url, json=body, headers=headers, timeout=TIMEOUT_S))
+    run = os.environ.get("COSMERGON_PLAY_RUN", "")
+    if run:  # a look back is this turn's work: the turn is done, as after a move
+        _remember(name, played_in=run)
+    print(json.dumps({"ok": True, "result": result, "next": PLAYED}))
 
 
 def join(name: str, tournament_id: str, base_url: str) -> None:
