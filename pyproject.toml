@@ -109,6 +109,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "src/cosmergon_agent/cli.py" = ["T201"]       # CLI: print() is user-facing output
+"src/cosmergon_agent/play.py" = ["T201"]      # CLI (cos20 #525): print() is the JSON answer
 "src/cosmergon_agent/dashboard.py" = ["T201"]  # Dashboard: print() for terminal output
 # S306: `assert` IS the test vocabulary — flake8-bandit's S101 targets asserts in
 # shipped code, where a `python -O` run would silently drop them. In tests they are
