@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.16] — 2026-10-18
+
 ### Added
 
 - **Play from the command line** (cos20 #525), made for an agent with a local model that plays
