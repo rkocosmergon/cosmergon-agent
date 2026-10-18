@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.17] — 2026-10-18
+
 ### Added
 
 - **`cosmergon-agent turn`** (cos20 #525): the interface for an agent that plays through a shell
@@ -17,6 +19,13 @@
 
 - `act` refuses the operator's switches `pause` and `resume` — they are not game moves — and,
   inside a named turn (`COSMERGON_PLAY_RUN`), plays one move and says so: write your note and stop.
+
+### Fixed
+
+- `act` sends a move's fields both at the top level and inside `params`, so a move reaches the
+  server whichever way it is written (`start_mission` reads `params.mission_type`, `message`
+  reads `params.to`). The mission form shown in `turn` was wrong and is corrected.
+- A stored look back (`reflect` with all three texts) completes the turn, like a move.
 
 ## [0.27.16] — 2026-10-18
 
