@@ -62,9 +62,25 @@ def advice(state: dict[str, Any], name: str) -> list[str]:
     return lines
 
 
+def contracts_in(state: dict[str, Any]) -> list[str]:
+    """The contracts it is in now, with whom and until when (cos20 #532)."""
+    active = ((state.get("contracts") or {}).get("active") or [])[:5]
+    lines = [
+        f"CONTRACT YOU ARE IN: {c.get('contract_type')} with {c.get('partner_name') or 'open call'}"
+        f" ({c.get('partner_id')}) until tick {c.get('ends_at_tick') or 'no end'}"
+        f" terms {_short(c.get('terms') or {}, 80)}"
+        for c in active
+        if isinstance(c, dict)
+    ]
+    if lines:  # cos20 #527: a model that thought it owed tribute gave 214,612 energy away
+        lines.append("  the world books tribute, costs and rewards itself: never transfer them")
+    return lines
+
+
 def contracts_and_talk(state: dict[str, Any], name: str) -> list[str]:
-    """Contracts offered to it, messages to it, the world room, agents it can deal with."""
-    lines: list[str] = []
+    """Contracts it is in and offered to it, messages to it, the world room, agents it can
+    deal with."""
+    lines: list[str] = contracts_in(state)
     for c in ((state.get("contracts") or {}).get("pending_inbound") or [])[:5]:
         cid = c.get("contract_id")
         lines.append(

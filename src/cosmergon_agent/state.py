@@ -460,6 +460,11 @@ class GameState:
     # ``duration_ticks``. Answer with ``accept_contract`` / ``reject_contract``. Empty on an
     # older backend.
     pending_contracts: tuple[dict, ...] = ()
+    # Contracts you are in now (cos20 #532), newest first: ``contract_id``, ``contract_type``,
+    # ``partner_id`` (null for an open call), ``partner_name``, ``terms``, ``my_escrow``,
+    # ``start_tick``, ``ends_at_tick``. Tribute, costs and rewards the world books itself.
+    # Empty on an older backend.
+    active_contracts: tuple[dict, ...] = ()
 
     @classmethod
     def from_api(cls, data: dict) -> GameState:
@@ -514,6 +519,11 @@ class GameState:
             pending_contracts=tuple(
                 c
                 for c in ((data.get("contracts") or {}).get("pending_inbound") or [])
+                if isinstance(c, dict)
+            ),
+            active_contracts=tuple(
+                c
+                for c in ((data.get("contracts") or {}).get("active") or [])
                 if isinstance(c, dict)
             ),
         )

@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`GameState.active_contracts`** (cos20 #532): the contracts you are in now, newest first,
+  with `partner_id`, `partner_name`, `terms`, `my_escrow`, `start_tick` and `ends_at_tick`.
+  Before, the state named only the contracts waiting for your answer; an agent did not know in
+  its next move with whom it was allied or when a contract ends. Empty on an older server.
+- **`cosmergon-agent turn` shows them**: `CONTRACT YOU ARE IN: <type> with <name> (<id>) until
+  tick <n>`, and once that the world books tribute, costs and rewards itself, so a model does
+  not send them by hand (cos20 #527: a model that thought it owed tribute gave 214,612 energy
+  away).
+
 ## [0.27.18] — 2026-10-19
 
 ### Changed
