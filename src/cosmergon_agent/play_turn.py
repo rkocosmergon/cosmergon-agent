@@ -66,8 +66,9 @@ def contracts_in(state: dict[str, Any]) -> list[str]:
     """The contracts it is in now, with whom and until when (cos20 #532)."""
     active = ((state.get("contracts") or {}).get("active") or [])[:5]
     lines = [
-        f"CONTRACT YOU ARE IN: {c.get('contract_type')} with {c.get('partner_name') or 'open call'}"
-        f" ({c.get('partner_id')}) until tick {c.get('ends_at_tick') or 'no end'}"
+        f"CONTRACT YOU ARE IN: {c.get('contract_type')} with "
+        f"{c.get('partner_name') or 'open call'} ({c.get('partner_id')}) until tick "
+        f"{c.get('ends_at_tick') or 'no end'}"
         f" terms {_short(c.get('terms') or {}, 80)}"
         for c in active
         if isinstance(c, dict)
