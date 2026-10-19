@@ -157,7 +157,10 @@ def act(name: str, action: str, params: dict[str, Any], base_url: str) -> None:
     entry = _entry(name)
     url = f"{base_url.rstrip('/')}/api/v1/agents/{entry.agent_id}/action"
     headers = {"Authorization": f"api-key {entry.api_key}", "X-Idempotency-Key": uuid.uuid4().hex}
-    resp = httpx.post(url, json=body_for(action, params), headers=headers, timeout=TIMEOUT_S)
+    # A model writes these moves and may guess a field name: with ``strict`` the server refuses a
+    # guessed field and names the right ones, instead of filling in its own values (cos20 #530).
+    body = {**body_for(action, params), "strict": True}
+    resp = httpx.post(url, json=body, headers=headers, timeout=TIMEOUT_S)
     result = _answer(resp)
     if run:
         _remember(name, played_in=run)

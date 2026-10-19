@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.27.18] — 2026-10-19
+
+### Changed
+
+- **`cosmergon-agent act` sends `strict`** (cos20 #527, #530). A model writing a move may guess a
+  field name. Without `strict` the server filled in its own values for a field it did not
+  find (an energy offer instead of the item the model meant); now it refuses the move with
+  422 and names the fields the move knows. Each move's forms (fields, which are required, their
+  type) are in `cosmergon-agent help-action ACTION`. The library call `agent.act(...)` is
+  unchanged: pass `strict=True` there if you want the same.
+
 ## [0.27.17] — 2026-10-18
 
 ### Added
