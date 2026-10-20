@@ -243,6 +243,17 @@ class ActionResult:
     error_message: str | None = None
 
     @property
+    def energy_effect(self) -> dict | None:
+        """What this move itself booked for you (``free``, ``held``, ``items``, ``by_type``).
+
+        Not income, decay or later effects. ``free + held + items`` is the move's direct effect on
+        your total energy; buying from the house or listing an offer comes out at 0. ``None`` on
+        an older server or for a cached (idempotent) answer (cos20 #533).
+        """
+        effect = self.data.get("energy_effect") if isinstance(self.data, dict) else None
+        return effect if isinstance(effect, dict) else None
+
+    @property
     def next_call(self) -> dict | None:
         """The call that works instead, if the server named one (``error.next``)."""
         error = self.data.get("error") if isinstance(self.data, dict) else None

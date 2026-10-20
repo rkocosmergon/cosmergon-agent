@@ -164,7 +164,13 @@ def act(name: str, action: str, params: dict[str, Any], base_url: str) -> None:
     result = _answer(resp)
     if run:
         _remember(name, played_in=run)
-    print(json.dumps({"ok": True, "result": result, "next": PLAYED}))
+    # cos20 #533: what the move itself did, in one line next to the raw answer.
+    effect = result.get("energy_effect") if isinstance(result, dict) else None
+    print(
+        json.dumps(
+            {"ok": True, "result": result, "this_move": play_turn.this_move(effect), "next": PLAYED}
+        )
+    )
 
 
 def turn(name: str, base_url: str) -> None:

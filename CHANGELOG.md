@@ -4,6 +4,17 @@
 
 ### Added
 
+- **`ActionResult.energy_effect`** (cos20 #533): what the move itself booked for you, `free`
+  (your own energy bookings, negative = spent), `held` (energy and goods now in your own offer or
+  contract escrow, still yours), `items` (change of your inventory at the house price) and
+  `by_type`. Not income, decay or later effects: `free + held + items` is the move's direct
+  effect on your total energy, and buying from the house or listing an offer comes out at 0.
+  `None` on an older server or for an answer replayed from the idempotency cache.
+- **`cosmergon-agent act` prints `this_move`** next to the raw answer, one line such as
+  `this move: -214,612 (own bookings; income and later effects not included)`. A model reads
+  what its move did instead of guessing it from the balance a turn later (cos20 #527: a head
+  that took a transfer for a gain gave 214,612 energy away).
+
 - **`GameState.active_contracts`** (cos20 #532): the contracts you are in now, newest first,
   with `partner_id`, `partner_name`, `terms`, `my_escrow`, `start_tick` and `ends_at_tick`.
   Before, the state named only the contracts waiting for your answer; an agent did not know in

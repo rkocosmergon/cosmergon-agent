@@ -24,6 +24,24 @@ def _short(value: Any, chars: int = 160) -> str:
     return text if len(text) <= chars else text[: chars - 1] + "…"
 
 
+def this_move(effect: Any) -> str | None:
+    """The answer's ``energy_effect`` as one line, or ``None`` if the server sent none (cos20 #533).
+
+    ``this move: -214,612 (own bookings; income and later effects not included)``, with
+    ``, 1,000 held in your offer`` and ``, items +900 at house price`` where they apply.
+    """
+    if not isinstance(effect, dict):
+        return None
+    parts = [f"this move: {float(effect.get('free') or 0):+,.0f}"]
+    held = float(effect.get("held") or 0)
+    if held:
+        parts.append(f"{held:,.0f} held in your offer")
+    items = float(effect.get("items") or 0)
+    if items:
+        parts.append(f"items {items:+,.0f} at house price")
+    return ", ".join(parts) + " (own bookings; income and later effects not included)"
+
+
 def total_energy(state: dict[str, Any]) -> float | None:
     total = (state.get("ranking") or {}).get("gesamtenergie")
     return float(total) if isinstance(total, int | float) else None
