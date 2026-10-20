@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.19] — 2026-10-20
+
 ### Added
 
 - **`ActionResult.energy_effect`** (cos20 #533): what the move itself booked for you, `free`
