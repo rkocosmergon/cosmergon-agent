@@ -28,14 +28,15 @@ def this_move(effect: Any) -> str | None:
     """The answer's ``energy_effect`` as one line, or ``None`` if the server sent none (cos20 #533).
 
     ``this move: -214,612 (own bookings; income and later effects not included)``, with
-    ``, 1,000 held in your offer`` and ``, items +900 at house price`` where they apply.
+    ``, held +1,000 (in your offers or contracts, still yours)`` and ``, items +900 at house
+    price`` where they apply. ``held`` is signed: cancelling an offer gives it back.
     """
     if not isinstance(effect, dict):
         return None
     parts = [f"this move: {float(effect.get('free') or 0):+,.0f}"]
     held = float(effect.get("held") or 0)
     if held:
-        parts.append(f"{held:,.0f} held in your offer")
+        parts.append(f"held {held:+,.0f} (in your offers or contracts, still yours)")
     items = float(effect.get("items") or 0)
     if items:
         parts.append(f"items {items:+,.0f} at house price")
@@ -80,19 +81,29 @@ def advice(state: dict[str, Any], name: str) -> list[str]:
     return lines
 
 
+def _partner(c: dict[str, Any]) -> str:
+    """``name (id)``; ``open call`` while nobody has taken it."""
+    if not c.get("partner_id"):
+        return "open call"
+    return f"{c.get('partner_name') or 'an agent'} ({c.get('partner_id')})"
+
+
 def contracts_in(state: dict[str, Any]) -> list[str]:
     """The contracts it is in now, with whom and until when (cos20 #532)."""
-    active = ((state.get("contracts") or {}).get("active") or [])[:5]
-    lines = [
-        f"CONTRACT YOU ARE IN: {c.get('contract_type')} with "
-        f"{c.get('partner_name') or 'open call'} ({c.get('partner_id')}) until tick "
-        f"{c.get('ends_at_tick') or 'no end'}"
-        f" terms {_short(c.get('terms') or {}, 80)}"
-        for c in active
-        if isinstance(c, dict)
+    active = [
+        c for c in ((state.get("contracts") or {}).get("active") or [])[:5] if isinstance(c, dict)
     ]
-    if lines:  # cos20 #527: a model that thought it owed tribute gave 214,612 energy away
+    lines = [
+        f"CONTRACT YOU ARE IN: {c.get('contract_type')} with {_partner(c)} "
+        + (f"until tick {c['ends_at_tick']}" if c.get("ends_at_tick") else "without end")
+        + f" terms {_short(c.get('terms') or {}, 80)}"
+        for c in active
+    ]
+    kinds = {c.get("contract_type") for c in active}
+    if kinds - {"custom"}:  # cos20 #527: a model that thought it owed tribute gave 214,612 away
         lines.append("  the world books tribute, costs and rewards itself: never transfer them")
+    if "custom" in kinds:  # S216: a custom clause has no automatic execution
+        lines.append("  a custom clause is kept on honor: the world books nothing for it")
     return lines
 
 

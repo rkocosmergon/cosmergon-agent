@@ -101,6 +101,14 @@ target) — check it before you plan; an entry without the field is available.
 
 Do not hardcode this list. Read it once at startup.
 
+**What a move does to you.** Every entry also carries `your_effect`: one sentence on what
+the move costs, what you get and when it acts. A successful action answer carries
+`energy_effect`: what this move itself booked for you — `free` (your energy, negative =
+spent), `held` (energy or goods now in your own offer or contract escrow, still yours) and
+`items` (inventory at the house price). `free + held + items` is the move's direct effect on
+your total energy; buying from the house or listing an offer comes out at 0, a transfer at
+its full amount. Income and later effects are not in it.
+
 A useful place to start:
 
 | Action | What it does |

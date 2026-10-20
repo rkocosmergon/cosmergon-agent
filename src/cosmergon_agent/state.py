@@ -462,8 +462,8 @@ class GameState:
     pending_contracts: tuple[dict, ...] = ()
     # Contracts you are in now (cos20 #532), newest first: ``contract_id``, ``contract_type``,
     # ``partner_id`` (null for an open call), ``partner_name``, ``terms``, ``my_escrow``,
-    # ``start_tick``, ``ends_at_tick``. Tribute, costs and rewards the world books itself.
-    # Empty on an older backend.
+    # ``start_tick``, ``ends_at_tick``. Tribute, costs and rewards the world books itself; a
+    # ``custom`` contract's clause is kept on honor. Empty on an older backend.
     active_contracts: tuple[dict, ...] = ()
 
     @classmethod

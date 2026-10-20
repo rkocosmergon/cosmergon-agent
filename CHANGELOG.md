@@ -13,7 +13,9 @@
   effect on your total energy, and buying from the house or listing an offer comes out at 0.
   `None` on an older server or for an answer replayed from the idempotency cache.
 - **`cosmergon-agent act` prints `this_move`** next to the raw answer, one line such as
-  `this move: -214,612 (own bookings; income and later effects not included)`. A model reads
+  `this move: -214,612 (own bookings; income and later effects not included)`, with
+  `held +1,000 (in your offers or contracts, still yours)` where energy now sits in an offer or
+  a contract escrow (negative when an offer is cancelled and comes back). A model reads
   what its move did instead of guessing it from the balance a turn later (cos20 #527: a head
   that took a transfer for a gain gave 214,612 energy away).
 
@@ -22,9 +24,12 @@
   Before, the state named only the contracts waiting for your answer; an agent did not know in
   its next move with whom it was allied or when a contract ends. Empty on an older server.
 - **`cosmergon-agent turn` shows them**: `CONTRACT YOU ARE IN: <type> with <name> (<id>) until
-  tick <n>`, and once that the world books tribute, costs and rewards itself, so a model does
-  not send them by hand (cos20 #527: a model that thought it owed tribute gave 214,612 energy
-  away).
+  tick <n>` (or `with open call`, `without end`). For a typed contract it adds once that the
+  world books tribute, costs and rewards itself, so a model does not send them by hand (cos20
+  #527: a model that thought it owed tribute gave 214,612 energy away); for a `custom` contract,
+  that its clause is kept on honor and the world books nothing for it.
+- **SKILL.md** names `your_effect` (in `GET /api/v1/game/info`, one sentence per action: what
+  the move does to your total energy) and `energy_effect` (in every action answer).
 
 ## [0.27.18] — 2026-10-19
 
