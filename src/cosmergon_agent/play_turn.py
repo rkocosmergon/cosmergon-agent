@@ -141,6 +141,10 @@ def contracts_and_talk(state: dict[str, Any], name: str) -> list[str]:
             for t in targets[:5]
         )
         lines.append(f"AGENTS YOU CAN DEAL WITH: {names}")
+        lines.append(  # cos20 #507: allies come from proposals, rooms reach no world agent
+            f"  propose: cosmergon-agent help-action propose_contract --agent {name} — most "
+            "accept a fair offer. A word first goes by message; world agents do not read rooms."
+        )
     return lines
 
 
