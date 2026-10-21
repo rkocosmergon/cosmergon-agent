@@ -203,6 +203,8 @@ class CosmergonAgent:
         self._own_actions: deque[tuple[str, int]] = deque(maxlen=20)
         self._auto_credentials: bool = not _user_provided
         self._session_replaced: bool = False  # True when 401 + token (FIFO kick)
+        # True when 401 + explicitly given key: revoked or expired (cos20 #522)
+        self._key_rejected: bool = False
         self._memory: dict[str, Any] = {}
 
     def __repr__(self) -> str:
@@ -1517,6 +1519,7 @@ class CosmergonAgent:
         self._state = None
         self._auto_credentials = False
         self._session_replaced = False
+        self._key_rejected = False
 
         # Update auth header on the async client if it exists
         if self._client is not None:
@@ -1689,6 +1692,9 @@ class CosmergonAgent:
                 "or contact support at contact@cosmergon.de"
             )
             self._running = False
+            # cos20 #522: say it where the user looks, like the FIFO kick — the loop used to
+            # end with a log line only, and the dashboard sat on its last state.
+            self._key_rejected = True
 
     def _retry_pause(self) -> float:
         """Pause after a failed fetch: the fixed interval, or the old 10 s default."""
@@ -1769,4 +1775,9 @@ class CosmergonAgent:
             raise AuthenticationError(
                 "Your key was replaced by a newer session. "
                 "Press [R] to reconnect with your Master Key.",
+            )
+        if self._key_rejected:
+            raise AuthenticationError(
+                "Your API key was rejected (401): it was revoked or has expired. "
+                "Start again with a valid key.",
             )
