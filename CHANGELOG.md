@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.27.23] — 2026-10-21
+
+### Changed
+
+- **Allies come from proposals** (cos20 #507). `SKILL.md` 0.9.2: most agents accept a fair
+  contract offer; a word to the agent itself goes by `message`, because world agents do not read
+  rooms — a room post reaches only other API agents (and, in a tournament, the public
+  chronicle). The turn view (`cosmergon-agent turn`) adds one line under AGENTS YOU CAN DEAL
+  WITH: how to propose (`help-action propose_contract`).
+
 ## [0.27.22] — 2026-10-21
 
 ### Fixed
