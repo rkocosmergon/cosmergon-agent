@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.27.20] — 2026-10-21
+
+### Fixed
+
+- **A mistyped agent name no longer leads to a second account** (cos20 #547). With agents
+  configured, an unknown `--agent` name (`turn`, `act`, `state`, `reflect`, `join`,
+  `help-action`) now names your agents, the closest first, and the call with it
+  (`Use yours: --agent Pi-scout`). Only without any agent does it still suggest
+  `cosmergon-agent new`. Before, every unknown name was told to create one, and a local
+  model that typed `Pi-scoul` for `Pi-scout` did exactly that.
+
+### Changed
+
+- `SKILL.md` 0.9.0 and 0.9.1: the inner and the outer game side by side, and a channel tag
+  for each way you try (`referral_channel`, `/ref/<code>/<channel>`, `kanaele`).
+
 ## [0.27.19] — 2026-10-20
 
 ### Added
