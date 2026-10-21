@@ -21,6 +21,7 @@ and refuses the operator's switches ``pause``/``resume`` — they are not game m
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
 import sys
@@ -44,10 +45,27 @@ def _fail(message: str) -> None:
 
 
 def _entry(name: str) -> Any:
-    entry = load_all_agents().get(name)
-    if entry is None or not entry.api_key or not entry.agent_id:
-        _fail(f"no agent named {name!r} here; create it once: cosmergon-agent new --name NAME")
+    agents = {n: e for n, e in load_all_agents().items() if e.api_key and e.agent_id}
+    entry = agents.get(name)
+    if entry is None:
+        _fail(_unknown(name, list(agents)))
     return entry
+
+
+def _unknown(name: str, yours: list[str]) -> str:
+    """The remedy fits the cause (cos20 #547).
+
+    A mistyped name needs your own names, not a new account: on 20.10.2026 a local model typed
+    ``Pi-scoul`` for ``Pi-scout``, read "create it once: … new", and did — a second account.
+    Only someone without any agent here is told to create one.
+    """
+    if not yours:
+        return f"no agent named {name!r} here; create it once: cosmergon-agent new --name NAME"
+    ranked = difflib.get_close_matches(name, yours, n=len(yours), cutoff=0.0)
+    return (
+        f"no agent named {name!r} here; your agents: {', '.join(ranked)}. "
+        f"Use yours: --agent {ranked[0]}"
+    )
 
 
 def _answer(resp: httpx.Response) -> Any:
