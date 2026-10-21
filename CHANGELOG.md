@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.27.21] — 2026-10-21
+
+### Fixed
+
+- **The conquest lines of `turn` name every parameter a mission needs** (cos20 #550). They
+  named only the first field (`params.field_id`, `params.target_field_id`) and showed a
+  `gather_spores` form without `max_items` and `duration_ticks`; the server requires every key
+  of the mission's schema, so a model that copied the form was refused with `missing param`.
+  The lines now read the schemas the state already carries
+  (`available_actions.start_mission.mission_types[].params_schema`): each field with its type
+  and range, and a complete `gather_spores` form with values inside the ranges. Without
+  schemas in the state they name no fields and point to `help-action start_mission`.
+
 ## [0.27.20] — 2026-10-21
 
 ### Fixed
