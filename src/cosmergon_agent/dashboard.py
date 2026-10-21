@@ -1267,8 +1267,10 @@ class KeyModal(ModalScreen):
         has_stripe_customer: bool = False,
         downgrade_at: str | None = None,
         has_token: bool = False,
+        referral_code: str = "",
     ) -> None:
         super().__init__()
+        self._referral_code = referral_code
         self._api_key = api_key
         self._config_path = config_path
         self._tier = tier
@@ -1306,6 +1308,15 @@ class KeyModal(ModalScreen):
             lines += [
                 "",
                 "[dim]Permanent key? Upgrade at cosmergon.com/upgrade[/dim]",
+            ]
+        # cos20 #542 (panel 21.10.2026): the outer game next to the key, where the player looks —
+        # not in the header (pushy). Voluntary; the terms are one link away.
+        if self._referral_code:
+            lines += [
+                "",
+                f"[bold]Partner code:[/bold]  {self._referral_code}",
+                f"  [dim]Invite others: cosmergon.com/ref/{self._referral_code}/dashboard[/dim]",
+                "  [dim]Voluntary partner program — terms: cosmergon.com/partner/terms[/dim]",
             ]
         # Paket 4.1: Rotate hint (only for Paid users with a saved Master Key)
         can_rotate = self._has_token and self._tier not in ("free", "")
@@ -3761,6 +3772,7 @@ class CosmergonDashboard(App):
                 has_stripe_customer=has_stripe,
                 downgrade_at=downgrade,
                 has_token=bool(token),
+                referral_code=state.referral_code if state else "",
             )
         )
         if result == "rotate":

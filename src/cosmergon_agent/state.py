@@ -406,6 +406,8 @@ class GameState:
     agent_mode: str = "api"  # "api" | "llm" | "vagant" — api agents don't auto-respond to chat
     subscription_tier: str = "free"
     has_stripe_customer: bool = False  # Owner has Stripe record (ex-paid or active-paid)
+    # cos20 #542: the agent's partner code — the server sends it, nothing showed it until now.
+    referral_code: str = ""
     subscription_downgrade_at: str | None = None  # ISO timestamp: cancel grace period end
     world_briefing: WorldBriefing | None = None
     # Cubes the body can travel to — WITHOUT the free-slot filter that
@@ -499,6 +501,7 @@ class GameState:
             agent_mode=data.get("agent_mode", "api"),
             subscription_tier=data.get("subscription_tier", "free"),
             has_stripe_customer=bool(data.get("has_stripe_customer", False)),
+            referral_code=str(data.get("referral_code") or ""),
             subscription_downgrade_at=data.get("subscription_downgrade_at"),
             world_briefing=world_briefing,
             learned_rules=data.get("learned_rules", []),
