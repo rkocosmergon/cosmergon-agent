@@ -3733,13 +3733,14 @@ class CosmergonDashboard(App):
         if isinstance(self.screen, FieldScreen):
             self.screen.action_refresh_field()
             return
-        # cos20 #522: a loop that ended (network gone too long, key rejected) is started
-        # again; before, [R] only wrote "Refreshing..." and nothing happened.
-        if not self.agent._running:
-            self._add_log(_c(self._theme.data, "Connecting again..."))
+        # cos20 #522: a loop that ended (key rejected, client closed) is started again;
+        # before, [R] only wrote "Refreshing..." and nothing happened.
+        restart = not self.agent._running
+        self._add_log(
+            _c(self._theme.data, "Refreshing... connecting again" if restart else "Refreshing...")
+        )
+        if restart:
             self._run_agent()
-            return
-        self._add_log(_c(self._theme.data, "Refreshing..."))
 
     @work
     async def action_show_key(self) -> None:
