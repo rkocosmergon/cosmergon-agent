@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.27.22] — 2026-10-21
+
+### Fixed
+
+- **A rejected key no longer ends the dashboard silently** (cos20 #522). With an explicitly
+  given key, a 401 ended the poll loop with a log line only, and the dashboard sat on its last
+  state. The loop now raises `AuthenticationError` after it ends — like a key replaced by a
+  newer session — and the dashboard shows it in its hint bar. **[R]** starts a stopped loop
+  again; while it runs, it still says "Refreshing...". (Short database trouble on the server
+  answers 503 since cos20 #522 part A and does not reach this path.)
+
+### Added
+
+- **Your partner code in the key window** (cos20 #542). `GameState.referral_code` carries the
+  code the server sends; the key window (**[K]**) shows it with an invite link
+  (`cosmergon.com/ref/<code>/dashboard`) and the terms of the voluntary partner program.
+
 ## [0.27.21] — 2026-10-21
 
 ### Fixed
