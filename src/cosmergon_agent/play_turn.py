@@ -144,6 +144,62 @@ def contracts_and_talk(state: dict[str, Any], name: str) -> list[str]:
     return lines
 
 
+def _schema(mission: dict[str, Any], kind: str) -> dict[str, Any] | None:
+    """The params of one mission type as the server checks them (``mission_types[].params_schema``).
+
+    cos20 #550: the view named only the first field of each mission (``params.field_id``), the
+    server requires every key of the schema — a model copied the form and got ``missing param``.
+    The schema is in the state, so the view reads it instead of keeping its own copy.
+    """
+    for entry in mission.get("mission_types") or []:
+        if isinstance(entry, dict) and entry.get("type") == kind:
+            schema = entry.get("params_schema")
+            return schema if isinstance(schema, dict) and schema else None
+    return None
+
+
+def _ranged(spec: Any) -> bool:
+    return isinstance(spec, list) and len(spec) == 3
+
+
+def _sample(spec: Any, field: str) -> Any:
+    """A value the server accepts for one key: the middle of its range, the field, or a
+    placeholder. Not the lower bound: copied, that gathers one item in 50 ticks."""
+    if _ranged(spec):
+        middle = (spec[1] + spec[2]) / 2
+        return int(middle) if spec[0] == "int" else middle
+    return field if spec == "uuid" else "<text>"
+
+
+def _fields(mission: dict[str, Any], kind: str) -> str:
+    """``params field_id (uuid), max_items (int 1-50)`` — every key the server requires."""
+    schema = _schema(mission, kind)
+    if schema is None:
+        return "its own params (help-action start_mission lists them)"
+    parts = [
+        f"{key} ({spec[0]} {spec[1]}-{spec[2]})" if _ranged(spec) else f"{key} ({spec})"
+        for key, spec in schema.items()
+    ]
+    return "params " + ", ".join(parts)
+
+
+def _form(mission: dict[str, Any], loot: dict[str, Any], name: str) -> str:
+    """One complete gather_spores call: every key of its schema with a value in its range."""
+    schema = _schema(mission, "gather_spores")
+    field = loot.get("field_id") or "<field>"
+    params = (
+        {key: _sample(spec, field) for key, spec in schema.items()}
+        if schema
+        else {"<its params>": "..."}
+    )
+    body = json.dumps({"mission_type": "gather_spores", "params": params})
+    return (
+        f"  Form: cosmergon-agent act start_mission --agent {name} --json '{body}' — the "
+        "mission's own parameters go inside params; all mission types and their parameters: "
+        f"cosmergon-agent help-action start_mission --agent {name}"
+    )
+
+
 def conquest(state: dict[str, Any], name: str) -> list[str]:
     """How fields are won here: a chain of missions, with this agent's own numbers.
 
@@ -172,7 +228,7 @@ def conquest(state: dict[str, Any], name: str) -> list[str]:
     )
     lines.append(
         f"  1. bombs — you have {mission.get('mega_bombs', 0)}{where}: start_mission "
-        "gather_spores with params.field_id"
+        f"gather_spores with {_fields(mission, 'gather_spores')}"
     )
     targets = ((actions.get("claim_field") or {}).get("targets") or [])[:3]
     shown = ", ".join(
@@ -183,20 +239,15 @@ def conquest(state: dict[str, Any], name: str) -> list[str]:
     # Vulnerable = more holes than the threshold, or fewer living cells than its tier's floor
     # (eroberung_tick.is_field_vulnerable, the one rule).
     lines.append(
-        f"  2. siege — start_mission siege_field with params.target_field_id until it has "
-        f"more than {mission.get('holes_threshold', '?')} holes (a field with almost no "
+        f"  2. siege — start_mission siege_field with {_fields(mission, 'siege_field')} until "
+        f"it has more than {mission.get('holes_threshold', '?')} holes (a field with almost no "
         f"living cells is open anyway). Targets: {shown or 'none seen'}"
     )
     lines.append(
-        "  3. capture — start_mission capture_field with params.target_field_id once the "
-        "field is vulnerable; it becomes yours after the claim holds."
+        f"  3. capture — start_mission capture_field with {_fields(mission, 'capture_field')} "
+        "once the field is vulnerable; it becomes yours after the claim holds."
     )
-    lines.append(
-        f"  Form: cosmergon-agent act start_mission --agent {name} --json "
-        '\'{"mission_type": "gather_spores", "params": {"field_id": "<field>"}}\' — the '
-        "mission's own parameters go inside params; all mission types and their parameters: "
-        f"cosmergon-agent help-action start_mission --agent {name}"
-    )
+    lines.append(_form(mission, loot, name))
     return lines
 
 
