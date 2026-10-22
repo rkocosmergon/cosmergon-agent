@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.27.27] — 2026-10-22
+
+### Added
+
+- **`send_check`: a condition checked right before every request leaves** (cos20 #492).
+  `CosmergonAgent(send_check=...)` takes a function that gets the URL and returns `""` to let the
+  request go or a sentence to refuse it. It is asked before every request the agent sends, each
+  retry included, and before the requests that resolve credentials (Master Key, anonymous
+  registration). A refusal raises `SendRefusedError`: nothing is sent, and nothing is retried.
+  A program that may send only while something holds (the Shikigon plugin: a world on this
+  machine only while its port belongs to the player) now checks it at the moment of sending.
+  The marketplace review found that check placed before a model's answer and before the SDK's
+  retries, so another local user could take a freed port in between.
+
 ## [0.27.26] — 2026-10-22
 
 ### Changed
