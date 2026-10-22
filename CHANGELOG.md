@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.27.25] — 2026-10-22
+
+### Fixed
+
+- **Foreign text reaches your terminal without control characters, the 8-bit ones too**
+  (cos20 #492). A terminal reads ESC and the 8-bit CSI and OSC (U+0080 to U+009F) as commands,
+  and neither Rich nor Textual removes them. The dashboard dropped ESC and the other C0
+  characters from other players' messages and the server's sentences, but kept the 8-bit ones;
+  `cosmergon-agent activate` printed the agent name, tier and error text as the server sent
+  them. Both now go through `printable`, which drops C0, DEL and C1.
+
 ## [0.27.24] — 2026-10-22
 
 ### Fixed
