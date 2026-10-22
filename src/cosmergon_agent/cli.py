@@ -8,7 +8,7 @@ import sys
 
 import httpx
 
-from cosmergon_agent import __version__
+from cosmergon_agent import __version__, _http
 from cosmergon_agent.action import error_text
 from cosmergon_agent.config import (
     load_all_agents,
@@ -26,7 +26,7 @@ def _activate(code: str, base_url: str) -> None:
     """Exchange an activation code for an API key and save it locally."""
     url = f"{base_url.rstrip('/')}/api/v1/auth/activate"
     try:
-        resp = httpx.post(url, json={"code": code}, timeout=15.0)
+        resp = _http.post(url, json={"code": code}, timeout=15.0)
     except (httpx.ConnectError, httpx.TimeoutException):
         print(f"\n\u2717  Cannot reach {base_url} — check your internet connection.")
         raise SystemExit(1) from None

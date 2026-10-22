@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from cosmergon_agent import _http
+
 logger = logging.getLogger(__name__)
 
 
@@ -202,7 +204,7 @@ def resolve_token_sync(
     raw_token = token.raw if isinstance(token, _SensitiveStr) else token
     url = f"{base_url.rstrip('/')}/api/v1/players/me/agents"
     try:
-        resp = httpx.get(
+        resp = _http.get(
             url,
             headers={"X-Player-Token": raw_token},
             timeout=timeout,
@@ -235,7 +237,7 @@ async def resolve_token_async(
     raw_token = token.raw if isinstance(token, _SensitiveStr) else token
     url = f"{base_url.rstrip('/')}/api/v1/players/me/agents"
     try:
-        async with httpx.AsyncClient(timeout=timeout, verify=True) as client:
+        async with _http.async_client(timeout=timeout, verify=True) as client:
             resp = await client.get(
                 url,
                 headers={"X-Player-Token": raw_token},

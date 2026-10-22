@@ -27,7 +27,7 @@ import uuid
 
 import httpx
 
-from cosmergon_agent import __version__
+from cosmergon_agent import __version__, _http
 from cosmergon_agent.config import (
     load_credentials,
     load_token,
@@ -129,7 +129,7 @@ async def _auto_register(base_url: str) -> tuple[str, str | None]:
     """Register an anonymous agent.  Returns (api_key, agent_id)."""
     url = f"{base_url.rstrip('/')}/api/v1/auth/register/anonymous-agent"
     try:
-        async with httpx.AsyncClient(timeout=10, verify=True) as client:
+        async with _http.async_client(timeout=10, verify=True) as client:
             resp = await client.post(url, json={"source": "mcp"})
     except httpx.ConnectError:
         _error(f"Cannot reach {base_url} — check your connection")
@@ -206,7 +206,7 @@ async def _force_reregister() -> tuple[str, str]:
 async def _api_get(path: str, api_key: str, base_url: str) -> dict:
     """HTTP GET to Cosmergon API."""
     try:
-        async with httpx.AsyncClient(timeout=30, verify=True) as client:
+        async with _http.async_client(timeout=30, verify=True) as client:
             resp = await client.get(
                 f"{base_url}/api/v1{path}",
                 headers={
@@ -222,7 +222,7 @@ async def _api_get(path: str, api_key: str, base_url: str) -> dict:
 async def _api_post(path: str, body: dict, api_key: str, base_url: str) -> dict:
     """HTTP POST to Cosmergon API."""
     try:
-        async with httpx.AsyncClient(timeout=30, verify=True) as client:
+        async with _http.async_client(timeout=30, verify=True) as client:
             resp = await client.post(
                 f"{base_url}/api/v1{path}",
                 json=body,

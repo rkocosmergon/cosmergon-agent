@@ -30,8 +30,8 @@ from typing import Any
 
 import httpx
 
+from cosmergon_agent import _http, play_turn
 from cosmergon_agent import config as _config
-from cosmergon_agent import play_turn
 from cosmergon_agent.action import error_text
 from cosmergon_agent.config import load_all_agents, save_agent
 
@@ -82,7 +82,7 @@ def _answer(resp: httpx.Response) -> Any:
 def _get(entry: Any, base_url: str, path: str) -> Any:
     url = f"{base_url.rstrip('/')}/api/v1/agents/{entry.agent_id}{path}"
     headers = {"Authorization": f"api-key {entry.api_key}"}
-    return _answer(httpx.get(url, headers=headers, timeout=TIMEOUT_S))
+    return _answer(_http.get(url, headers=headers, timeout=TIMEOUT_S))
 
 
 def _notes_path(name: str) -> Any:
@@ -113,7 +113,7 @@ def new(name: str, persona: str | None, base_url: str) -> None:
     if persona:
         body["persona"] = persona
     url = f"{base_url.rstrip('/')}/api/v1/auth/register/anonymous-agent"
-    data = _answer(httpx.post(url, json=body, timeout=TIMEOUT_S))
+    data = _answer(_http.post(url, json=body, timeout=TIMEOUT_S))
     save_agent(name, data["api_key"], data["agent_id"], base_url=base_url)
     print(
         json.dumps(
@@ -127,7 +127,7 @@ def state(name: str, base_url: str) -> None:
     entry = _entry(name)
     url = f"{base_url.rstrip('/')}/api/v1/agents/{entry.agent_id}/state"
     headers = {"Authorization": f"api-key {entry.api_key}"}
-    print(json.dumps(_answer(httpx.get(url, headers=headers, timeout=TIMEOUT_S))))
+    print(json.dumps(_answer(_http.get(url, headers=headers, timeout=TIMEOUT_S))))
 
 
 def params_from(pairs: list[str], raw: str | None) -> dict[str, Any]:
@@ -178,7 +178,7 @@ def act(name: str, action: str, params: dict[str, Any], base_url: str) -> None:
     # A model writes these moves and may guess a field name: with ``strict`` the server refuses a
     # guessed field and names the right ones, instead of filling in its own values (cos20 #530).
     body = {**body_for(action, params), "strict": True}
-    resp = httpx.post(url, json=body, headers=headers, timeout=TIMEOUT_S)
+    resp = _http.post(url, json=body, headers=headers, timeout=TIMEOUT_S)
     result = _answer(resp)
     if run:
         _remember(name, played_in=run)
@@ -224,7 +224,7 @@ def reflect(name: str, texts: dict[str, str | None], base_url: str) -> None:
     }
     url = f"{base_url.rstrip('/')}/api/v1/agents/{entry.agent_id}/reflection"
     headers = {"Authorization": f"api-key {entry.api_key}"}
-    result = _answer(httpx.post(url, json=body, headers=headers, timeout=TIMEOUT_S))
+    result = _answer(_http.post(url, json=body, headers=headers, timeout=TIMEOUT_S))
     run = os.environ.get("COSMERGON_PLAY_RUN", "")
     if run:  # a look back is this turn's work: the turn is done, as after a move
         _remember(name, played_in=run)
@@ -238,7 +238,7 @@ def join(name: str, tournament_id: str, base_url: str) -> None:
     headers = {"Authorization": f"api-key {entry.api_key}"}
     print(
         json.dumps(
-            {"ok": True, "result": _answer(httpx.post(url, headers=headers, timeout=TIMEOUT_S))}
+            {"ok": True, "result": _answer(_http.post(url, headers=headers, timeout=TIMEOUT_S))}
         )
     )
 
@@ -246,7 +246,7 @@ def join(name: str, tournament_id: str, base_url: str) -> None:
 def help_action(name: str, action: str, base_url: str) -> None:
     """What an action needs: the rules (``/game/info``) and what the agent's state says now."""
     entry = _entry(name)
-    rules = _answer(httpx.get(f"{base_url.rstrip('/')}/api/v1/game/info", timeout=TIMEOUT_S))
+    rules = _answer(_http.get(f"{base_url.rstrip('/')}/api/v1/game/info", timeout=TIMEOUT_S))
     now = (_get(entry, base_url, "/state").get("available_actions") or {}).get(action)
     print(
         json.dumps(

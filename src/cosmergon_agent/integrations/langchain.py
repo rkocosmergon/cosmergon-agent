@@ -25,13 +25,13 @@ import uuid
 
 import httpx
 
-from cosmergon_agent import __version__
+from cosmergon_agent import __version__, _http
 from cosmergon_agent.exceptions import AuthenticationError
 
 
 def _get_client(api_key: str, base_url: str) -> httpx.Client:
     """Create a sync HTTP client with TLS verification and SDK headers."""
-    return httpx.Client(
+    return _http.client(
         base_url=base_url,
         headers={
             "Authorization": f"api-key {api_key}",

@@ -55,7 +55,7 @@ except ImportError as _exc:
         "  pip install textual"
     ) from _exc
 
-from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError, __version__
+from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError, __version__, _http
 from cosmergon_agent.action import (
     action_done_word,
     action_word,
@@ -431,7 +431,8 @@ def _stimme_name(stimme: dict) -> str:
 # starter names its brain). The dashboard itself connects to no model.
 _ADVISOR_ENV = "COSMERGON_ADVISOR_CMD"
 _ADVISOR_PATIENCE_S = 120.0
-_ADVISOR_KEPT_FROM_CHILD = ("COSMERGON_API_KEY", "COSMERGON_PLAYER_TOKEN", _ADVISOR_ENV)
+_SECRETS_IN_ENVIRONMENT = ("COSMERGON_API_KEY", "COSMERGON_PLAYER_TOKEN")
+_ADVISOR_KEPT_FROM_CHILD = (*_SECRETS_IN_ENVIRONMENT, _ADVISOR_ENV)
 # Where the advisor keeps the talk, if the starter names the file: JSON lines, one per question,
 # in the form the command prints plus ``q`` (the question). The dashboard only reads it.
 _ADVISOR_HISTORY_ENV = "COSMERGON_ADVISOR_HISTORY"
@@ -3426,11 +3427,9 @@ class CosmergonDashboard(App):
         Panel S112: the player chooses the plan (``_keep_or_upgrade``); robust fallback on
         any error.
         """
-        import httpx as _httpx
-
         url = f"{self.agent.base_url}/api/v1/billing/create-upgrade-checkout?tier={tier}"
         try:
-            async with _httpx.AsyncClient(timeout=15.0, verify=True) as client:
+            async with _http.async_client(timeout=15.0, verify=True) as client:
                 resp = await client.post(
                     url,
                     headers={"Authorization": f"api-key {self.agent._api_key.raw}"},
@@ -3467,7 +3466,7 @@ class CosmergonDashboard(App):
         headers = {"Authorization": f"api-key {self.agent._api_key.raw}"}
 
         try:
-            async with _httpx.AsyncClient(timeout=15.0, verify=True) as client:
+            async with _http.async_client(timeout=15.0, verify=True) as client:
                 consent_resp = await client.get(
                     f"{base}/api/v1/universe/showcase-consent?lang=en",
                     headers=headers,
@@ -3501,7 +3500,7 @@ class CosmergonDashboard(App):
 
         payload = _showcase_payload(result, str(_uuid.uuid4()))
         try:
-            async with _httpx.AsyncClient(timeout=15.0, verify=True) as client:
+            async with _http.async_client(timeout=15.0, verify=True) as client:
                 r = await client.patch(f"{base}/api/v1/players/me", json=payload, headers=headers)
         except Exception as exc:
             self._set_feedback(_c(self._theme.warn, f"✗ Showcase: PATCH failed: {exc}"))
@@ -3800,7 +3799,7 @@ class CosmergonDashboard(App):
 
         url = f"{self.agent.base_url}/api/v1/billing/regenerate-token"
         try:
-            async with _httpx.AsyncClient(timeout=15.0, verify=True) as client:
+            async with _http.async_client(timeout=15.0, verify=True) as client:
                 resp = await client.post(
                     url,
                     headers={"X-Player-Token": token},
@@ -3861,7 +3860,7 @@ class CosmergonDashboard(App):
 
         url = f"{self.agent.base_url}/api/v1/players/me/agents/{agent_id}/revoke-keys"
         try:
-            async with _httpx.AsyncClient(timeout=15.0, verify=True) as client:
+            async with _http.async_client(timeout=15.0, verify=True) as client:
                 resp = await client.post(url, headers={"X-Player-Token": token})
         except (_httpx.ConnectError, _httpx.TimeoutException):
             self._set_feedback("Cannot reach server — try again later.")
@@ -3948,7 +3947,7 @@ class CosmergonDashboard(App):
 
         url = f"{self.agent.base_url}/api/v1/players/me/agents"
         try:
-            async with _httpx.AsyncClient(timeout=15.0, verify=True) as client:
+            async with _http.async_client(timeout=15.0, verify=True) as client:
                 resp = await client.post(
                     url,
                     headers={"X-Player-Token": token},
@@ -5675,6 +5674,17 @@ class FirstStartApp(App):
 # ---------------------------------------------------------------------------
 
 
+def _secrets_leave_environment() -> None:
+    """Take the key and the Master Key out of the environment once the agent holds them.
+
+    Every program the dashboard starts inherits its environment: the advisor got a cleaned
+    copy, but the browser behind ``webbrowser.open`` got the whole one, key included (cos20
+    #492 S11). Gone from the environment, no later child can inherit them.
+    """
+    for name in _SECRETS_IN_ENVIRONMENT:
+        os.environ.pop(name, None)
+
+
 def _needs_first_start(api_key: str | None) -> bool:
     """Return True when the first-start screen should be shown."""
     if api_key or os.environ.get("COSMERGON_API_KEY", ""):
@@ -5777,6 +5787,7 @@ def main() -> None:
 
     try:
         agent = CosmergonAgent(api_key=resolved_key, base_url=args.base_url, poll_interval=10.0)
+        _secrets_leave_environment()
         CosmergonDashboard(agent=agent, theme=theme).run()
     except CosmergonError as exc:
         msg = str(exc)

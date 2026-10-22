@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 
-from cosmergon_agent import __version__
+from cosmergon_agent import __version__, _http
 from cosmergon_agent._token import TokenResolutionError, _SensitiveStr, resolve_token_sync
 from cosmergon_agent.action import ActionResult, error_text
 from cosmergon_agent.config import (
@@ -1353,7 +1353,7 @@ class CosmergonAgent:
         # Resolve agent_id synchronously if not yet known
         if not self.agent_id:
             plain_key = self._api_key.raw
-            with httpx.Client(timeout=10.0) as resolve_client:
+            with _http.client(timeout=10.0) as resolve_client:
                 resp = resolve_client.get(
                     f"{self.base_url}/api/v1/agents/",
                     headers={"Authorization": f"api-key {plain_key}"},
@@ -1384,7 +1384,9 @@ class CosmergonAgent:
 
                 # read=None keeps the connection open indefinitely (required for SSE).
                 # Default 10s covers connect/write/pool; read=None overrides read-only.
-                with httpx.Client(timeout=httpx.Timeout(10.0, read=None)) as sse_client:
+                with _http.client(
+                    timeout=httpx.Timeout(10.0, read=None), deadline=None
+                ) as sse_client:
                     with sse_client.stream("GET", url, headers=headers) as response:
                         if response.status_code in (401, 403):
                             raise AuthenticationError(
@@ -1537,7 +1539,7 @@ class CosmergonAgent:
         The agent gets 1000 energy and a 24h session.
         """
         url = f"{base_url.rstrip('/')}/api/v1/auth/register/anonymous-agent"
-        with httpx.Client(timeout=10.0) as client:
+        with _http.client(timeout=10.0) as client:
             resp = client.post(url, json={"source": "sdk"})
         if resp.status_code != 200:
             is_json = resp.headers.get(
@@ -1562,7 +1564,7 @@ class CosmergonAgent:
 
     def _create_client(self) -> httpx.AsyncClient:
         """Single point of HTTP client creation (H3: DRY + consistent config)."""
-        return httpx.AsyncClient(
+        return _http.async_client(
             headers={
                 "Authorization": f"api-key {self._api_key.raw}",
                 "User-Agent": f"cosmergon-agent-python/{__version__}",
@@ -1570,7 +1572,6 @@ class CosmergonAgent:
             },
             timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0),
             verify=True,
-            max_redirects=3,
         )
 
     async def _request(
