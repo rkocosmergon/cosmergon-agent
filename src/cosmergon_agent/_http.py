@@ -10,6 +10,12 @@ it is unpacked, and counts the bytes as they arrive. No redirect is followed.
 Every HTTP call of the SDK goes through ``client``, ``async_client`` or ``request`` below
 (guard: ``sdk-tests/test_http_grenze_492.py``). The check runs as a response hook, so it also
 holds for a proxy from the environment, which brings its own transport.
+
+The same door asks a caller's ``send_check`` right before each request leaves, retries
+included. A program that may send only while a condition holds (the Shikigon plugin: a world
+on this machine only while its port is the player's) checks it here, at the moment of sending,
+not once before a wait. The marketplace review found the check placed before a model's answer
+and the SDK's retries (cos20 #492, #12584).
 """
 
 from __future__ import annotations
@@ -19,6 +25,11 @@ from time import monotonic
 from typing import Any, cast
 
 import httpx
+
+from cosmergon_agent.exceptions import SendRefusedError
+
+SendCheck = Callable[[str], str]
+"""Asked with the URL right before a request leaves: ``""`` lets it go, a sentence refuses it."""
 
 ANSWER_BYTES = 8 * 1024 * 1024
 """Raw bytes one answer may bring. The largest answer an SDK client got in a day was a
@@ -121,30 +132,70 @@ def _async_guard(deadline: float | None) -> Callable[[httpx.Response], Awaitable
     return check
 
 
-def _settings(kwargs: dict[str, Any], guard: Callable[[httpx.Response], Any]) -> dict[str, Any]:
+def _refuse_unless(check: SendCheck, request: httpx.Request) -> None:
+    why = check(str(request.url))
+    if why:
+        raise SendRefusedError(why)
+
+
+def _send_guard(check: SendCheck) -> Callable[[httpx.Request], None]:
+    def guard(request: httpx.Request) -> None:
+        _refuse_unless(check, request)
+
+    return guard
+
+
+def _async_send_guard(check: SendCheck) -> Callable[[httpx.Request], Awaitable[None]]:
+    async def guard(request: httpx.Request) -> None:
+        # No await between this check and httpx opening or reusing the connection.
+        _refuse_unless(check, request)
+
+    return guard
+
+
+def _settings(
+    kwargs: dict[str, Any],
+    guard: Callable[[httpx.Response], Any],
+    send_guard: Callable[[httpx.Request], Any] | None,
+) -> dict[str, Any]:
     if kwargs.pop("follow_redirects", False):
         raise ValueError("the SDK follows no redirect")
     hooks = dict(kwargs.pop("event_hooks", None) or {})
     hooks["response"] = [guard, *hooks.get("response", [])]
+    if send_guard is not None:
+        # Last of the request hooks: httpx sends right after them, every attempt anew.
+        hooks["request"] = [*hooks.get("request", []), send_guard]
     headers = {**(kwargs.pop("headers", None) or {}), **PLAIN}
     return {**kwargs, "headers": headers, "event_hooks": hooks, "follow_redirects": False}
 
 
-def client(*, deadline: float | None = ANSWER_SECONDS, **kwargs: Any) -> httpx.Client:
+def client(
+    *, deadline: float | None = ANSWER_SECONDS, send_check: SendCheck | None = None, **kwargs: Any
+) -> httpx.Client:
     """``httpx.Client`` with the bounds above; takes httpx's own arguments."""
-    return httpx.Client(**_settings(kwargs, _guard(deadline)))
+    send_guard = _send_guard(send_check) if send_check else None
+    return httpx.Client(**_settings(kwargs, _guard(deadline), send_guard))
 
 
-def async_client(*, deadline: float | None = ANSWER_SECONDS, **kwargs: Any) -> httpx.AsyncClient:
+def async_client(
+    *, deadline: float | None = ANSWER_SECONDS, send_check: SendCheck | None = None, **kwargs: Any
+) -> httpx.AsyncClient:
     """``httpx.AsyncClient`` with the bounds above; takes httpx's own arguments."""
-    return httpx.AsyncClient(**_settings(kwargs, _async_guard(deadline)))
+    send_guard = _async_send_guard(send_check) if send_check else None
+    return httpx.AsyncClient(**_settings(kwargs, _async_guard(deadline), send_guard))
 
 
 def request(
-    method: str, url: str, *, timeout: Any = 10.0, verify: Any = True, **kwargs: Any
+    method: str,
+    url: str,
+    *,
+    timeout: Any = 10.0,
+    verify: Any = True,
+    send_check: SendCheck | None = None,
+    **kwargs: Any,
 ) -> httpx.Response:
     """One call like ``httpx.request``, with the bounds above."""
-    with client(timeout=timeout, verify=verify) as one:
+    with client(timeout=timeout, verify=verify, send_check=send_check) as one:
         return one.request(method, url, **kwargs)
 
 

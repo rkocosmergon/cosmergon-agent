@@ -63,6 +63,13 @@ class ConnectionError(CosmergonError):
     """Network failure after all retries exhausted."""
 
 
+class SendRefusedError(CosmergonError):
+    """The caller's ``send_check`` refused a request before it left (cos20 #492).
+
+    Not a network failure: nothing was sent, and nothing is retried.
+    """
+
+
 class WebhookSignatureError(CosmergonError):
     """Webhook signature verification failed (wrong format or invalid HMAC)."""
 

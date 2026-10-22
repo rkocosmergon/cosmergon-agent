@@ -93,6 +93,7 @@ class CosmergonAgent:
         auto_reconnect: bool = True,
         player_token: str | None = None,
         agent_name: str | None = None,
+        send_check: _http.SendCheck | None = None,
     ) -> None:
         """Connect to Cosmergon.
 
@@ -116,7 +117,11 @@ class CosmergonAgent:
             player_token: Master Key (CSMR-...) for multi-agent access.
             agent_name: Select agent by name when using player_token.
                 If omitted with multiple agents, the oldest is used.
+            send_check: Asked with the URL right before every request this agent sends,
+                retries and credential resolution included; a non-empty answer refuses the
+                request with ``SendRefusedError``, and nothing leaves (cos20 #492).
         """
+        self._send_check = send_check  # before the first request, which may come right below
         # C1: 6-level credential resolution
         # Track whether credentials came from the user (explicit) or auto-managed.
         # Used in _poll_loop: user-provided → error on 401, auto → re-register.
@@ -134,6 +139,7 @@ class CosmergonAgent:
                 player_token,
                 base_url,
                 agent_name,
+                send_check,
             )
             _user_provided = True
 
@@ -153,6 +159,7 @@ class CosmergonAgent:
                     env_token,
                     base_url,
                     env_name,
+                    send_check,
                 )
                 _user_provided = True
 
@@ -170,7 +177,7 @@ class CosmergonAgent:
 
         # Level 6: auto-register anonymous agent
         if not resolved_key:
-            resolved_key, auto_agent_id = self._auto_register_anonymous(base_url)
+            resolved_key, auto_agent_id = self._auto_register_anonymous(base_url, send_check)
             if not agent_id:
                 agent_id = auto_agent_id
             save_credentials(resolved_key, agent_id, base_url=base_url)
@@ -1353,7 +1360,7 @@ class CosmergonAgent:
         # Resolve agent_id synchronously if not yet known
         if not self.agent_id:
             plain_key = self._api_key.raw
-            with _http.client(timeout=10.0) as resolve_client:
+            with _http.client(timeout=10.0, send_check=self._send_check) as resolve_client:
                 resp = resolve_client.get(
                     f"{self.base_url}/api/v1/agents/",
                     headers={"Authorization": f"api-key {plain_key}"},
@@ -1385,7 +1392,9 @@ class CosmergonAgent:
                 # read=None keeps the connection open indefinitely (required for SSE).
                 # Default 10s covers connect/write/pool; read=None overrides read-only.
                 with _http.client(
-                    timeout=httpx.Timeout(10.0, read=None), deadline=None
+                    timeout=httpx.Timeout(10.0, read=None),
+                    deadline=None,
+                    send_check=self._send_check,
                 ) as sse_client:
                     with sse_client.stream("GET", url, headers=headers) as response:
                         if response.status_code in (401, 403):
@@ -1477,13 +1486,16 @@ class CosmergonAgent:
         token: str,
         base_url: str,
         agent_name: str | None,
+        send_check: _http.SendCheck | None = None,
     ) -> tuple[str, str]:
         """Resolve a Master Key to (api_key, agent_id).
 
         Saves token + all agents to config.toml for future use.
         """
         try:
-            result = resolve_token_sync(token, base_url=base_url, agent_name=agent_name)
+            result = resolve_token_sync(
+                token, base_url=base_url, agent_name=agent_name, send_check=send_check
+            )
         except TokenResolutionError as exc:
             raise AuthenticationError(str(exc)) from exc
 
@@ -1532,14 +1544,16 @@ class CosmergonAgent:
     # --- Auto-registration ---
 
     @staticmethod
-    def _auto_register_anonymous(base_url: str) -> tuple[str, str | None]:
+    def _auto_register_anonymous(
+        base_url: str, send_check: _http.SendCheck | None = None
+    ) -> tuple[str, str | None]:
         """Register an anonymous agent. Returns (api_key, agent_id).
 
         Called automatically when no api_key is provided.
         The agent gets 1000 energy and a 24h session.
         """
         url = f"{base_url.rstrip('/')}/api/v1/auth/register/anonymous-agent"
-        with _http.client(timeout=10.0) as client:
+        with _http.client(timeout=10.0, send_check=send_check) as client:
             resp = client.post(url, json={"source": "sdk"})
         if resp.status_code != 200:
             is_json = resp.headers.get(
@@ -1572,6 +1586,7 @@ class CosmergonAgent:
             },
             timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0),
             verify=True,
+            send_check=self._send_check,
         )
 
     async def _request(
@@ -1676,7 +1691,7 @@ class CosmergonAgent:
                 "Your previous agent is no longer accessible from this device."
             )
             try:
-                new_key, new_id = self._auto_register_anonymous(self.base_url)
+                new_key, new_id = self._auto_register_anonymous(self.base_url, self._send_check)
                 self._api_key = _SensitiveStr(new_key)
                 self.agent_id = new_id
                 save_credentials(new_key, new_id, base_url=self.base_url)

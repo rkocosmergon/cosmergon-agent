@@ -185,6 +185,7 @@ def resolve_token_sync(
     base_url: str = "https://cosmergon.com",
     agent_name: str | None = None,
     timeout: float = 15.0,
+    send_check: _http.SendCheck | None = None,
 ) -> TokenResolutionResult:
     """Exchange a Master Key for agent credentials (synchronous).
 
@@ -194,6 +195,7 @@ def resolve_token_sync(
         agent_name: Select a specific agent by name. If None, all agents
             are returned and the caller picks (typically the oldest).
         timeout: HTTP timeout in seconds.
+        send_check: Asked right before the request leaves (``_http.SendCheck``).
 
     Returns:
         TokenResolutionResult with all agents and their fresh API keys.
@@ -209,6 +211,7 @@ def resolve_token_sync(
             headers={"X-Player-Token": raw_token},
             timeout=timeout,
             verify=True,
+            send_check=send_check,
         )
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         raise TokenResolutionError(
