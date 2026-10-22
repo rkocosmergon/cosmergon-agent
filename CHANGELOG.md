@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [0.27.30] — 2026-10-22
+
+### Added
+
+- **`cosmergon-dashboard --api-key-fd N`: the key from a file descriptor** (cos20 #492). The
+  dashboard reads the API key from descriptor `N` (a pipe from the program that starts it) to
+  its end and closes it. The key then stands neither in the process list nor in
+  `/proc/<pid>/environ`, which keeps a process's starting environment for its whole life, also
+  after the dashboard takes `COSMERGON_API_KEY` out of `os.environ`. The Shikigon plugin starts
+  the dashboard this way.
+
+### Fixed
+
+- **The server's words are text in the dashboard, everywhere** (cos20 #492). A sentence the
+  world sent with a refusal (a move, a compass, a mission, a registration) went into the log and
+  the hint bar as it came: markup in it was read, and control characters reached the terminal.
+  Now `ActionResult.error_message`, `error_text` and the `{"error": …}` answers come without
+  control characters, and every place the dashboard shows foreign text (refusals, agent names,
+  a field's type, the server's next step, the tournament line, when the key ends, dialog titles
+  and choices) shows it as text.
+
 ## [0.27.29] — 2026-10-22
 
 0.27.28 was tagged but never published: the type check failed on that commit. 0.27.29 is the
