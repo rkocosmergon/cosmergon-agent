@@ -26,6 +26,16 @@ def error_text(body: Any, fallback: str = "") -> str:
     return text
 
 
+def printable(text: object, keep: str = "") -> str:
+    """``text`` without control characters, for a terminal; ``keep`` names those that stay.
+
+    A terminal reads ESC (C0) and the 8-bit CSI and OSC (C1, U+0080 to U+009F) as commands, and
+    neither Rich nor Textual removes them. Foreign text (other players, the server, a model)
+    therefore loses all of C0, DEL and C1 — the range Shikigon's bar drops (cos20 #492).
+    """
+    return "".join(z for z in str(text) if z in keep or not (z < " " or "\x7f" <= z <= "\x9f"))
+
+
 # Mission kinds and outcomes in a player's words (cos20 #468, #475). The terminal and
 # Shikigon's bar both show them, so they live here once. Anything not listed is shown as
 # the server names it, so a new outcome is still readable.

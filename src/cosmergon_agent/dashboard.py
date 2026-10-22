@@ -63,6 +63,7 @@ from cosmergon_agent.action import (
     mission_outcome_text,
     mission_step_text,
     mission_word,
+    printable,
 )
 from cosmergon_agent.config import (
     is_onboarding_dismissed,
@@ -331,9 +332,10 @@ def _roh(text: object) -> str:
 
     Other agents' messages, a model's answer and the server's sentences go into panels that
     read markup. A ``[`` in them stays a bracket (``[SYSTEM]`` used to vanish from the log for
-    this reason), and a backslash cannot swallow the tag that follows the text.
+    this reason), and a backslash cannot swallow the tag that follows the text. Control
+    characters go by ``printable``, the 8-bit ones too (cos20 #492).
     """
-    sauber = "".join(z for z in str(text) if z >= " " and z != "\x7f")
+    sauber = printable(text)
     sauber = _BACKSLASHES_BEFORE_BRACKET.sub(lambda m: m.group(1) * 2 + "\\[", sauber)
     return _BACKSLASHES_AT_END.sub(lambda m: m.group(1) * 2, sauber)
 
