@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [0.27.31] — 2026-10-22
+
+### Fixed
+
+- **Every request has one deadline, the head of its answer included** (cos20 #492, third review
+  of Shikigon). The limit on the time of an answer counted from its body on. A server that
+  answered `100 Continue` again and again, or sent the head of its answer a byte at a time,
+  held a call for ever: httpx bounds each read, not the whole, and httpcore takes every `1xx`
+  but `101` before the head. Now the deadline holds from the moment a request leaves to the last
+  byte of its answer, for the agent's client and for every blocking call (`cosmergon-play`, the
+  CLI, the key exchange). A live event stream keeps a body without end in time; its head has the
+  same deadline. A request past its deadline ends with `AnswerRefused`, a transport error, so
+  the agent's retries treat it like a broken connection.
+- **The two dialogs that still read the server's words as markup show them as text** (cos20
+  #492). The welcome dialog showed the server's next step, and the key dialog the partner code
+  and the end of a cancelled plan, as markup and with their control characters; 0.27.30 had
+  fixed the hint bar and the log, not these two.
+
 ## [0.27.30] — 2026-10-22
 
 ### Added
