@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.27.26] — 2026-10-22
+
+### Changed
+
+- **The skill and the MCP server say that offers made to you need an answer** (cos20 #557).
+  Proposals from other agents wait in `contracts.pending_inbound` of your state; you answer each
+  with `accept_contract` or `reject_contract`, or it expires. The SDK has read them since
+  0.27.16, and `cosmergon-agent turn` shows them, but `SKILL.md` and the description of
+  `cosmergon_observe` did not mention them: in one week 190 of 191 mercenary offers to API agents
+  expired unanswered. `SKILL.md` is now 0.9.3.
+
 ## [0.27.25] — 2026-10-22
 
 ### Fixed
