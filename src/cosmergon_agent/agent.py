@@ -18,7 +18,7 @@ import httpx
 
 from cosmergon_agent import __version__, _http
 from cosmergon_agent._token import TokenResolutionError, _SensitiveStr, resolve_token_sync
-from cosmergon_agent.action import ActionResult, error_text
+from cosmergon_agent.action import ActionResult, error_text, printable
 from cosmergon_agent.config import (
     CONFIG_PATH,
     load_credentials,
@@ -815,7 +815,7 @@ class CosmergonAgent:
             json={"preset": preset},
         )
         if resp.status_code >= 400:
-            return {"error": resp.text}
+            return {"error": printable(resp.text)}
         return resp.json()  # type: ignore[no-any-return]
 
     async def tournament_current(self) -> dict:
@@ -830,7 +830,7 @@ class CosmergonAgent:
         """
         resp = await self._request("GET", "/api/v1/tournaments/current")
         if resp.status_code >= 400:
-            return {"error": resp.text}
+            return {"error": printable(resp.text)}
         body = resp.json()
         return (body.get("data", body) or {}).get("tournament") or {}
 
@@ -928,7 +928,7 @@ class CosmergonAgent:
         """
         resp = await self._request("POST", f"/api/v1/tournaments/{tournament_id}/register")
         if resp.status_code >= 400:
-            return {"error": resp.text}
+            return {"error": printable(resp.text)}
         return resp.json()  # type: ignore[no-any-return]
 
     async def patch_identity(
@@ -953,7 +953,7 @@ class CosmergonAgent:
             payload["persona"] = persona
         resp = await self._request("PATCH", "/api/v1/players/me", json=payload)
         if resp.status_code >= 400:
-            return {"error": resp.text, "status_code": resp.status_code}
+            return {"error": printable(resp.text), "status_code": resp.status_code}
         return resp.json()  # type: ignore[no-any-return]
 
     async def get_events(self, limit: int = 20, event_type: str | None = None) -> list[dict]:
@@ -1170,7 +1170,7 @@ class CosmergonAgent:
             json={"message": text},
         )
         if resp.status_code >= 400:
-            return {"error": resp.text}
+            return {"error": printable(resp.text)}
         return resp.json()  # type: ignore[no-any-return]
 
     async def get_field_cells(self, field_id: str) -> dict[str, int]:
@@ -1569,7 +1569,7 @@ class CosmergonAgent:
                 "content-type",
                 "",
             ).startswith("application/json")
-            detail = error_text(resp.json(), resp.text) if is_json else resp.text
+            detail = error_text(resp.json(), resp.text) if is_json else printable(resp.text)
             raise CosmergonError(f"Auto-registration failed ({resp.status_code}): {detail}")
         data = resp.json()
         key = data.get("api_key", "")

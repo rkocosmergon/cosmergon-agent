@@ -1017,7 +1017,7 @@ class SelectModal(ModalScreen):
                 yield Static("")
             # Static, not Label: a Label is as wide as its text and was cut off at the
             # dialog border ("… 8 free sl", #468); a Static wraps.
-            yield Static(f"[bold]{self._title}[/bold]", markup=True)
+            yield Static(f"[bold]{_roh(self._title)}[/bold]", markup=True)
             if self._body:
                 yield Static("")
                 # Scrollable and capped: the choices below must stay visible. On the first
@@ -1026,7 +1026,7 @@ class SelectModal(ModalScreen):
                     yield Static(self._body, markup=False)
             yield Label("")
             for i, opt in enumerate(self._options):
-                yield Label(f"[cyan][{i + 1}][/cyan] {opt}")
+                yield Label(f"[cyan][{i + 1}][/cyan] {_roh(opt)}")
             yield Label("")
             mehr = "  [↑/↓] scroll" if self._body else ""
             if self._options:
@@ -1284,8 +1284,8 @@ class KeyModal(ModalScreen):
 
     def compose(self) -> ComposeResult:
         lines: list[str] = [
-            f"[bold]Agent:[/bold]  {self._agent_name}",
-            f"[bold]Tier:[/bold]   {self._tier}",
+            f"[bold]Agent:[/bold]  {_roh(self._agent_name)}",
+            f"[bold]Tier:[/bold]   {_roh(self._tier)}",
             "",
             "[bold]API Key:[/bold]",
             f"  [cyan]{self._api_key}[/cyan]",
@@ -1427,8 +1427,8 @@ class AgentSelectorModal(ModalScreen):
             marker = "[bold cyan]▸[/bold cyan]" if i == self._cursor else " "
             active_mark = " ★" if name == self._active else ""
             lines.append(
-                f" {marker} {name}{active_mark}    "
-                f"[dim]{energy:.0f} E  {persona}  {self._tier}[/dim]"
+                f" {marker} {_roh(name)}{active_mark}    "
+                f"[dim]{energy:.0f} E  {_roh(persona)}  {_roh(self._tier)}[/dim]"
             )
         is_new = self._cursor == len(self._agents)
         marker = "[bold cyan]▸[/bold cyan]" if is_new else " "
@@ -1922,7 +1922,7 @@ class CosmergonDashboard(App):
         try:
             await handlers[idx]()
         except Exception as e:
-            self._set_feedback(_c(self._theme.warn, f"✗ {e}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ {_roh(e)}"))
 
     async def _mar_capture_field(self) -> None:
         """Capture a field: say what is missing, then let the player pick (cos20 #468).
@@ -2021,10 +2021,10 @@ class CosmergonDashboard(App):
             self._set_feedback(_c("dim", "⏳ Mega bomb — bought at the next tick"), duration=10.0)
             return
         except CosmergonError as exc:
-            self._set_feedback(_c(warn, f"✗ Not bought: {exc}"), duration=10.0)
+            self._set_feedback(_c(warn, f"✗ Not bought: {_roh(exc)}"), duration=10.0)
             return
         if not r.success:
-            self._set_feedback(_c(warn, f"✗ Not bought: {r.error_message}"), duration=10.0)
+            self._set_feedback(_c(warn, f"✗ Not bought: {_roh(r.error_message)}"), duration=10.0)
             return
         bezahlt = float(((r.data or {}).get("result") or {}).get("price") or preis)
         self._add_log(_c(self._theme.pos, f"✓ bought a mega bomb (-{bezahlt:,.0f} E)"))
@@ -2047,10 +2047,10 @@ class CosmergonDashboard(App):
             self._set_feedback(_c("dim", "⏳ Mission — started at the next tick"), duration=10.0)
             return
         except CosmergonError as exc:
-            self._set_feedback(_c(warn, f"✗ Not started: {exc}"), duration=10.0)
+            self._set_feedback(_c(warn, f"✗ Not started: {_roh(exc)}"), duration=10.0)
             return
         if not r.success:
-            self._set_feedback(_c(warn, f"✗ Not started: {r.error_message}"), duration=10.0)
+            self._set_feedback(_c(warn, f"✗ Not started: {_roh(r.error_message)}"), duration=10.0)
             return
         self._set_feedback(_c(self._theme.pos, f"✓ {erfolg}"), at_tick=False, duration=10.0)
 
@@ -2062,7 +2062,7 @@ class CosmergonDashboard(App):
         deps = await self.agent.bus_departures(cube)
         for d in deps:
             dest = d.get("dest_cube_name", "?")
-            self._add_log(f"🚌 → {dest} · ETA {d.get('eta_ticks', '?')} ticks")
+            self._add_log(f"🚌 → {_roh(dest)} · ETA {_roh(d.get('eta_ticks', '?'))} ticks")
         self._set_feedback(f"{len(deps)} departure(s) — see log")
 
     async def _mar_buy_ticket(self) -> None:
@@ -2076,12 +2076,14 @@ class CosmergonDashboard(App):
         if i is None:
             return
         r = await self.agent.buy_bus_ticket(deps[i].get("dest_cube_id"))
-        self._set_feedback(_c(self._theme.pos, f"✓ Ticket → {r.get('to_cube_name', names[i])}"))
+        ziel = _roh(r.get("to_cube_name", names[i]))
+        self._set_feedback(_c(self._theme.pos, f"✓ Ticket → {ziel}"))
 
     async def _mar_market_listings(self) -> None:
         listings = await self.agent.market_listings()
         for ml in listings[:8]:  # kuerzen-ok: list length
-            self._add_log(f"🏪 {ml.get('item_type', '?')} · {ml.get('price_energy', '?')} E")
+            ware, preis = _roh(ml.get("item_type", "?")), _roh(ml.get("price_energy", "?"))
+            self._add_log(f"🏪 {ware} · {preis} E")
         self._set_feedback(f"{len(listings)} listing(s) — see log")
 
     async def _mar_sell_item(self) -> None:
@@ -2093,19 +2095,19 @@ class CosmergonDashboard(App):
         r = await self.agent.list_item(item, self._MARAUDER_SELL_PRICE[item])
         if r.get("error") or r.get("detail"):
             reason = r.get("detail", "Sale failed")
-            self._set_feedback(_c(self._theme.warn, f"✗ {reason}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ {_roh(reason)}"))
         else:
             self._set_feedback(_c(self._theme.pos, f"✓ {item} listed"))
 
     async def _mar_hp_status(self) -> None:
         hp = await self.agent.hp_status()
         alive = "dead" if hp.get("dead") else "alive"
-        self._set_feedback(f"HP {hp.get('marauder_hp', '?')} · {alive}")
+        self._set_feedback(f"HP {_roh(hp.get('marauder_hp', '?'))} · {alive}")
 
     async def _mar_passenger_status(self) -> None:
         st = await self.agent.bus_passenger_status()
         if st:
-            self._set_feedback("On the bus → " + str(st.get("to_cube_id", "?"))[:8])
+            self._set_feedback("On the bus → " + _roh(str(st.get("to_cube_id", "?"))[:8]))
         else:
             self._set_feedback("Not on a bus")
 
@@ -2155,7 +2157,7 @@ class CosmergonDashboard(App):
         @self.agent.on_error
         async def _error(result: Any) -> None:
             zeile = f"✗ couldn't {action_word(result.action)}: {result.error_message}"
-            self._add_log(_c(self._theme.warn, zeile))
+            self._add_log(_c(self._theme.warn, _roh(zeile)))
 
     @work(exclusive=True)
     async def _run_agent(self) -> None:
@@ -2169,10 +2171,10 @@ class CosmergonDashboard(App):
                 # Client is already closed. Show ReconnectScreen.
                 await self._reconnect_flow()
             else:
-                self._auth_error = f"✗ Auth failed: {exc}"
+                self._auth_error = f"✗ Auth failed: {_roh(exc)}"
                 self._add_log(_c(self._theme.warn, self._auth_error))
         except Exception as exc:
-            self._add_log(_c(self._theme.warn, f"Agent error: {exc}"))
+            self._add_log(_c(self._theme.warn, f"Agent error: {_roh(exc)}"))
 
     async def _reconnect_flow(self) -> None:
         """FIFO-kick recovery: ReconnectScreen → resolve token → restart agent.
@@ -2205,7 +2207,7 @@ class CosmergonDashboard(App):
         try:
             result = resolve_token_sync(token, base_url=self.agent.base_url)
         except TokenResolutionError as exc:
-            self._set_feedback(f"Reconnect failed: {exc}")
+            self._set_feedback(f"Reconnect failed: {_roh(exc)}")
             return False
 
         selected = result.selected
@@ -2221,7 +2223,7 @@ class CosmergonDashboard(App):
 
         # Reconnect agent — resets _session_replaced, updates credentials
         self.agent.reconnect(raw_key, selected.agent_id)
-        self._add_log(_c(self._theme.pos, f"Reconnected to {selected.agent_name}"))
+        self._add_log(_c(self._theme.pos, f"Reconnected to {_roh(selected.agent_name)}"))
 
         # Restart agent (new worker — exclusive=True ensures old one is done)
         self._run_agent()
@@ -2242,7 +2244,7 @@ class CosmergonDashboard(App):
             IdentitySetupScreen(self.agent, current_name, current_persona, self._theme)
         )
         if result:
-            self._add_log(_c(self._theme.pos, f"✓ Identity set: {result['agent_name']}"))
+            self._add_log(_c(self._theme.pos, f"✓ Identity set: {_roh(result['agent_name'])}"))
         # Show onboarding tips if not yet dismissed on this machine
         if not is_onboarding_dismissed():
             await self.push_screen_wait(OnboardingModal(self._theme, self._next_step()))
@@ -2323,7 +2325,7 @@ class CosmergonDashboard(App):
         kosten = _cost_str(_cost_of(data))
         # No tick in front: the same move every minute is one line that counts up.
         wer = _roh(self._agent_name_or_id())
-        self._add_log(_c(self._theme.data, f"{wer} {action_done_word(action)}{kosten}"))
+        self._add_log(_c(self._theme.data, f"{wer} {_roh(action_done_word(action))}{kosten}"))
 
     async def _follow_missions(self) -> None:
         """Keep the Marauder's running mission for the panel; log each start and end (#468).
@@ -2556,27 +2558,27 @@ class CosmergonDashboard(App):
             return
         pending = self._pending_action
         self._pending_action = None  # clear before firing — prevents re-queue on error
-        self._add_log(_c(self._theme.data, f"⠋ trying again: {pending.display}…"))
+        self._add_log(_c(self._theme.data, f"⠋ trying again: {_roh(pending.display)}…"))
         try:
             if pending.kind == "compass":
                 result = await self.agent.set_compass(pending.action)
                 if result.get("error"):
-                    self._add_log(_c(self._theme.warn, f"✗ {pending.display}: failed"))
-                    self._set_feedback(_c(self._theme.warn, f"✗ {pending.display} failed"))
+                    self._add_log(_c(self._theme.warn, f"✗ {_roh(pending.display)}: failed"))
+                    self._set_feedback(_c(self._theme.warn, f"✗ {_roh(pending.display)} failed"))
                 else:
                     self._compass_preset = pending.action
                     self._compass_ever_set = True
-                    self._add_log(_c(self._theme.pos, f"✓ {pending.display}"))
-                    self._set_feedback(_c(self._theme.pos, f"✓ Compass → {pending.display}"))
+                    self._add_log(_c(self._theme.pos, f"✓ {_roh(pending.display)}"))
+                    self._set_feedback(_c(self._theme.pos, f"✓ Compass → {_roh(pending.display)}"))
             else:
                 r = await self.agent.act(pending.action, **pending.params)
                 cs = _cost_str(_action_cost(r)) if r.success else ""
                 color = self._theme.pos if r.success else self._theme.warn
                 msg = r.error_message or "failed"
                 label = (
-                    f"✓ done: {pending.display}{cs}"
+                    f"✓ done: {_roh(pending.display)}{cs}"
                     if r.success
-                    else f"✗ couldn't {pending.display}: {msg}"
+                    else f"✗ couldn't {_roh(pending.display)}: {_roh(msg)}"
                 )
                 self._add_log(_c(color, label))
                 self._set_feedback(_c(color, label))
@@ -2584,10 +2586,12 @@ class CosmergonDashboard(App):
             # Re-queue with another timer — tick boundary not yet reached
             self._schedule_pending(pending, retry_after=exc.retry_after)
             wait = int(exc.retry_after)
-            self._add_log(_c("dim", f"⏳ {pending.display}: still rate limited, retry ~{wait}s"))
+            self._add_log(
+                _c("dim", f"⏳ {_roh(pending.display)}: still rate limited, retry ~{wait}s")
+            )
         except CosmergonError as exc:
-            self._add_log(_c(self._theme.warn, f"✗ couldn't {pending.display}: {exc}"))
-            self._set_feedback(_c(self._theme.warn, f"✗ {pending.display} failed"))
+            self._add_log(_c(self._theme.warn, f"✗ couldn't {_roh(pending.display)}: {_roh(exc)}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ {_roh(pending.display)} failed"))
 
     # --- Redraw ---
 
@@ -2685,7 +2689,7 @@ class CosmergonDashboard(App):
         # place of the blank one before FIELDS — the panel has a fixed height.
         turnier_kompass = (state.tournament or {}).get("compass")
         if turnier_kompass:
-            lines.append(_c(t.data, f"  in tournament: {turnier_kompass}"))
+            lines.append(_c(t.data, f"  in tournament: {_roh(turnier_kompass)}"))
 
         # Fields
         if state.fields:
@@ -2707,10 +2711,12 @@ class CosmergonDashboard(App):
             etype = f.entity_type or "novice"  # the frame ends a long line in "…" (#508)
             ncells = f.active_cell_count
             if narrow:
-                lines.append(_c(t.data, f"  {f.id[:8]} {tier} {etype} {ncells} cells"))
+                zeile = f"  {_roh(f.id[:8])} {_roh(tier)} {_roh(etype)} {ncells} cells"
+                lines.append(_c(t.data, zeile))
             else:
                 bar_f = _energy_bar(ncells, 200, 6)
-                lines.append(_c(t.data, f"  {f.id[:8]} {tier} {etype:8s} {bar_f} {ncells} cells"))
+                zeile = f"  {_roh(f.id[:8])} {_roh(tier)} {_roh(etype):8s} {bar_f} {ncells} cells"
+                lines.append(_c(t.data, zeile))
         if len(fields) > zeigen:
             lines.append(_c("dim", f"  ... (+{len(fields) - zeigen} more)  \\[V] to browse"))
         return lines
@@ -2875,7 +2881,7 @@ class CosmergonDashboard(App):
         sep = " │ "
         # subscription tier in status bar (tick already shown in hint-bar — no duplicate)
         tier = (state.subscription_tier if state else None) or "free"
-        line = f"[dim]{sep.join([name, tier])}[/dim]"
+        line = f"[dim]{sep.join([_roh(name), _roh(tier)])}[/dim]"
         # [K] Key stands where the shortened key used to stand (founder on the device,
         # 12.10.2026): the key itself is shown by [K], its first characters said nothing.
         # Where the line has no room for it, [K] stays the last entry of the bottom bar.
@@ -2886,12 +2892,12 @@ class CosmergonDashboard(App):
         ends = _key_ends(state)
         if ends and ends[1]:
             warn = self._theme.warn
-            warning = f"⚠ key ends {ends[0]} unless used · "
+            warning = f"⚠ key ends {_roh(ends[0])} unless used · "
             word = _keep_word(len(warning), self.size.width - 2)  # the bar's padding: 0 1
             keep = _c(self._theme.cmd, _hk("U")) + _c(warn, " " + word)
             line = _c(warn, warning) + keep + sep + line
         elif ends:
-            line = _c("dim", f"key kept until {ends[0]}") + sep + line
+            line = _c("dim", f"key kept until {_roh(ends[0])}") + sep + line
         self._update_panel("status-bar", line)
 
     def _set_feedback(self, msg: str, duration: float = 4.0, at_tick: bool | None = None) -> None:
@@ -3093,7 +3099,7 @@ class CosmergonDashboard(App):
         try:
             result = await self.agent.set_compass(preset)
             if result.get("error"):
-                self._add_log(_c(self._theme.warn, f"✗ compass failed: {result['error']}"))
+                self._add_log(_c(self._theme.warn, f"✗ compass failed: {_roh(result['error'])}"))
                 self._set_feedback(_c(self._theme.warn, "✗ Compass failed"))
             else:
                 self._compass_preset = preset
@@ -3101,7 +3107,7 @@ class CosmergonDashboard(App):
                 self._add_log(_c(self._theme.pos, f"✓ compass: {compass_label}"))
                 explanation = (result.get("explanation") or "").strip()
                 if explanation:
-                    self._add_log(_c("dim", f"  {_truncate_words(explanation, 48)}"))
+                    self._add_log(_c("dim", f"  {_roh(_truncate_words(explanation, 48))}"))
                 self._set_feedback(_c(self._theme.pos, f"✓ Compass → {compass_label}"))
         except RateLimitError as exc:
             wait_str = f" ~{int(exc.retry_after)}s" if exc.retry_after > 1 else ""
@@ -3119,7 +3125,7 @@ class CosmergonDashboard(App):
             self._add_log(_c("dim", f"⏳ {compass_label} — network error, retry next tick"))
             self._set_feedback(_c("dim", f"⏳ {compass_label} — retrying next tick"))
         except CosmergonError as exc:
-            self._add_log(_c(self._theme.warn, f"✗ compass failed: {exc}"))
+            self._add_log(_c(self._theme.warn, f"✗ compass failed: {_roh(exc)}"))
             self._set_feedback(_c(self._theme.warn, "✗ Compass failed"))
 
     @work
@@ -3170,7 +3176,7 @@ class CosmergonDashboard(App):
                 if r.success
                 else f"✗ couldn't place {ziel}: {r.error_message or 'refused'}"
             )
-            self._add_log(_c(color, zeile))
+            self._add_log(_c(color, _roh(zeile)))
             label = f"{icon} Cells placed ({_PRESETS[pi]}){cs} — evolves next tick"
             self._set_feedback(_c(color, label))
         except RateLimitError as exc:
@@ -3185,11 +3191,11 @@ class CosmergonDashboard(App):
                 ),
                 retry_after=exc.retry_after,
             )
-            self._add_log(_c("dim", f"⏳ {display} — queued, fires next tick{wait_str}"))
-            self._set_feedback(_c("dim", f"⏳ Queued: {display} — next tick{wait_str}"))
+            self._add_log(_c("dim", f"⏳ {_roh(display)} — queued, fires next tick{wait_str}"))
+            self._set_feedback(_c("dim", f"⏳ Queued: {_roh(display)} — next tick{wait_str}"))
         except CosmergonError as exc:
-            self._add_log(_c(self._theme.warn, f"✗ couldn't place cells: {exc}"))
-            self._set_feedback(_c(self._theme.warn, f"✗ Place cells failed: {exc}"))
+            self._add_log(_c(self._theme.warn, f"✗ couldn't place cells: {_roh(exc)}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ Place cells failed: {_roh(exc)}"))
 
     @work
     async def action_create_field(self) -> None:
@@ -3213,7 +3219,7 @@ class CosmergonDashboard(App):
                 if r.success
                 else f"✗ couldn't create a field: {r.error_message or 'refused'}"
             )
-            self._add_log(_c(color, zeile))
+            self._add_log(_c(color, _roh(zeile)))
             self._set_feedback(_c(color, f"{icon} Field created{cs} — press \\[P] to place cells"))
         except RateLimitError as exc:
             wait_str = f" ~{int(exc.retry_after)}s" if exc.retry_after > 1 else ""
@@ -3229,8 +3235,8 @@ class CosmergonDashboard(App):
             self._add_log(_c("dim", f"⏳ create a field — queued, fires next tick{wait_str}"))
             self._set_feedback(_c("dim", f"⏳ Queued: create a field — next tick{wait_str}"))
         except CosmergonError as exc:
-            self._add_log(_c(self._theme.warn, f"✗ couldn't create a field: {exc}"))
-            self._set_feedback(_c(self._theme.warn, f"✗ Field creation failed: {exc}"))
+            self._add_log(_c(self._theme.warn, f"✗ couldn't create a field: {_roh(exc)}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ Field creation failed: {_roh(exc)}"))
 
     @work
     async def action_evolve(self) -> None:
@@ -3271,14 +3277,15 @@ class CosmergonDashboard(App):
             if r.success:
                 new_tier = (r.data.get("result") or {}).get("new_tier")
                 cs = _cost_str(_action_cost(r))
-                tier_str = f" to T{new_tier}" if new_tier else ""
-                self._add_log(_c(color, f"✓ you evolved {ready[fi].id[:8]}{tier_str}{cs}"))
-                label = f"T{new_tier}" if new_tier else "ok"
+                tier_str = f" to T{_roh(new_tier)}" if new_tier else ""
+                self._add_log(_c(color, f"✓ you evolved {_roh(ready[fi].id[:8])}{tier_str}{cs}"))
+                label = f"T{_roh(new_tier)}" if new_tier else "ok"
                 self._set_feedback(_c(color, f"{icon} Evolved: {label}{cs}"))
             else:
                 msg = r.error_message or "failed"
-                self._add_log(_c(color, f"✗ couldn't evolve {ready[fi].id[:8]}: {msg}"))
-                self._set_feedback(_c(color, f"{icon} Evolve: {msg}"))
+                feld = _roh(ready[fi].id[:8])
+                self._add_log(_c(color, f"✗ couldn't evolve {feld}: {_roh(msg)}"))
+                self._set_feedback(_c(color, f"{icon} Evolve: {_roh(msg)}"))
         except RateLimitError as exc:
             was = f"evolve {ready[fi].id[:8]}"
             wait_str = f" ~{int(exc.retry_after)}s" if exc.retry_after > 1 else ""
@@ -3291,11 +3298,11 @@ class CosmergonDashboard(App):
                 ),
                 retry_after=exc.retry_after,
             )
-            self._add_log(_c("dim", f"⏳ {was} — queued, fires next tick{wait_str}"))
-            self._set_feedback(_c("dim", f"⏳ Queued: {was} — next tick{wait_str}"))
+            self._add_log(_c("dim", f"⏳ {_roh(was)} — queued, fires next tick{wait_str}"))
+            self._set_feedback(_c("dim", f"⏳ Queued: {_roh(was)} — next tick{wait_str}"))
         except CosmergonError as exc:
-            self._add_log(_c(self._theme.warn, f"✗ couldn't evolve: {exc}"))
-            self._set_feedback(_c(self._theme.warn, f"✗ Evolve failed: {exc}"))
+            self._add_log(_c(self._theme.warn, f"✗ couldn't evolve: {_roh(exc)}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ Evolve failed: {_roh(exc)}"))
 
     @work
     async def action_leave(self) -> None:
@@ -3409,7 +3416,7 @@ class CosmergonDashboard(App):
                 "POST", "/api/v1/billing/persist-checkout", params={"interval": interval}
             )
         except CosmergonError as exc:
-            self._set_feedback(_c(warn, f"✗ Keep this agent: {exc}"))
+            self._set_feedback(_c(warn, f"✗ Keep this agent: {_roh(exc)}"))
             return
         body = _json_or_empty(resp)
         url = body.get("checkout_url") if resp.status_code == 200 else None
@@ -3421,7 +3428,7 @@ class CosmergonDashboard(App):
             )
             return
         message = (body.get("error") or {}).get("message") or f"HTTP {resp.status_code}"
-        self._set_feedback(_c(warn, f"✗ Keep this agent: {message}"), duration=10.0)
+        self._set_feedback(_c(warn, f"✗ Keep this agent: {_roh(message)}"), duration=10.0)
 
     async def _upgrade_anonymous_via_api(self, tier: str) -> None:
         """Paket 2.7a SDK: Direct Stripe checkout for anonymous free agents.
@@ -3475,10 +3482,10 @@ class CosmergonDashboard(App):
                 )
                 me_resp = await client.get(f"{base}/api/v1/players/me", headers=headers)
         except (_httpx.ConnectError, _httpx.TimeoutException) as exc:
-            self._set_feedback(_c(self._theme.warn, f"✗ Showcase: connect failed: {exc}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ Showcase: connect failed: {_roh(exc)}"))
             return
         except Exception as exc:
-            self._set_feedback(_c(self._theme.warn, f"✗ Showcase: {exc}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ Showcase: {_roh(exc)}"))
             return
 
         if consent_resp.status_code != 200 or me_resp.status_code != 200:
@@ -3505,13 +3512,13 @@ class CosmergonDashboard(App):
             async with _http.async_client(timeout=15.0, verify=True) as client:
                 r = await client.patch(f"{base}/api/v1/players/me", json=payload, headers=headers)
         except Exception as exc:
-            self._set_feedback(_c(self._theme.warn, f"✗ Showcase: PATCH failed: {exc}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ Showcase: PATCH failed: {_roh(exc)}"))
             return
 
         if r.status_code == 200:
             slug = (r.json() or {}).get("public_slug")
             if result["desired"] and slug:
-                msg = f"✓ Showcase enabled — cosmergon.com/universe/a/{slug}"
+                msg = f"✓ Showcase enabled — cosmergon.com/universe/a/{_roh(slug)}"
             elif result["desired"]:
                 msg = "✓ Showcase enabled (slug pending)"
             else:
@@ -3527,7 +3534,7 @@ class CosmergonDashboard(App):
                 detail = (r.json() or {}).get("detail", "")
             except Exception:
                 logger.debug("action_toggle_showcase: failed, falling back", exc_info=True)
-            self._set_feedback(_c(self._theme.warn, f"✗ Showcase {r.status_code}: {detail}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ Showcase {r.status_code}: {_roh(detail)}"))
 
     def _next_step(self) -> dict | None:
         """The server's current advice, or ``None`` when nothing blocks the agent (#468)."""
@@ -3537,7 +3544,8 @@ class CosmergonDashboard(App):
     def _next_step_hint(self, schritt: dict) -> str:
         """Hint-bar line from the server's advice; [T] when it is a free tournament slot."""
         t = self._theme
-        text = f"{_c(t.guide, '→')} {schritt.get('you_are_here', '')} — {schritt.get('next', '')}"
+        hier, weiter = _roh(schritt.get("you_are_here", "")), _roh(schritt.get("next", ""))
+        text = f"{_c(t.guide, '→')} {hier} — {weiter}"
         if _turnier_id(schritt):
             text += f" · {_c(t.cmd, _hk('T'))} join"
         return text
@@ -3578,7 +3586,7 @@ class CosmergonDashboard(App):
         try:
             offene = await self.agent.tournaments_open()
         except (CosmergonError, RuntimeError) as exc:
-            self._add_log(_c("dim", f"tournament posting unavailable: {exc}"))
+            self._add_log(_c("dim", f"tournament posting unavailable: {_roh(exc)}"))
             return {}
         return next((t for t in offene if str(t.get("id")) == tournament_id), {})
 
@@ -3588,11 +3596,11 @@ class CosmergonDashboard(App):
         try:
             antwort = await self.agent.register_tournament(tournament_id)
         except CosmergonError as exc:
-            self._set_feedback(_c(warn, f"✗ Tournament: {exc}"))
+            self._set_feedback(_c(warn, f"✗ Tournament: {_roh(exc)}"))
             return
         if "error" in antwort:
             self._add_log(_c(warn, "✗ tournament registration refused"))
-            self._set_feedback(_c(warn, f"✗ {antwort['error']}"))
+            self._set_feedback(_c(warn, f"✗ {_roh(antwort['error'])}"))
             return
         self._add_log(_c(self._theme.pos, "✓ registered for the tournament"))
         await self._turnier_kompass_setzen(kompass)
@@ -3623,11 +3631,15 @@ class CosmergonDashboard(App):
             )
             return
         except CosmergonError as exc:
-            self._set_feedback(_c(warn, f"✗ Compass not set: {exc} — {nochmal}"), duration=10.0)
+            self._set_feedback(
+                _c(warn, f"✗ Compass not set: {_roh(exc)} — {nochmal}"), duration=10.0
+            )
             return
         if not r.success:
             fehler = r.error_message or "refused"
-            self._set_feedback(_c(warn, f"✗ Compass not set: {fehler} — {nochmal}"), duration=10.0)
+            self._set_feedback(
+                _c(warn, f"✗ Compass not set: {_roh(fehler)} — {nochmal}"), duration=10.0
+            )
             return
         self._add_log(_c(self._theme.pos, f"✓ tournament compass: {kompass}"))
         self._set_feedback(
@@ -3673,11 +3685,13 @@ class CosmergonDashboard(App):
         t = self._theme
         taste = _c(t.cmd, _hk("T"))
         if not brief.get("compass"):
-            return f"{_c(t.guide, '→')} {_turnier_zeile(brief)} — press {taste} to choose one"
+            zeile = _roh(_turnier_zeile(brief))
+            return f"{_c(t.guide, '→')} {zeile} — press {taste} to choose one"
         # Columns left for the line: the bar's padding (2), the flag (2) and the tick
         # countdown behind it (up to 15, "  ·  next ~120s").
-        zeile = _turnier_zeile(brief, breite=self.size.width - 19, schluss="[T] compass")
-        return f"{_c(t.guide, '⚑')} " + zeile.replace("[T]", taste)
+        # The line holds the server's words (number, compass): escaped, then the key put in.
+        zeile = _roh(_turnier_zeile(brief, breite=self.size.width - 19, schluss="[T] compass"))
+        return f"{_c(t.guide, '⚑')} " + zeile.replace("\\[T]", taste)
 
     @work
     async def action_pause(self) -> None:
@@ -3693,8 +3707,8 @@ class CosmergonDashboard(App):
         try:
             r = await self.agent.act(action)
         except CosmergonError as exc:
-            self._add_log(_c(self._theme.warn, f"✗ couldn't {action}: {exc}"))
-            self._set_feedback(_c(self._theme.warn, f"✗ {action} failed: {exc}"))
+            self._add_log(_c(self._theme.warn, f"✗ couldn't {action}: {_roh(exc)}"))
+            self._set_feedback(_c(self._theme.warn, f"✗ {action} failed: {_roh(exc)}"))
             return
         # Only a confirmed server change flips the local state (a refused resume left the
         # dashboard showing an active agent that was still paused, #468).
@@ -3706,9 +3720,10 @@ class CosmergonDashboard(App):
             if r.success
             else f"✗ couldn't {action}: {r.error_message or 'refused'}"
         )
-        self._add_log(_c(color, zeile))
+        self._add_log(_c(color, _roh(zeile)))
         label = "⏸ Agent paused" if action == "pause" else "▶ Agent resumed"
-        self._set_feedback(_c(color, f"{icon} {label}" if r.success else f"✗ {r.error_message}"))
+        gesagt = f"{icon} {label}" if r.success else f"✗ {_roh(r.error_message)}"
+        self._set_feedback(_c(color, gesagt))
 
     async def _game_actions(self) -> dict:
         """The server's rules per action, ``GET /api/v1/game/info`` → ``actions`` (#484).
@@ -3870,7 +3885,7 @@ class CosmergonDashboard(App):
 
         if resp.status_code == 200:
             count = resp.json().get("revoked_count", 0)
-            self._set_feedback(f"{count} key(s) revoked for {name}")
+            self._set_feedback(f"{_roh(count)} key(s) revoked for {_roh(name)}")
             if is_active and count > 0:
                 # Reconnect with a fresh key via token (Panel P4-4)
                 from cosmergon_agent._token import resolve_token_sync
@@ -3880,7 +3895,7 @@ class CosmergonDashboard(App):
                     selected = result.selected
                     if selected.api_key:
                         self.agent.reconnect(selected.api_key.raw, selected.agent_id or "")
-                        self._set_feedback(f"Keys revoked + reconnected as {name}")
+                        self._set_feedback(f"Keys revoked + reconnected as {_roh(name)}")
                 except Exception:
                     self._set_feedback("Keys revoked. Restart dashboard to reconnect.")
         elif resp.status_code == 404:
@@ -3941,7 +3956,7 @@ class CosmergonDashboard(App):
                 set_active_agent(name)
                 # Immediate refresh (Panel decision: no 3s delay)
                 self._redraw()
-                self._set_feedback(f"Switched to {name}")
+                self._set_feedback(f"Switched to {_roh(name)}")
 
     async def _create_agent_via_token(self, token: str) -> None:
         """Create a new agent via POST /players/me/agents (Token-Auth)."""
@@ -3966,7 +3981,7 @@ class CosmergonDashboard(App):
             self._set_feedback("Too many requests — try again later.")
             return
         if resp.status_code != 200:
-            self._set_feedback(f"Error ({resp.status_code}): {resp.text}")
+            self._set_feedback(f"Error ({resp.status_code}): {_roh(resp.text)}")
             return
 
         data = resp.json()
@@ -3979,7 +3994,7 @@ class CosmergonDashboard(App):
             self.agent.reconnect(new_key, new_id)
             set_active_agent(new_name)
             self._redraw()
-            self._set_feedback(f"Agent created: {new_name}")
+            self._set_feedback(f"Agent created: {_roh(new_name)}")
 
     @work
     async def action_help(self) -> None:
@@ -4477,7 +4492,7 @@ class FieldScreen(ModalScreen):
             h1 = _c(t.struct, "[bold]═ FIELD VIEW[/bold]") + f"  {_c('dim', idx_label)}"
             h2 = _c(
                 "dim",
-                f"  {field.id[:8]} · {tier} {etype}"
+                f"  {_roh(field.id[:8])} · {_roh(tier)} {_roh(etype)}"
                 f" · {field.active_cell_count} cells · {zoom_label}",
             )
             self.query_one("#fv-header", Static).update(f"{h1}\n{h2}")
@@ -4728,9 +4743,10 @@ class IdentitySetupScreen(ModalScreen):
         if "error" in result:
             status = result.get("status_code", 0)
             if status == 409:
-                self._set_error(f"Name '{name}' is already taken — choose another.")
+                self._set_error(f"Name '{_roh(name)}' is already taken — choose another.")
             else:
-                self._set_error(f"Error: {str(result['error'])[:80]}")  # kuerzen-ok: one-line label
+                gesagt = _roh(str(result["error"])[:80])  # kuerzen-ok: one-line label
+                self._set_error(f"Error: {gesagt}")
             self.query_one("#name-input", Input).focus()
         else:
             self.dismiss({"agent_name": result.get("username", name), "persona": persona})
@@ -5445,7 +5461,7 @@ class PauseConfirmModal(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="pause-wrap"):
-            yield Label(_c(self._theme.warn, f"Pause {self._agent_name}?"), id="pause-title")
+            yield Label(_c(self._theme.warn, f"Pause {_roh(self._agent_name)}?"), id="pause-title")
             yield Label(
                 "Your agent leaves the game: its body becomes a ghost and takes no\n"
                 "part in fights, loot or missions.\n"
@@ -5466,7 +5482,7 @@ class PauseConfirmModal(ModalScreen):
         if event.key in ("y", "Y"):
             event.stop()
             self._step = 2
-            self._footer(f"Type {self._agent_name} and press Enter · Esc cancel")
+            self._footer(f"Type {_roh(self._agent_name)} and press Enter · Esc cancel")
             field = self.query_one("#pause-name", Input)
             field.disabled = False
             field.display = True
@@ -5480,7 +5496,7 @@ class PauseConfirmModal(ModalScreen):
         if event.value.strip() == self._agent_name:
             self.dismiss(True)
         else:
-            self._footer(f"That is not {self._agent_name} — type it exactly, or Esc")
+            self._footer(f"That is not {_roh(self._agent_name)} — type it exactly, or Esc")
 
     def _footer(self, text: str) -> None:
         self.query_one("#pause-footer", Label).update(_c("dim", text))
@@ -5687,6 +5703,24 @@ def _secrets_leave_environment() -> None:
         os.environ.pop(name, None)
 
 
+_KEY_FD_BYTES = 4096  # an API key is under 100 characters; a bound all the same
+
+
+def _key_from_fd(fd: int) -> str:
+    """The API key from an open file descriptor, read to its end (at most 4 KiB) and closed.
+
+    A starter hands the key over a pipe (``--api-key-fd 3 3< <(…)``), so it stands neither in
+    the process list nor in ``/proc/<pid>/environ``. That file keeps a process's starting
+    environment for its whole life, also after ``os.environ`` lets go of a name, so
+    ``_secrets_leave_environment`` keeps the key from children only (cos20 #492 B7).
+    """
+    with os.fdopen(fd, "r", encoding="utf-8", errors="replace") as pipe:
+        key = pipe.read(_KEY_FD_BYTES).strip()
+    if not key:
+        raise SystemExit(f"No API key on file descriptor {fd}.")
+    return key
+
+
 def _needs_first_start(api_key: str | None) -> bool:
     """Return True when the first-start screen should be shown."""
     if api_key or os.environ.get("COSMERGON_API_KEY", ""):
@@ -5742,11 +5776,19 @@ def main() -> None:
         "Config: ~/.cosmergon/dashboard.toml  |  COSMERGON_THEME env var",
     )
     parser.add_argument("--api-key", help="API key (auto-registers if omitted)")
+    parser.add_argument(
+        "--api-key-fd",
+        type=int,
+        metavar="N",
+        help="read the API key from file descriptor N (a pipe from the starter)",
+    )
     parser.add_argument("--token", help="Master Key (CSMR-...) — loads all your agents")
     parser.add_argument("--base-url", default="https://cosmergon.com")
     parser.add_argument("--theme", choices=[*THEMES, "omarchy"], default=None)
     args = parser.parse_args()
     logging.basicConfig(level=logging.WARNING)
+    if args.api_key_fd is not None:  # never in argv or environ (cos20 #492 B7)
+        args.api_key = _key_from_fd(args.api_key_fd)
 
     # --token: resolve Master Key to agent API key via GET /players/me/agents
     if args.token:

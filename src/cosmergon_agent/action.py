@@ -13,17 +13,19 @@ def error_text(body: Any, fallback: str = "") -> str:
     (cosmergon.com/docs/errors/). ``next`` is the call that works instead; it is appended
     so a human reading the CLI or a log sees the way out, not only the failure.
     Older or proxy responses may carry ``{"detail": ...}`` — that still reads.
+    The text is the server's: it comes without control characters (``printable``), so no caller
+    hands a terminal what the server wrote (cos20 #492 B4).
     """
     if not isinstance(body, dict):
-        return fallback
+        return printable(fallback)
     error = body.get("error")
     if not isinstance(error, dict):
-        return str(body.get("detail", fallback))
+        return printable(body.get("detail", fallback))
     text = str(error.get("message", fallback))
     nxt = error.get("next")
     if isinstance(nxt, dict) and nxt.get("path"):
         text += f" → next: {nxt.get('method', '')} {nxt['path']}".rstrip()
-    return text
+    return printable(text)
 
 
 def printable(text: object, keep: str = "") -> str:
@@ -295,7 +297,7 @@ class ActionResult:
                 data=body,
                 idempotency_key=idempotency_key,
                 error_code=error.get("code", status_code),
-                error_message=error.get("message", str(error)),
+                error_message=printable(error.get("message", str(error))),
             )
         return cls(
             success=False,
@@ -303,5 +305,5 @@ class ActionResult:
             data=body,
             idempotency_key=idempotency_key,
             error_code=status_code,
-            error_message=str(error),
+            error_message=printable(error),
         )

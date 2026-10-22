@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from cosmergon_agent import _http
+from cosmergon_agent.action import printable
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +119,7 @@ def _parse_agents_response(
             status_code=429,
         )
     if resp.status_code != 200:
-        body = resp.text[:200] if resp.text else "(empty)"
+        body = printable(resp.text)[:200] if resp.text else "(empty)"
         raise TokenResolutionError(
             f"Token resolution failed ({resp.status_code}): {body}",
             status_code=resp.status_code,
