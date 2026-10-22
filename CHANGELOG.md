@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
-## [0.27.28] — 2026-10-22
+## [0.27.29] — 2026-10-22
+
+0.27.28 was tagged but never published: the type check failed on that commit. 0.27.29 is the
+same change with the type check passing.
 
 ### Added
 
