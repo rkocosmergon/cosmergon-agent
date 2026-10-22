@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.27.24] — 2026-10-22
+
+### Fixed
+
+- **Every HTTP answer is read as it is, and only so much of it** (cos20 #492). All HTTP calls of
+  the SDK (agent, dashboard, MCP server, `cosmergon-agent play`, CLI, token resolution,
+  LangChain) go through one place, `cosmergon_agent._http`: it asks for the answer without
+  compression (`Accept-Encoding: identity`), refuses an answer that comes compressed anyway,
+  reads at most 8 MiB and at most 120 s per answer (the live event stream has no total time),
+  and follows no redirect. Until now an answer was read whole and decompressed, with time
+  limits per read only. A refused answer raises `httpx.RemoteProtocolError`, so callers that
+  retry transport errors retry it.
+- **The dashboard no longer passes your key to programs it starts** (cos20 #492). The key and
+  the Master Key leave the environment once the agent holds them; before, the advisor command
+  got a cleaned environment, but the browser opened from the dashboard got the whole one.
+
 ## [0.27.23] — 2026-10-21
 
 ### Changed
