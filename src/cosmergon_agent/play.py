@@ -32,11 +32,16 @@ import httpx
 
 from cosmergon_agent import _http, play_turn
 from cosmergon_agent import config as _config
-from cosmergon_agent.action import error_text
+from cosmergon_agent.action import error_text, printable
 from cosmergon_agent.config import load_all_agents, save_agent
 
 TIMEOUT_S = 20.0
 PLAYED = "Your move for this turn is played. Write one line into your notes and stop."
+
+
+def _say(text: str) -> None:
+    """Print text that carries the world's words: other players write in it (cos20 #492)."""
+    print(printable(text, keep="\n"))
 
 
 def _fail(message: str) -> None:
@@ -196,7 +201,7 @@ def turn(name: str, base_url: str) -> None:
     entry = _entry(name)
     data = _get(entry, base_url, "/state")
     memory = str((_get(entry, base_url, "/memory/prompt") or {}).get("prompt") or "")
-    print(play_turn.render(data, memory, name, _remember(name).get("total")))
+    _say(play_turn.render(data, memory, name, _remember(name).get("total")))
     total = play_turn.total_energy(data)
     if total is not None:
         _remember(name, total=total)
@@ -208,7 +213,7 @@ def reflect(name: str, texts: dict[str, str | None], base_url: str) -> None:
     signals = _get(entry, base_url, "/reflection/signals")
     if not all(texts.values()):
         memory = str((_get(entry, base_url, "/memory/prompt") or {}).get("prompt") or "")
-        print(
+        _say(
             f"LOOK BACK on your moves.\n{memory}\nBest and worst moves: {json.dumps(signals)}\n"
             "Write three texts in English, then send them:\n"
             f"cosmergon-agent reflect --agent {name} --lessons '<100-500 chars: what you learned>' "
@@ -248,7 +253,7 @@ def help_action(name: str, action: str, base_url: str) -> None:
     entry = _entry(name)
     rules = _answer(_http.get(f"{base_url.rstrip('/')}/api/v1/game/info", timeout=TIMEOUT_S))
     now = (_get(entry, base_url, "/state").get("available_actions") or {}).get(action)
-    print(
+    _say(
         json.dumps(
             {"action": action, "rules": (rules.get("actions") or {}).get(action), "now": now},
             ensure_ascii=False,

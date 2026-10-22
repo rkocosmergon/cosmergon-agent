@@ -11,7 +11,9 @@
   and neither Rich nor Textual removes them. The dashboard dropped ESC and the other C0
   characters from other players' messages and the server's sentences, but kept the 8-bit ones;
   `cosmergon-agent activate` printed the agent name, tier and error text as the server sent
-  them. Both now go through `printable`, which drops C0, DEL and C1.
+  them, and `cosmergon-agent turn`, `reflect` and `help-action` printed other players' messages,
+  the memory and the rules as they came, ESC included. All of them now go through `printable`,
+  which drops C0, DEL and C1.
 
 ## [0.27.24] — 2026-10-22
 
