@@ -129,7 +129,7 @@ class CosmergonAgent:
         # Before the first request, which may come right below (credential resolution).
         self._send_check = send_check
         self._peer_check = peer_check
-        guards = {"send_check": send_check, "peer_check": peer_check}
+        guards: dict[str, Any] = {"send_check": send_check, "peer_check": peer_check}
         self._guards = guards
         # C1: 6-level credential resolution
         # Track whether credentials came from the user (explicit) or auto-managed.

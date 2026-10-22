@@ -257,7 +257,7 @@ def request(
     **kwargs: Any,
 ) -> httpx.Response:
     """One call like ``httpx.request``, with the bounds above."""
-    guards = {"send_check": send_check, "peer_check": peer_check}
+    guards: dict[str, Any] = {"send_check": send_check, "peer_check": peer_check}
     with client(timeout=timeout, verify=verify, **guards) as one:
         return one.request(method, url, **kwargs)
 
