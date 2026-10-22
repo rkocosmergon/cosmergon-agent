@@ -1288,14 +1288,14 @@ class KeyModal(ModalScreen):
             f"[bold]Tier:[/bold]   {_roh(self._tier)}",
             "",
             "[bold]API Key:[/bold]",
-            f"  [cyan]{self._api_key}[/cyan]",
+            f"  [cyan]{_roh(self._api_key)}[/cyan]",
             "",
             "[bold]Config:[/bold]",
-            f"  [dim]{self._config_path}[/dim]",
+            f"  [dim]{_roh(self._config_path)}[/dim]",
         ]
         # Paket 4.6b: Post-Cancel grace period notice
         if self._downgrade_at:
-            date_part = self._downgrade_at[:10]  # kuerzen-ok: YYYY-MM-DD from ISO
+            date_part = _roh(self._downgrade_at[:10])  # kuerzen-ok: YYYY-MM-DD from ISO
             lines += [
                 "",
                 f"[yellow]Plan cancelled. Access continues until {date_part}.[/yellow]",
@@ -1315,10 +1315,11 @@ class KeyModal(ModalScreen):
         # cos20 #542 (panel 21.10.2026): the outer game next to the key, where the player looks —
         # not in the header (pushy). Voluntary; the terms are one link away.
         if self._referral_code:
+            code = _roh(self._referral_code)  # the server's word: text, never markup (cos20 #492)
             lines += [
                 "",
-                f"[bold]Partner code:[/bold]  {self._referral_code}",
-                f"  [dim]Invite others: cosmergon.com/ref/{self._referral_code}/dashboard[/dim]",
+                f"[bold]Partner code:[/bold]  {code}",
+                f"  [dim]Invite others: cosmergon.com/ref/{code}/dashboard[/dim]",
                 "  [dim]Voluntary partner program — terms: cosmergon.com/partner/terms[/dim]",
             ]
         # Paket 4.1: Rotate hint (only for Paid users with a saved Master Key)
@@ -5553,9 +5554,9 @@ class OnboardingModal(ModalScreen):
         """The server's advice first (#468); no steps that need a field you may not have."""
         g = self._theme.guide
         zeilen = []
-        if self._next_step:
-            zeilen.append(f"  {self._next_step.get('you_are_here', '')}")
-            zeilen.append(f"  → {self._next_step.get('next', '')}")
+        if self._next_step:  # the server's words: text, never markup (cos20 #492, third review)
+            zeilen.append(f"  {_roh(self._next_step.get('you_are_here', ''))}")
+            zeilen.append(f"  → {_roh(self._next_step.get('next', ''))}")
             if _turnier_id(self._next_step):
                 zeilen.append(f"  {_c(g, _hk('T'))}  Join the tournament")
             zeilen.append("")
