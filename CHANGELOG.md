@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.27.28] — 2026-10-22
+
+### Added
+
+- **`peer_check`: the address a connection really reached, checked before a byte goes over it**
+  (cos20 #492). `CosmergonAgent(peer_check=...)` takes a function that gets the host and port
+  each new connection of the agent actually reached and returns `""` to let the request go or a
+  sentence to close the connection (`SendRefusedError`). A name can resolve elsewhere after
+  `send_check`, and a proxy from the environment connects to itself; the socket's own peer is the
+  last word. The Shikigon plugin already checks its own calls this way, and now its calls
+  through this SDK too.
+
 ## [0.27.27] — 2026-10-22
 
 ### Added
