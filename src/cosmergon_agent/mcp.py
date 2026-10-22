@@ -245,7 +245,9 @@ TOOLS = [
         "description": (
             "Get the current game state for your Cosmergon agent. "
             "Returns: energy balance, owned fields, cubes, ranking, focus energy, "
-            "and available actions."
+            "and available actions. Offers other agents made to you are in "
+            "contracts.pending_inbound: answer each with cosmergon_act accept_contract or "
+            "reject_contract (contract_id), or it expires."
         ),
         "inputSchema": {
             "type": "object",
