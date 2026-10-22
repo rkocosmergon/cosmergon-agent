@@ -186,6 +186,7 @@ def resolve_token_sync(
     agent_name: str | None = None,
     timeout: float = 15.0,
     send_check: _http.SendCheck | None = None,
+    peer_check: _http.PeerCheck | None = None,
 ) -> TokenResolutionResult:
     """Exchange a Master Key for agent credentials (synchronous).
 
@@ -196,6 +197,7 @@ def resolve_token_sync(
             are returned and the caller picks (typically the oldest).
         timeout: HTTP timeout in seconds.
         send_check: Asked right before the request leaves (``_http.SendCheck``).
+        peer_check: Asked with the address the connection reached (``_http.PeerCheck``).
 
     Returns:
         TokenResolutionResult with all agents and their fresh API keys.
@@ -212,6 +214,7 @@ def resolve_token_sync(
             timeout=timeout,
             verify=True,
             send_check=send_check,
+            peer_check=peer_check,
         )
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         raise TokenResolutionError(

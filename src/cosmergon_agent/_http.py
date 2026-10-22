@@ -15,7 +15,8 @@ The same door asks a caller's ``send_check`` right before each request leaves, r
 included. A program that may send only while a condition holds (the Shikigon plugin: a world
 on this machine only while its port is the player's) checks it here, at the moment of sending,
 not once before a wait. The marketplace review found the check placed before a model's answer
-and the SDK's retries (cos20 #492, #12584).
+and the SDK's retries (cos20 #492, #12584). A ``peer_check`` is asked with the address each new
+connection actually reached, before a byte of the request goes over it (httpx ``trace``).
 """
 
 from __future__ import annotations
@@ -30,6 +31,12 @@ from cosmergon_agent.exceptions import SendRefusedError
 
 SendCheck = Callable[[str], str]
 """Asked with the URL right before a request leaves: ``""`` lets it go, a sentence refuses it."""
+
+PeerCheck = Callable[[str, int], str]
+"""Asked with the address a new connection actually reached (host, port), before a byte of the
+request goes over it: ``""`` lets it go, a sentence closes it. A name can resolve elsewhere
+between a ``SendCheck`` and the connection, and a proxy from the environment connects to
+itself; the socket's own peer is the last word."""
 
 ANSWER_BYTES = 8 * 1024 * 1024
 """Raw bytes one answer may bring. The largest answer an SDK client got in a day was a
@@ -138,17 +145,61 @@ def _refuse_unless(check: SendCheck, request: httpx.Request) -> None:
         raise SendRefusedError(why)
 
 
-def _send_guard(check: SendCheck) -> Callable[[httpx.Request], None]:
+_CONNECTED = "connection.connect_tcp.complete"  # httpcore's trace event for a new connection
+
+
+def _peer_of(stream: Any) -> tuple[str, int]:
+    addr = stream.get_extra_info("server_addr") or ("", 0)
+    return str(addr[0]), int(addr[1])
+
+
+def _trace(check: PeerCheck) -> Callable[[str, dict[str, Any]], None]:
+    def trace(event: str, info: dict[str, Any]) -> None:
+        if event != _CONNECTED:
+            return
+        stream = info["return_value"]
+        if why := check(*_peer_of(stream)):
+            stream.close()
+            raise SendRefusedError(why)
+
+    return trace
+
+
+def _async_trace(check: PeerCheck) -> Callable[[str, dict[str, Any]], Awaitable[None]]:
+    async def trace(event: str, info: dict[str, Any]) -> None:
+        if event != _CONNECTED:
+            return
+        stream = info["return_value"]
+        if why := check(*_peer_of(stream)):
+            await stream.aclose()
+            raise SendRefusedError(why)
+
+    return trace
+
+
+def _send_guard(check: SendCheck | None, peer: PeerCheck | None) -> Callable[[httpx.Request], None]:
+    trace = _trace(peer) if peer else None
+
     def guard(request: httpx.Request) -> None:
-        _refuse_unless(check, request)
+        if check:
+            _refuse_unless(check, request)
+        if trace:
+            request.extensions["trace"] = trace  # httpcore calls it for each new connection
 
     return guard
 
 
-def _async_send_guard(check: SendCheck) -> Callable[[httpx.Request], Awaitable[None]]:
+def _async_send_guard(
+    check: SendCheck | None, peer: PeerCheck | None
+) -> Callable[[httpx.Request], Awaitable[None]]:
+    trace = _async_trace(peer) if peer else None
+
     async def guard(request: httpx.Request) -> None:
         # No await between this check and httpx opening or reusing the connection.
-        _refuse_unless(check, request)
+        if check:
+            _refuse_unless(check, request)
+        if trace:
+            request.extensions["trace"] = trace
 
     return guard
 
@@ -170,18 +221,28 @@ def _settings(
 
 
 def client(
-    *, deadline: float | None = ANSWER_SECONDS, send_check: SendCheck | None = None, **kwargs: Any
+    *,
+    deadline: float | None = ANSWER_SECONDS,
+    send_check: SendCheck | None = None,
+    peer_check: PeerCheck | None = None,
+    **kwargs: Any,
 ) -> httpx.Client:
     """``httpx.Client`` with the bounds above; takes httpx's own arguments."""
-    send_guard = _send_guard(send_check) if send_check else None
+    guarded = send_check or peer_check
+    send_guard = _send_guard(send_check, peer_check) if guarded else None
     return httpx.Client(**_settings(kwargs, _guard(deadline), send_guard))
 
 
 def async_client(
-    *, deadline: float | None = ANSWER_SECONDS, send_check: SendCheck | None = None, **kwargs: Any
+    *,
+    deadline: float | None = ANSWER_SECONDS,
+    send_check: SendCheck | None = None,
+    peer_check: PeerCheck | None = None,
+    **kwargs: Any,
 ) -> httpx.AsyncClient:
     """``httpx.AsyncClient`` with the bounds above; takes httpx's own arguments."""
-    send_guard = _async_send_guard(send_check) if send_check else None
+    guarded = send_check or peer_check
+    send_guard = _async_send_guard(send_check, peer_check) if guarded else None
     return httpx.AsyncClient(**_settings(kwargs, _async_guard(deadline), send_guard))
 
 
@@ -192,10 +253,12 @@ def request(
     timeout: Any = 10.0,
     verify: Any = True,
     send_check: SendCheck | None = None,
+    peer_check: PeerCheck | None = None,
     **kwargs: Any,
 ) -> httpx.Response:
     """One call like ``httpx.request``, with the bounds above."""
-    with client(timeout=timeout, verify=verify, send_check=send_check) as one:
+    guards = {"send_check": send_check, "peer_check": peer_check}
+    with client(timeout=timeout, verify=verify, **guards) as one:
         return one.request(method, url, **kwargs)
 
 
