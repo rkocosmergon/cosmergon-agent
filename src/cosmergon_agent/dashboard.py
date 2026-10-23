@@ -2015,7 +2015,7 @@ class CosmergonDashboard(App):
         if lage["marauder"] is None:
             return "Your agent has no Marauder in the main world yet"
         was = _mission_zeile(self._mission) if self._mission else str(lage["marauder"])
-        return f"Your Marauder is busy ({was}) — one mission at a time"
+        return f"Your Marauder is busy ({_roh(was)}) — one mission at a time"
 
     async def _bomben_preis(self) -> float | None:
         """The cheapest mega bomb on the market right now, or ``None`` if there is none."""
@@ -2440,13 +2440,15 @@ class CosmergonDashboard(App):
         """Log each start and end since the last reading into ``tab``; return what is known.
 
         ``bekannt`` is ``None`` on the first reading: what was there before the dashboard
-        connected is remembered, not logged.
+        connected is remembered, not logged. What is known is what the server lists now, no
+        more: a mission it no longer lists is forgotten, so the memory stays as small as the
+        list (cos20 #492, fifth review).
         """
         neu = bekannt is not None
-        stand = dict(bekannt or {})
+        stand: dict[str, str] = {}
         for mission in reversed(missionen):  # the server sends the newest first
             kennung, status = str(mission.get("mission_id")), str(mission.get("status"))
-            vorher = stand.get(kennung)
+            vorher = (bekannt or {}).get(kennung)
             stand[kennung] = status
             laeuft = status in ("pending", "active")
             if neu and vorher != status:
@@ -2718,7 +2720,7 @@ class CosmergonDashboard(App):
         # What the main-world Marauder does, while a mission runs (#468) — in the place of
         # the blank line, the panel has a fixed height.
         lines.append(
-            _c(t.data, f"Marauder: {_mission_zeile(self._mission)}") if self._mission else ""
+            _c(t.data, f"Marauder: {_roh(_mission_zeile(self._mission))}") if self._mission else ""
         )
 
         # Compass — CTA lives in hint-bar, agent panel shows current state only

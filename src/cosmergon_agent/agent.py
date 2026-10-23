@@ -61,6 +61,8 @@ _MAX_POLL_S = 300.0
 # One action per tick is accepted whenever it arrives during the tick, so nothing is lost.
 _JITTER_SHARE = 0.4
 _JITTER_MAX_S = 30.0
+# Missions per read: the server lists at most 50 (``GET /api/v1/agent-missions``).
+MISSIONS_MAX = 50
 
 
 class CosmergonAgent:
@@ -315,9 +317,10 @@ class CosmergonAgent:
 
         Returns the fresh :class:`GameState` (also assigned to
         ``self._state``) or ``None`` if the request failed in a
-        non-raising way (rate limit, transient 5xx). 4xx auth errors
-        raise the usual :class:`AuthenticationError` /
-        :class:`AuthorizationError` so callers can react explicitly.
+        non-raising way (rate limit, transient 5xx). 401 and 403
+        raise :class:`AuthenticationError` so callers can react explicitly
+        (a key that ended, a revoked one); until 0.27.32 they returned
+        ``None`` like a world that did not answer (cos20 #492).
 
         Background — cosmergon-pet 2026-05-04: Pet's custom poll loop
         had no public API to mirror its fetched state into
@@ -330,6 +333,11 @@ class CosmergonAgent:
         if self._client is None:
             raise RuntimeError("Agent not connected. Call run() or use async with.")
         resp = await self._request("GET", f"/api/v1/agents/{self.agent_id}/state")
+        if resp.status_code in (401, 403):
+            raise AuthenticationError(
+                f"state refused ({resp.status_code}): the key ended or was revoked",
+                code=resp.status_code,
+            )
         if resp.status_code == 200:
             self._state = GameState.from_api(resp.json())
             return self._state
@@ -497,12 +505,18 @@ class CosmergonAgent:
 
         Returns:
             The list, or ``None`` when the server could not be read — an agent that has
-            never started a mission gets ``[]``.
+            never started a mission gets ``[]``. Only objects, and at most ``MISSIONS_MAX``:
+            a client that does something per mission does it a bounded number of times,
+            whatever the server sends (cos20 #492, fifth review).
         """
         resp = await self._request("GET", "/api/v1/agent-missions")
         if resp.status_code >= 400:
             return None
-        return list(resp.json().get("missions") or [])
+        body = resp.json()
+        listed = body.get("missions") if isinstance(body, dict) else None
+        if not isinstance(listed, list):
+            return []
+        return [m for m in listed[:MISSIONS_MAX] if isinstance(m, dict)]
 
     async def list_mission_templates(self) -> list[dict]:
         """Fetch the 11 Mission-Templates (M01..M11) with params-schema + affinity."""

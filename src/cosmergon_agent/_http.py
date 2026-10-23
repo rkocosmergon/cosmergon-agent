@@ -25,6 +25,9 @@ on this machine only while its port is the player's) checks it here, at the mome
 not once before a wait. The marketplace review found the check placed before a model's answer
 and the SDK's retries (cos20 #492, #12584). A ``peer_check`` is asked with the address each new
 connection actually reached, before a byte of the request goes over it (httpx ``trace``).
+
+And every answer's ``json()`` comes with each string through ``printable``: no text of the world
+reaches a terminal with a control character, whichever call read it (cos20 #492).
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ from typing import Any, cast
 import httpx
 
 from cosmergon_agent.exceptions import SendRefusedError
+from cosmergon_agent.state import _texts
 
 SendCheck = Callable[[str], str]
 """Asked with the URL right before a request leaves: ``""`` lets it go, a sentence refuses it."""
@@ -154,6 +158,21 @@ class _AsyncCounted(httpx.AsyncByteStream):
         await self._inner.aclose()
 
 
+def _printable_json(response: httpx.Response) -> None:
+    """``response.json()`` with every string in it through ``printable`` (the newline stays).
+
+    One place for every answer the SDK reads. Until 0.27.32 only the state was read that way
+    (``state._build``); ``missions()`` and some forty other calls handed the world's strings on
+    with their control characters, and the terminal drew one of them (cos20 #492, fifth review).
+    """
+    read = response.json
+
+    def json(**kwargs: Any) -> Any:
+        return _texts(read(**kwargs))
+
+    response.json = json  # type: ignore[method-assign]
+
+
 def _guard(deadline: float | None) -> Callable[[httpx.Response], None]:
     def check(response: httpx.Response) -> None:
         # A response hook runs after the headers and before the body is read; httpx closes the
@@ -163,6 +182,7 @@ def _guard(deadline: float | None) -> Callable[[httpx.Response], None]:
             _stop_watches(response.request)
         inner = cast(httpx.SyncByteStream, response.stream)
         response.stream = _Counted(inner, response.request, deadline)
+        _printable_json(response)
 
     return check
 
@@ -172,6 +192,7 @@ def _async_guard(deadline: float | None) -> Callable[[httpx.Response], Awaitable
         _refuse_encoded(response)
         inner = cast(httpx.AsyncByteStream, response.stream)
         response.stream = _AsyncCounted(inner, response.request, deadline)
+        _printable_json(response)
 
     return check
 
