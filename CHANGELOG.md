@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [0.27.33] — 2026-10-23
+
+### Fixed
+
+- **Every answer of the world comes without control characters, whichever call reads it**
+  (cos20 #492, fifth review of Shikigon). 0.27.32 read the state that way; `missions()` and
+  some forty other calls handed the server's strings on as they came, and the dashboard drew
+  the running mission into the agent panel and the hint bar as markup, with its control
+  characters. Now the one door every request goes through (`_http`) gives `json()` with each
+  string cleaned, and the mission line is shown as text.
+- **`missions()` returns at most 50 missions, objects only** (cos20 #492). A client that does
+  something for each mission did it as many times as the server listed; the server lists at
+  most 50. An answer that is no object or no list gives `[]` instead of ending the call. The
+  dashboard remembers only the missions the server still lists.
+- **`refresh_state()` raises `AuthenticationError` on 401 and 403**, as its docstring said
+  (cos20 #492). It returned `None`, like a world that did not answer, so a client could not
+  tell a key that ended from a short outage.
+
 ## [0.27.32] — 2026-10-23
 
 ### Fixed
