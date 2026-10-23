@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+## [0.27.32] — 2026-10-23
+
+### Fixed
+
+- **The state is read in the types it declares** (cos20 #492, fourth review of Shikigon). A
+  dataclass does not enforce its annotations: `tick`, `rang_von`, `your_rank` and
+  `total_agents` arrived as whatever the server sent, and the dashboard put them into markup as
+  numbers nobody had checked; `tier_name` went into the rank line as it came. Now every field
+  of every class built from a server answer gets its declared type: a number is a number (not
+  a finite one, or no number at all, gives the field's default), and every string, also inside
+  the open blocks such as `tournament`, `next_step` and the contracts, loses its control
+  characters but the newline. The rank line shows the tier as text. A list where an object
+  belongs, or text where a number belongs, no longer ends `GameState.from_api`, and text in the
+  tournament scores no longer ends the top line.
+- **Only https addresses go to the browser** (cos20 #492). A checkout address from the server's
+  answer went to `webbrowser.open` unchecked, and that hands any scheme to the desktop. Every
+  way to the browser now goes through one function that opens `https://host` only.
+- **The advisor under [M] ends with SIGTERM** (cos20 #492). After 120 s the dashboard killed the
+  advisor command with SIGKILL, which reaches no signal handler: an advisor that ran a coding
+  agent could not end it, and the agent ran on. Now the dashboard waits 300 s, sends SIGTERM,
+  and only after 5 more seconds SIGKILL; the same happens when the dashboard closes while a
+  question is open.
+- **What the SDK writes under `~/.cosmergon` is private from its first byte** (cos20 #492).
+  `config.toml` was written to a temp file of a fixed name with the terminal's umask and made
+  `0600` only afterwards; the backup before a migration (it holds the key) and the notes of
+  `cosmergon-play` the same way. Now every such file is created `0600` under a random name and
+  renamed into place, and `~/.cosmergon` is kept `0700`, also when an older SDK made it.
+
 ## [0.27.31] — 2026-10-22
 
 ### Fixed
