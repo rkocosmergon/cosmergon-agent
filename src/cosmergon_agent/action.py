@@ -291,7 +291,13 @@ class ActionResult:
         body: dict,
         idempotency_key: str | None = None,
     ) -> ActionResult:
-        """Parse HTTP response into ActionResult."""
+        """Parse HTTP response into ActionResult.
+
+        A body that is no object counts as an empty one (cos20 #492): until 0.27.33 a list or a
+        word in the body of a refusal ended the caller with an ``AttributeError``.
+        """
+        if not isinstance(body, dict):
+            body = {}
         if 200 <= status_code < 300:
             return cls(
                 success=True,
@@ -302,12 +308,13 @@ class ActionResult:
 
         error = body.get("error", body.get("detail", {}))
         if isinstance(error, dict):
+            code = error.get("code")
             return cls(
                 success=False,
                 action=action,
                 data=body,
                 idempotency_key=idempotency_key,
-                error_code=error.get("code", status_code),
+                error_code=code if type(code) is int else status_code,
                 error_message=printable(error.get("message", str(error))),
             )
         return cls(

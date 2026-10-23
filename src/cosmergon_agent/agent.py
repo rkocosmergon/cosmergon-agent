@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import email.utils
 import inspect
 import json
 import logging
+import math
 import os
 import random
 import time
@@ -63,6 +65,27 @@ _JITTER_SHARE = 0.4
 _JITTER_MAX_S = 30.0
 # Missions per read: the server lists at most 50 (``GET /api/v1/agent-missions``).
 MISSIONS_MAX = 50
+
+
+def _retry_after(value: str | None) -> float:
+    """Seconds from a ``Retry-After`` header: a number or an HTTP date (RFC 9110 §10.2.3).
+
+    Anything else is one second; the result lies between 0 and ``_MAX_BACKOFF``. Until 0.27.33
+    the header went through a bare ``float()``, and a date there (which proxies send) ended the
+    caller with a ``ValueError`` (cos20 #492, sixth review of Shikigon).
+    """
+    if not value:
+        return 1.0
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            seconds = email.utils.parsedate_to_datetime(value).timestamp() - time.time()
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return 1.0
+    if not math.isfinite(seconds):
+        return 1.0
+    return min(max(seconds, 0.0), _MAX_BACKOFF)
 
 
 class CosmergonAgent:
@@ -338,17 +361,27 @@ class CosmergonAgent:
                 f"state refused ({resp.status_code}): the key ended or was revoked",
                 code=resp.status_code,
             )
-        if resp.status_code == 200:
-            self._state = GameState.from_api(resp.json())
-            return self._state
-        return None
+        if resp.status_code != 200:
+            return None
+        # An answer that is no JSON object is no state (cos20 #492): until 0.27.33 a list or a
+        # word there, or brackets nested too deep, ended the caller.
+        try:
+            body = resp.json()
+        except _http.NotJSONError:
+            return None
+        if not isinstance(body, dict):
+            return None
+        self._state = GameState.from_api(body)
+        return self._state
 
     # --- Actions (Screeps pattern) ---
 
     async def act(self, action: str, **params: Any) -> ActionResult:
         """Execute a game action. Returns ActionResult with success/failure.
 
-        Raises CosmergonError subclasses on server errors (4xx/5xx).
+        Raises CosmergonError subclasses on server errors (4xx/5xx). An answer that is no usable
+        JSON (a proxy's error page, an empty 502) raises ``ConnectionError`` like a world that
+        did not answer; until 0.27.33 it ended the caller with a ``ValueError`` (cos20 #492).
         """
         idem_key = str(uuid.uuid4())
         body = {"action": action, **params}
@@ -359,11 +392,15 @@ class CosmergonAgent:
             json=body,
             headers={"X-Idempotency-Key": idem_key},
         )
+        try:
+            answer = resp.json()
+        except _http.NotJSONError as exc:
+            raise CsgConnectionError(f"the answer to {action[:40]} was no JSON") from exc
 
         result = ActionResult.from_response(
             action,
             resp.status_code,
-            resp.json(),
+            answer,
             idempotency_key=idem_key,
         )
 
@@ -512,7 +549,10 @@ class CosmergonAgent:
         resp = await self._request("GET", "/api/v1/agent-missions")
         if resp.status_code >= 400:
             return None
-        body = resp.json()
+        try:
+            body = resp.json()
+        except _http.NotJSONError:
+            return None
         listed = body.get("missions") if isinstance(body, dict) else None
         if not isinstance(listed, list):
             return []
@@ -1646,11 +1686,7 @@ class CosmergonAgent:
                 )
 
                 if resp.status_code == 429:
-                    retry_after = min(
-                        float(resp.headers.get("Retry-After", "1.0")),
-                        _MAX_BACKOFF,
-                    )
-                    raise RateLimitError(retry_after=retry_after)
+                    raise RateLimitError(retry_after=_retry_after(resp.headers.get("Retry-After")))
 
                 if resp.status_code >= 500 and attempt < self.max_retries:
                     # Backoff jitter, not cryptography.

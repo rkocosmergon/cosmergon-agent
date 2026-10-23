@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [0.27.34] — 2026-10-23
+
+### Fixed
+
+- **An answer of the world in the wrong form no longer ends the reader** (cos20 #492, sixth
+  review of Shikigon). The state was read by its scalar types only. A number where a list
+  belongs (`fields`, `buyable`, `inbox`, `contract_targets` and the other lists), a word in such a
+  list, a field without its `cube_id`, `inventory` or `available_actions` as something other than
+  an object, or `affordable_presets` as a number ended `GameState.from_api` with a `TypeError` or
+  `AttributeError`. Now every list keeps only its objects, an object missing a required field is
+  left out, and `available_actions` is always an object.
+- **`refresh_state()` returns `None` for an answer that is no JSON object**, `missions()` likewise,
+  and `act()` raises `ConnectionError` (a proxy's error page, an empty 502 after the retries). A
+  refusal whose body is no object is a refusal with its status code.
+- **`json()` of every answer refuses what is no usable JSON** with `NotJSONError` (a `ValueError`,
+  as before, and an `AnswerRefused`): brackets nested too deep raised `RecursionError`, which no
+  caller caught, and `NaN`, `Infinity` or `1e999` came through as numbers.
+- **`Retry-After` is read as a number or an HTTP date** (RFC 9110). A date, which proxies send,
+  ended the request with a `ValueError`; anything unreadable is now one second.
+
 ## [0.27.33] — 2026-10-23
 
 ### Fixed

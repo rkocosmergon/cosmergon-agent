@@ -128,6 +128,29 @@ def _typed_or_none(cls: type, data: dict, key: str) -> Any:
     return _safe_construct(cls, roh) if roh is not None else None
 
 
+def _liste(value: Any) -> list[Any]:
+    """``value`` when the server sent a list there, else an empty one."""
+    return value if isinstance(value, list) else []
+
+
+@cache
+def _required(cls: type) -> frozenset[str]:
+    """The fields of ``cls`` without a default: what an object of the server must name."""
+    return frozenset(
+        f.name for f in dc_fields(cls) if f.default is MISSING and f.default_factory is MISSING
+    )
+
+
+def _typed_list(cls: type, data: dict | None, key: str) -> list[Any]:
+    """The objects in the list ``data[key]`` as ``cls``; anything else is left out (cos20 #492).
+
+    An object without a field ``cls`` needs (a field without its ``cube_id``) is no such object.
+    Until 0.27.33 a number in place of the list, a word in it or an object missing a field
+    ended the reader with a ``TypeError`` or ``AttributeError``: for Shikigon its brain, on
+    every move."""
+    return [_safe_construct(cls, o) for o in _objects(data, key) if _required(cls) <= o.keys()]
+
+
 @dataclass(frozen=True)
 class Field:
     """A Conway game field owned by this agent."""
@@ -270,7 +293,9 @@ class AgentSituation:
             fields_owned=data.get("fields_owned", 0),
             fields_without_cells=data.get("fields_without_cells", 0),
             energy_trend=data.get("energy_trend", "stable"),
-            affordable_presets=tuple(data.get("affordable_presets", [])),
+            affordable_presets=tuple(
+                p for p in _liste(data.get("affordable_presets")) if isinstance(p, str)
+            ),
             benchmark_ready=data.get("benchmark_ready", False),
             benchmark_days_remaining=data.get("benchmark_days_remaining", 0),
             active_catastrophe=data.get("active_catastrophe"),
@@ -328,7 +353,7 @@ class MarketBriefing:
 
     @classmethod
     def from_api(cls, data: dict) -> MarketBriefing:
-        raw_buyable = data.get("buyable") or []
+        raw_buyable = _objects(data, "buyable")
         return _build(
             cls,
             summary=data.get("summary", ""),
@@ -341,7 +366,6 @@ class MarketBriefing:
                     seller_name=b.get("seller_name"),
                 )
                 for b in raw_buyable
-                if isinstance(b, dict)
             ),
             my_listings=tuple(
                 _build(
@@ -350,8 +374,7 @@ class MarketBriefing:
                     item_type=m.get("item_type", ""),
                     price_energy=m.get("price_energy", 0.0),
                 )
-                for m in data.get("my_listings") or []
-                if isinstance(m, dict)
+                for m in _objects(data, "my_listings")
             ),
         )
 
@@ -426,23 +449,16 @@ class Messages:
     def from_api(cls, data: dict) -> Messages:
         return _build(
             cls,
-            inbox=tuple(
-                AgentMessage.from_api(m) for m in data.get("inbox") or [] if isinstance(m, dict)
-            ),
+            inbox=tuple(AgentMessage.from_api(m) for m in _objects(data, "inbox")),
             rooms=tuple(
                 _build(
                     MessageRoom,
                     room=r.get("room", ""),
                     public=r.get("public", False),
-                    recent=tuple(
-                        AgentMessage.from_api(m)
-                        for m in r.get("recent") or []
-                        if isinstance(m, dict)
-                    ),
+                    recent=tuple(AgentMessage.from_api(m) for m in _objects(r, "recent")),
                     tournament_id=r.get("tournament_id"),
                 )
-                for r in data.get("rooms") or []
-                if isinstance(r, dict)
+                for r in _objects(data, "rooms")
             ),
             how=data.get("how", ""),
         )
@@ -470,7 +486,7 @@ class WorldBriefing:
         fund = _dict_or_none(data, "infrastructure_fund") or {}
         sit = _dict_or_none(data, "agent_situation") or {}
         market_data = _dict_or_none(data, "market") or {}
-        raw_targets = data.get("contract_targets") or []
+        raw_targets = _objects(data, "contract_targets")
         return _build(
             cls,
             total_agents=data.get("total_agents", 0),
@@ -486,7 +502,6 @@ class WorldBriefing:
                     coop_score=t.get("coop_score") or 0.0,
                 )
                 for t in raw_targets
-                if isinstance(t, dict)
             ),
             top_agent=data.get("top_agent"),
             last_event=data.get("last_event"),
@@ -588,10 +603,10 @@ class GameState:
         Uses defensive parsing: unknown fields are ignored,
         missing fields use defaults (forward-compatibility, C3).
         """
-        fields = [_safe_construct(Field, f) for f in data.get("fields", [])]
-        cubes = [_safe_construct(Cube, c) for c in data.get("cubes", [])]
-        universe_cubes = [_safe_construct(Cube, c) for c in data.get("universe_cubes", [])]
-        reachable_cubes = [_safe_construct(Cube, c) for c in data.get("reachable_cubes", [])]
+        fields = _typed_list(Field, data, "fields")
+        cubes = _typed_list(Cube, data, "cubes")
+        universe_cubes = _typed_list(Cube, data, "universe_cubes")
+        reachable_cubes = _typed_list(Cube, data, "reachable_cubes")
         ranking = Ranking.from_api(_dict_or_none(data, "ranking") or {})
         focus = _safe_construct(Focus, _dict_or_none(data, "focus") or {})
 
@@ -618,15 +633,17 @@ class GameState:
             referral_code=data.get("referral_code") or "",
             subscription_downgrade_at=data.get("subscription_downgrade_at"),
             world_briefing=world_briefing,
-            learned_rules=data.get("learned_rules", []),
+            learned_rules=[r for r in _liste(data.get("learned_rules")) if isinstance(r, str)],
             next_tick_at=data.get("next_tick_at"),
             compass_preset=data.get("compass_preset"),
             reflection_due=data.get("reflection_due", False),
             decisions_since_last_reflection=data.get("decisions_since_last_reflection", 0),
-            available_actions=data.get("available_actions") or {},
+            available_actions=_dict_or_none(data, "available_actions") or {},
             inventory_items={
                 str(k): n
-                for k, v in ((data.get("inventory") or {}).get("items") or {}).items()
+                for k, v in (
+                    _dict_or_none(_dict_or_none(data, "inventory") or {}, "items") or {}
+                ).items()
                 if (n := _number(int, v)) is not _NONE_OF_IT
             },
             next_step=_dict_or_none(data, "next_step"),

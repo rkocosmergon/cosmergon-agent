@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import math
 import socket
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
@@ -158,17 +159,46 @@ class _AsyncCounted(httpx.AsyncByteStream):
         await self._inner.aclose()
 
 
+class NotJSONError(AnswerRefused, ValueError):
+    """An answer that is no JSON, nested too deep, or with a number that is not finite.
+
+    A ``ValueError`` like the ``JSONDecodeError`` before it, so a caller that caught that still
+    catches this; and an ``AnswerRefused``, so it counts as a world that did not answer. Until
+    0.27.33 ``[[[…`` (some 200 KB) raised ``RecursionError``, which no caller caught, and
+    ``NaN`` or ``1e999`` came through as numbers (cos20 #492, sixth review of Shikigon).
+    """
+
+
+def _no_constant(name: str) -> Any:
+    raise ValueError(f"{name} is no JSON number")
+
+
+def _finite(text: str) -> float:
+    number = float(text)
+    if not math.isfinite(number):
+        raise ValueError(f"{text[:20]} is no finite number")
+    return number
+
+
 def _printable_json(response: httpx.Response) -> None:
     """``response.json()`` with every string in it through ``printable`` (the newline stays).
 
     One place for every answer the SDK reads. Until 0.27.32 only the state was read that way
     (``state._build``); ``missions()`` and some forty other calls handed the world's strings on
     with their control characters, and the terminal drew one of them (cos20 #492, fifth review).
+    What is no JSON, too deep or not finite is a ``NotJSONError`` (sixth review).
     """
     read = response.json
 
     def json(**kwargs: Any) -> Any:
-        return _texts(read(**kwargs))
+        kwargs.setdefault("parse_constant", _no_constant)
+        kwargs.setdefault("parse_float", _finite)
+        try:
+            return _texts(read(**kwargs))
+        except (ValueError, RecursionError) as exc:
+            raise NotJSONError(
+                f"the answer is no usable JSON ({type(exc).__name__})", request=response.request
+            ) from exc
 
     response.json = json  # type: ignore[method-assign]
 
