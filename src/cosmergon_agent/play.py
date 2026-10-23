@@ -105,8 +105,9 @@ def _remember(name: str, **values: Any) -> dict[str, Any]:
         pass
     if values:
         kept.update(values)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(kept), encoding="utf-8")
+        _config._private_dir()
+        path.parent.mkdir(mode=0o700, exist_ok=True)
+        _config._write_private(path, json.dumps(kept).encode("utf-8"))
     return kept
 
 

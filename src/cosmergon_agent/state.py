@@ -3,28 +3,123 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+import math
+from dataclasses import MISSING, dataclass, field
 from dataclasses import fields as dc_fields
-from typing import Any
+from functools import cache
+from typing import Any, TypeVar, get_args, get_type_hints
+
+from cosmergon_agent.action import printable
 
 logger = logging.getLogger(__name__)
+
+# What a scalar field holds when the server sent no value of its type and the field has no
+# default of its own.
+_SCALARS: dict[Any, Any] = {str: "", int: 0, float: 0.0, bool: False}
+# Far deeper than a state nests (the recorded one in cos20's client contract: 4 levels); a
+# container below this depth becomes None, so no answer can hold the reading in recursion.
+_DEPTH = 32
+_NONE_OF_IT = object()
+_T = TypeVar("_T")
+
+
+def _number(kind: type, value: Any) -> Any:
+    """``value`` as the number type ``kind``, or ``_NONE_OF_IT`` (no finite number)."""
+    if kind is int and isinstance(value, int):
+        return int(value)  # big integers stay exact; a bool counts 0 or 1
+    if not isinstance(value, int | float | str):
+        return _NONE_OF_IT
+    try:
+        number = float(value)
+    except (ValueError, OverflowError):
+        return _NONE_OF_IT
+    return kind(number) if math.isfinite(number) else _NONE_OF_IT
+
+
+def _scalar(kind: type, value: Any) -> Any:
+    """``value`` as ``kind`` (str, int, float or bool), or ``_NONE_OF_IT``."""
+    if kind is int or kind is float:
+        return _number(kind, value)
+    if kind is bool:
+        return bool(value) if isinstance(value, int | float) else _NONE_OF_IT
+    if isinstance(value, str):
+        return printable(value, keep="\n")
+    return str(value) if isinstance(value, int | float) else _NONE_OF_IT
+
+
+def _texts(value: Any, depth: int = _DEPTH) -> Any:
+    """``value`` with every string in it through ``printable`` (the newline stays)."""
+    if isinstance(value, str):
+        return printable(value, keep="\n")
+    if not isinstance(value, dict | list | tuple):
+        return value
+    if depth <= 0:
+        return None
+    if isinstance(value, dict):
+        return {_texts(k, depth - 1): _texts(v, depth - 1) for k, v in value.items()}
+    return type(value)(_texts(v, depth - 1) for v in value)
+
+
+def _as(hint: Any, fallback: Any, value: Any) -> Any:
+    """``value`` in the type ``hint`` declares; a scalar of another type becomes ``fallback``."""
+    kinds = get_args(hint)
+    if type(None) in kinds:
+        if value is None:
+            return None
+        rest = [k for k in kinds if k is not type(None)]
+        hint = rest[0] if len(rest) == 1 else Any
+    if hint in _SCALARS:
+        result = _scalar(hint, value)
+        return fallback if result is _NONE_OF_IT else result
+    return _texts(value)
+
+
+@cache
+def _schema(cls: type) -> dict[str, tuple[Any, Any]]:
+    """Per field of ``cls``: the declared type and the value for a scalar the server got wrong."""
+    hints = get_type_hints(cls)
+    return {
+        f.name: (
+            hints[f.name],
+            f.default if f.default is not MISSING else _SCALARS.get(hints[f.name]),
+        )
+        for f in dc_fields(cls)
+    }
+
+
+def _build(cls: type[_T], **values: Any) -> _T:
+    """``cls`` from the server's values, each in the type its field declares (cos20 #492).
+
+    A dataclass does not enforce its annotations. ``tick`` or ``your_rank`` arrived as whatever
+    the server sent, and the dashboard put them into markup as numbers nobody had checked. Here a
+    number becomes a number (else the field's default), and every string loses its control
+    characters but the newline, once, for every reader of the state.
+    """
+    art: type = cls  # the cache keys on the class; type[_T] alone is not Hashable to mypy
+    schema = _schema(art)
+    return cls(**{k: _as(*schema[k], v) for k, v in values.items()})
 
 
 def _safe_construct(cls: type, data: dict) -> Any:
     """Construct a dataclass from a dict, ignoring unknown fields (C3).
 
     Unknown fields are silently dropped for forward-compatibility.
-    Missing fields use dataclass defaults.
+    Missing fields use dataclass defaults. Known ones come in their declared type (``_build``).
     """
     known = {f.name for f in dc_fields(cls)}
-    filtered = {k: v for k, v in data.items() if k in known}
-    return cls(**filtered)
+    return _build(cls, **{k: v for k, v in data.items() if k in known})
 
 
 def _dict_or_none(data: dict, key: str) -> dict | None:
     """``data[key]`` when the server sent an object there, else ``None`` (C3)."""
     wert = data.get(key)
     return wert if isinstance(wert, dict) else None
+
+
+def _objects(data: dict | None, key: str) -> tuple[dict, ...]:
+    """The objects in the list ``data[key]``; anything else in it, or no list, is left out."""
+    liste = (data or {}).get(key)
+    return tuple(o for o in liste if isinstance(o, dict)) if isinstance(liste, list) else ()
 
 
 def _typed_or_none(cls: type, data: dict, key: str) -> Any:
@@ -116,7 +211,7 @@ class Ranking:
     @classmethod
     def from_api(cls, data: dict) -> Ranking:
         """Parse the ranking block, typing the per-facet standings."""
-        roh = data.get("facetten") or {}
+        roh = _dict_or_none(data, "facetten") or {}
         facetten = {
             str(name): _safe_construct(FacettenStand, stand)
             for name, stand in roh.items()
@@ -124,7 +219,7 @@ class Ranking:
         }
         known = {f.name for f in dc_fields(cls)} - {"facetten"}
         gefiltert = {k: v for k, v in data.items() if k in known}
-        return cls(**gefiltert, facetten=facetten)
+        return _build(cls, **gefiltert, facetten=facetten)
 
 
 @dataclass(frozen=True)
@@ -170,7 +265,8 @@ class AgentSituation:
 
     @classmethod
     def from_api(cls, data: dict) -> AgentSituation:
-        return cls(
+        return _build(
+            cls,
             fields_owned=data.get("fields_owned", 0),
             fields_without_cells=data.get("fields_without_cells", 0),
             energy_trend=data.get("energy_trend", "stable"),
@@ -233,22 +329,26 @@ class MarketBriefing:
     @classmethod
     def from_api(cls, data: dict) -> MarketBriefing:
         raw_buyable = data.get("buyable") or []
-        return cls(
+        return _build(
+            cls,
             summary=data.get("summary", ""),
             buyable=tuple(
-                BuyableListing(
-                    listing_id=str(b.get("listing_id", "")),
+                _build(
+                    BuyableListing,
+                    listing_id=b.get("listing_id", ""),
                     item_type=b.get("item_type", ""),
-                    price_energy=float(b.get("price_energy", 0.0)),
+                    price_energy=b.get("price_energy", 0.0),
                     seller_name=b.get("seller_name"),
                 )
                 for b in raw_buyable
+                if isinstance(b, dict)
             ),
             my_listings=tuple(
-                OwnListing(
-                    listing_id=str(m.get("listing_id", "")),
+                _build(
+                    OwnListing,
+                    listing_id=m.get("listing_id", ""),
                     item_type=m.get("item_type", ""),
-                    price_energy=float(m.get("price_energy", 0.0)),
+                    price_energy=m.get("price_energy", 0.0),
                 )
                 for m in data.get("my_listings") or []
                 if isinstance(m, dict)
@@ -286,12 +386,13 @@ class AgentMessage:
 
     @classmethod
     def from_api(cls, data: dict) -> AgentMessage:
-        return cls(
-            id=str(data.get("id", "")),
-            from_player_id=str(data.get("from_player_id", "")),
+        return _build(
+            cls,
+            id=data.get("id", ""),
+            from_player_id=data.get("from_player_id", ""),
             from_name=data.get("from_name"),
-            text=str(data.get("text", "")),
-            at=str(data.get("at", "")),
+            text=data.get("text", ""),
+            at=data.get("at", ""),
         )
 
 
@@ -323,18 +424,27 @@ class Messages:
 
     @classmethod
     def from_api(cls, data: dict) -> Messages:
-        return cls(
-            inbox=tuple(AgentMessage.from_api(m) for m in data.get("inbox") or []),
+        return _build(
+            cls,
+            inbox=tuple(
+                AgentMessage.from_api(m) for m in data.get("inbox") or [] if isinstance(m, dict)
+            ),
             rooms=tuple(
-                MessageRoom(
-                    room=str(r.get("room", "")),
-                    public=bool(r.get("public", False)),
-                    recent=tuple(AgentMessage.from_api(m) for m in r.get("recent") or []),
+                _build(
+                    MessageRoom,
+                    room=r.get("room", ""),
+                    public=r.get("public", False),
+                    recent=tuple(
+                        AgentMessage.from_api(m)
+                        for m in r.get("recent") or []
+                        if isinstance(m, dict)
+                    ),
                     tournament_id=r.get("tournament_id"),
                 )
                 for r in data.get("rooms") or []
+                if isinstance(r, dict)
             ),
-            how=str(data.get("how", "")),
+            how=data.get("how", ""),
         )
 
 
@@ -357,31 +467,34 @@ class WorldBriefing:
 
     @classmethod
     def from_api(cls, data: dict) -> WorldBriefing:
-        fund = data.get("infrastructure_fund") or {}
-        sit = data.get("agent_situation") or {}
-        market_data = data.get("market") or {}
+        fund = _dict_or_none(data, "infrastructure_fund") or {}
+        sit = _dict_or_none(data, "agent_situation") or {}
+        market_data = _dict_or_none(data, "market") or {}
         raw_targets = data.get("contract_targets") or []
-        return cls(
+        return _build(
+            cls,
             total_agents=data.get("total_agents", 0),
             your_rank=data.get("your_rank", 0),
             market_summary=data.get("market_summary", ""),
             market=MarketBriefing.from_api(market_data),
             contract_targets=tuple(
-                ContractTargetBrief(
-                    player_id=str(t.get("player_id", "")),
+                _build(
+                    ContractTargetBrief,
+                    player_id=t.get("player_id", ""),
                     username=t.get("username", ""),
                     persona=t.get("persona"),
-                    coop_score=float(t.get("coop_score", 0.0) or 0.0),
+                    coop_score=t.get("coop_score") or 0.0,
                 )
                 for t in raw_targets
+                if isinstance(t, dict)
             ),
             top_agent=data.get("top_agent"),
             last_event=data.get("last_event"),
             tip=data.get("tip", ""),
-            infra_fund_pct=float(fund.get("progress_pct", 0.0)),
+            infra_fund_pct=fund.get("progress_pct", 0.0),
             infra_fund_msg=fund.get("message", ""),
             situation=AgentSituation.from_api(sit),
-            messages=Messages.from_api(data.get("messages") or {}),
+            messages=Messages.from_api(_dict_or_none(data, "messages") or {}),
         )
 
 
@@ -479,18 +592,19 @@ class GameState:
         cubes = [_safe_construct(Cube, c) for c in data.get("cubes", [])]
         universe_cubes = [_safe_construct(Cube, c) for c in data.get("universe_cubes", [])]
         reachable_cubes = [_safe_construct(Cube, c) for c in data.get("reachable_cubes", [])]
-        ranking = Ranking.from_api(data.get("ranking") or {})
-        focus = _safe_construct(Focus, data.get("focus", {}))
+        ranking = Ranking.from_api(_dict_or_none(data, "ranking") or {})
+        focus = _safe_construct(Focus, _dict_or_none(data, "focus") or {})
 
-        wb_data = data.get("world_briefing")
+        wb_data = _dict_or_none(data, "world_briefing")
         world_briefing = WorldBriefing.from_api(wb_data) if wb_data else None
 
-        return cls(
+        return _build(
+            cls,
             agent_id=data.get("agent_id", "unknown"),
             agent_name=data.get("agent_name", ""),
             persona_type=data.get("persona_type", ""),
             agent_type=data.get("agent_type", "independent_agent"),
-            energy=float(data.get("energy_balance", data.get("energy", 0.0))),
+            energy=data.get("energy_balance", data.get("energy", 0.0)),
             fields=fields,
             cubes=cubes,
             universe_cubes=universe_cubes,
@@ -500,33 +614,25 @@ class GameState:
             tick=data.get("tick", 0),
             agent_mode=data.get("agent_mode", "api"),
             subscription_tier=data.get("subscription_tier", "free"),
-            has_stripe_customer=bool(data.get("has_stripe_customer", False)),
-            referral_code=str(data.get("referral_code") or ""),
+            has_stripe_customer=data.get("has_stripe_customer", False),
+            referral_code=data.get("referral_code") or "",
             subscription_downgrade_at=data.get("subscription_downgrade_at"),
             world_briefing=world_briefing,
             learned_rules=data.get("learned_rules", []),
             next_tick_at=data.get("next_tick_at"),
             compass_preset=data.get("compass_preset"),
-            reflection_due=bool(data.get("reflection_due", False)),
-            decisions_since_last_reflection=int(data.get("decisions_since_last_reflection", 0)),
+            reflection_due=data.get("reflection_due", False),
+            decisions_since_last_reflection=data.get("decisions_since_last_reflection", 0),
             available_actions=data.get("available_actions") or {},
             inventory_items={
-                str(k): int(v)
+                str(k): n
                 for k, v in ((data.get("inventory") or {}).get("items") or {}).items()
-                if isinstance(v, int | float)
+                if (n := _number(int, v)) is not _NONE_OF_IT
             },
             next_step=_dict_or_none(data, "next_step"),
             key_expiry=_dict_or_none(data, "key_expiry"),
             tournament=_dict_or_none(data, "tournament"),
             showcase=_typed_or_none(ShowcaseStand, data, "showcase"),
-            pending_contracts=tuple(
-                c
-                for c in ((data.get("contracts") or {}).get("pending_inbound") or [])
-                if isinstance(c, dict)
-            ),
-            active_contracts=tuple(
-                c
-                for c in ((data.get("contracts") or {}).get("active") or [])
-                if isinstance(c, dict)
-            ),
+            pending_contracts=_objects(_dict_or_none(data, "contracts"), "pending_inbound"),
+            active_contracts=_objects(_dict_or_none(data, "contracts"), "active"),
         )

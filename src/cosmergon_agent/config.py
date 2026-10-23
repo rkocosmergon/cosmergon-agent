@@ -36,8 +36,11 @@ when the agent name becomes known (after first get_state from server).
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -114,13 +117,39 @@ def _read_raw() -> dict:
         return {}
 
 
+def _private_dir() -> Path:
+    """``~/.cosmergon``, made and kept 0700: what lies in it is the player's alone (cos20 #492).
+
+    An older SDK made the folder with the default mode; it is tightened on the next write.
+    """
+    folder = CONFIG_PATH.parent
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    folder.chmod(0o700)
+    return folder
+
+
+def _write_private(path: Path, data: bytes) -> None:
+    """Write ``path`` atomically and 0600 from its first byte: a fresh temp file, then rename.
+
+    The temp file has a random name and mode 0600 from its creation (``mkstemp``). Neither a
+    fixed name someone else prepared nor the terminal's umask decides who can read it in the
+    moment before the rename (cos20 #492, K2).
+    """
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as out:
+            out.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
 def _write_raw(data: dict) -> None:
-    """Atomic write: temp file -> chmod 600 -> rename."""
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = CONFIG_PATH.with_suffix(".toml.tmp")
-    tmp.write_bytes(tomli_w.dumps(data).encode())
-    tmp.chmod(0o600)
-    tmp.replace(CONFIG_PATH)
+    """Atomic write of config.toml, 0600 from the first byte, in a 0700 folder."""
+    _private_dir()
+    _write_private(CONFIG_PATH, tomli_w.dumps(data).encode())
 
 
 def _migrate_if_needed(data: dict) -> dict:
@@ -465,9 +494,7 @@ def maybe_migrate(
         bak = CONFIG_PATH.with_suffix(".toml.bak")
         if not bak.exists():
             try:
-                import shutil
-
-                shutil.copy2(CONFIG_PATH, bak)
+                _write_private(bak, CONFIG_PATH.read_bytes())  # the key is in it: 0600 too
                 logger.info("Config backup created: %s", bak)
             except Exception:
                 logger.debug("maybe_migrate: failed, falling back (non-fatal)", exc_info=True)

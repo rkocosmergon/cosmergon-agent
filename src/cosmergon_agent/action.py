@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cache
 from typing import Any
 
 
@@ -35,7 +36,17 @@ def printable(text: object, keep: str = "") -> str:
     neither Rich nor Textual removes them. Foreign text (other players, the server, a model)
     therefore loses all of C0, DEL and C1 — the range Shikigon's bar drops (cos20 #492).
     """
-    return "".join(z for z in str(text) if z in keep or not (z < " " or "\x7f" <= z <= "\x9f"))
+    return str(text).translate(_control_table(keep))
+
+
+@cache
+def _control_table(keep: str) -> dict[int, None]:
+    """``str.translate`` table that deletes C0, DEL and C1 but the characters in ``keep``.
+
+    A table, not a loop over characters: every string of a state goes through ``printable``
+    since the state is read typed (cos20 #492), and a long one must not hold the loop.
+    """
+    return {z: None for z in (*range(0x20), *range(0x7F, 0xA0)) if chr(z) not in keep}
 
 
 # Mission kinds and outcomes in a player's words (cos20 #468, #475). The terminal and

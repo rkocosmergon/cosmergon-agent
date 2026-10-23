@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
+import math
 import os
 import re
 import shlex
@@ -34,6 +36,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
+from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
     from cosmergon_agent.action import ActionResult
@@ -432,7 +435,11 @@ def _stimme_name(stimme: dict) -> str:
 # Who answers under [M]: a command the program that starts the dashboard may name (Shikigon's
 # starter names its brain). The dashboard itself connects to no model.
 _ADVISOR_ENV = "COSMERGON_ADVISOR_CMD"
-_ADVISOR_PATIENCE_S = 120.0
+# Longer than the advisor's own wait: Shikigon's brain gives an agent up to 240 s and then ends
+# it itself. A kill at 120 s ended the brain instead, and the agent ran on (cos20 #492).
+_ADVISOR_PATIENCE_S = 300.0
+# After SIGTERM the advisor has this long to end what it started; then SIGKILL.
+_ADVISOR_GRACE_S = 5.0
 _SECRETS_IN_ENVIRONMENT = ("COSMERGON_API_KEY", "COSMERGON_PLAYER_TOKEN")
 _ADVISOR_KEPT_FROM_CHILD = (*_SECRETS_IN_ENVIRONMENT, _ADVISOR_ENV)
 # Where the advisor keeps the talk, if the starter names the file: JSON lines, one per question,
@@ -517,10 +524,44 @@ async def _ask_advisor(argv: list[str], question: str) -> tuple[str, str, bool]:
     try:
         ausgabe, _ = await asyncio.wait_for(prozess.communicate(zeile), _ADVISOR_PATIENCE_S)
     except asyncio.TimeoutError:
-        prozess.kill()
-        await prozess.wait()
+        await _end_advisor(prozess)
         return "", f"No answer within {_ADVISOR_PATIENCE_S:.0f} s.", False
+    except asyncio.CancelledError:
+        await _end_advisor(prozess)  # the dashboard closes while the advisor still thinks
+        raise
     return _advisor_answer(ausgabe.decode("utf-8", "replace"))
+
+
+async def _end_advisor(prozess: asyncio.subprocess.Process) -> None:
+    """End the advisor: SIGTERM first, so it can end what it started; SIGKILL after a grace.
+
+    SIGKILL reaches no signal handler. An advisor that runs a coding agent of its own could not
+    end it, and the agent outlived both (cos20 #492, K14).
+    """
+    with contextlib.suppress(ProcessLookupError):
+        prozess.terminate()
+    try:
+        await asyncio.wait_for(prozess.wait(), _ADVISOR_GRACE_S)
+    except asyncio.TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            prozess.kill()
+        await prozess.wait()
+
+
+def _open_https(url: object) -> bool:
+    """Open ``url`` in the browser — an https address only; the one way to the browser.
+
+    ``webbrowser.open`` hands any scheme to the desktop (``file:``, another program's own
+    handler), and a checkout address is the server's word. Anything but ``https://host`` stays
+    closed, and so does an address with control characters in it (cos20 #492).
+    """
+    if not isinstance(url, str) or printable(url) != url:
+        return False
+    teile = urlsplit(url)
+    if teile.scheme != "https" or not teile.netloc:
+        return False
+    webbrowser.open(url)
+    return True
 
 
 def _energy_ref(energy: float, max_e: float = 5000.0) -> str:
@@ -3370,7 +3411,7 @@ class CosmergonDashboard(App):
         if url is None:
             self._set_feedback(_c(self._theme.data, "✓ You are on the top tier (Enterprise)"))
             return
-        webbrowser.open(url)
+        _open_https(url)
         self._add_log(_c(self._theme.pos, f"✓ Upgrade page opened ({tier} → next tier)"))
         self._set_feedback(_c(self._theme.pos, "✓ Browser opened — complete upgrade there"))
 
@@ -3422,7 +3463,11 @@ class CosmergonDashboard(App):
         body = _json_or_empty(resp)
         url = body.get("checkout_url") if resp.status_code == 200 else None
         if url:
-            webbrowser.open(url)
+            if not _open_https(url):
+                self._set_feedback(
+                    _c(warn, "✗ Keep this agent: the checkout address is not https"), duration=10.0
+                )
+                return
             self._add_log(_c(self._theme.pos, f"✓ Key persistence checkout opened ({interval})"))
             self._set_feedback(
                 _c(self._theme.pos, "✓ Checkout opened in your browser — pay there to keep it")
@@ -3446,8 +3491,7 @@ class CosmergonDashboard(App):
                 )
             if resp.status_code == 200:
                 checkout_url = resp.json().get("checkout_url", "")
-                if checkout_url:
-                    webbrowser.open(checkout_url)
+                if _open_https(checkout_url):
                     self._set_feedback(
                         _c(self._theme.pos, "✓ Stripe checkout opened — complete payment there")
                     )
@@ -3457,7 +3501,7 @@ class CosmergonDashboard(App):
             logger.debug("_upgrade_anonymous_via_api: failed, falling back", exc_info=True)
 
         # Fallback: open website (Panel: Engineering — robust degradation)
-        webbrowser.open("https://cosmergon.com/solo.html")
+        _open_https("https://cosmergon.com/solo.html")
         self._set_feedback(_c(self._theme.pos, "✓ Upgrade page opened — complete upgrade there"))
 
     @work
@@ -5071,7 +5115,7 @@ def _rang_zeile(ranking: Ranking, breite: int | None = None) -> str:
         passend = [f for f in formen if breite is None or len(f) <= breite]
         return passend[0] if passend else formen[-1]
     score = f"  Score: {ranking.player_score:,.0f}" if ranking.player_score > 0 else ""
-    return f"T{ranking.player_tier} {ranking.tier_name}{score}"
+    return f"T{ranking.player_tier} {_roh(ranking.tier_name)}{score}"
 
 
 def _kurz(wert: float) -> str:
@@ -5083,15 +5127,36 @@ def _kurz(wert: float) -> str:
     return f"{wert:,.0f}"
 
 
+def _score(wert: object) -> float:
+    """A score from the server's tournament block as a number; anything else counts 0.
+
+    The block stays a dict in the state (no typed reading), so the number is checked here: a
+    string in it ended the top line with ``ValueError`` (cos20 #492).
+    """
+    if not isinstance(wert, int | float | str):
+        return 0.0
+    try:
+        zahl = float(wert)
+    except (ValueError, OverflowError):
+        return 0.0
+    return zahl if math.isfinite(zahl) else 0.0
+
+
+def _scores(brief: dict) -> tuple[dict, dict]:
+    """``my_score`` and ``leader`` of the tournament block, each an object or empty."""
+    ich, beste = brief.get("my_score"), brief.get("leader")
+    return (ich if isinstance(ich, dict) else {}), (beste if isinstance(beste, dict) else {})
+
+
 def _turnier_stand(brief: dict) -> str:
     """Your score against the best value of each category, as one part of the top line.
 
     "best", not "leader": the server sends the highest value per category, and each may
     belong to a different agent.
     """
-    ich, beste = brief.get("my_score") or {}, brief.get("leader") or {}
+    ich, beste = _scores(brief)
     paare = [
-        f"{name} {_kurz(float(ich.get(kat) or 0))}/{_kurz(float(beste.get(kat) or 0))}"
+        f"{name} {_kurz(_score(ich.get(kat)))}/{_kurz(_score(beste.get(kat)))}"
         for name, kat in _TURNIER_WERTUNG
     ]
     return "you/best: " + " · ".join(paare)
@@ -5147,12 +5212,12 @@ def _turnier_bild(brief: dict) -> str:
 
     Empty before the tournament runs — the server sends scores and Marauders only then.
     """
-    ich, beste = brief.get("my_score") or {}, brief.get("leader") or {}
+    ich, beste = _scores(brief)
     zeilen: list[str] = []
     if ich or beste:
         zeilen.append(f"{'':<14}{'you':>10}{'best in the arena':>20}")
         zeilen += [
-            f"{name:<14}{float(ich.get(kat) or 0):>10,.0f}{float(beste.get(kat) or 0):>20,.0f}"
+            f"{name:<14}{_score(ich.get(kat)):>10,.0f}{_score(beste.get(kat)):>20,.0f}"
             for name, kat in _TURNIER_WERTUNG
         ]
     koerper = [k for k in brief.get("bodies") or [] if isinstance(k, dict)]
