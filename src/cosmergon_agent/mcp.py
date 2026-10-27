@@ -487,7 +487,8 @@ async def _call_tool(name: str, arguments: dict) -> dict:
     if name == "cosmergon_act":
         action = arguments.get("action", "")
         params = arguments.get("params", {})
-        body = {"action": action, **params}
+        # The named action wins over an "action" key in params (cos20 #587).
+        body = {"action": action, **{k: v for k, v in params.items() if k != "action"}}
         result = await _api_post(
             f"/agents/{agent_id}/action",
             body,

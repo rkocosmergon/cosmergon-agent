@@ -165,10 +165,14 @@ def body_for(action: str, params: dict[str, Any]) -> dict[str, Any]:
     ``params`` (``start_mission``: ``params.mission_type``, ``message``: ``params.to``). A model
     writing ``{"mission_type": …, "params": {…}}`` got 422 „mission_type required“ (device run,
     18.10.2026). So the fields go both ways; written already as ``{"params": {…}}``, as is.
+    An ``action`` key among the fields is dropped: the named move is sent. Until 0.27.34 it
+    overrode it, and ``--json '{"action": "pause"}'`` passed the operator-switch refusal
+    (cos20 #587).
     """
-    if set(params) == {"params"}:
-        return {"action": action, **params}
-    return {"action": action, **params, "params": params}
+    fields = {k: v for k, v in params.items() if k != "action"}
+    if set(fields) == {"params"}:
+        return {"action": action, **fields}
+    return {"action": action, **fields, "params": fields}
 
 
 def act(name: str, action: str, params: dict[str, Any], base_url: str) -> None:

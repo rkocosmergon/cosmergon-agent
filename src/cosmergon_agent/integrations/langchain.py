@@ -167,7 +167,8 @@ def _make_contracts_tool(tool_decorator: object, client: httpx.Client, agent_id:
         action = action_map.get(operation)
         if not action:
             return json.dumps({"error": f"unknown operation '{operation}'"})
-        body = {"action": action, **p}
+        # As in the act tool, the mapped action wins over an "action" key in params (cos20 #587).
+        body = {"action": action, **{k: v for k, v in p.items() if k != "action"}}
         resp = client.post(f"/api/v1/agents/{agent_id}/action", json=body, headers=idem)
         return json.dumps(resp.json(), indent=2)
 
