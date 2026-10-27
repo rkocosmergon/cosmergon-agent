@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+## [0.27.35] — 2026-10-27
+
+### Fixed
+
+- **`listen()` checks the body length before it reads** (cos20 #587). A `Content-Length` of
+  `-1` read until the connection closed, before the signature check, and a value that is no
+  number raised. Now the webhook receiver answers 400 or 413, and a socket timeout keeps a
+  hanging connection from holding the single-threaded server.
+- **The MCP server survives a failing request.** Any exception of one request (an HTML 502
+  while the backend restarts, `params` as text) ended the server. It is now a JSON-RPC error,
+  and the next request is served.
+- **Keys are saved where they are loaded after `maybe_migrate`.** `save_credentials` wrote
+  them flat while only the `agents` table is read: `activate` had no effect, and after an
+  expired free key every start created a new agent.
+- **A `config.toml` that is no TOML is kept as `config.toml.broken`** before a new one is
+  written, instead of being overwritten together with the master key.
+- **The named action wins over an `action` key in the parameters** in `cosmergon-play act`,
+  the MCP `act` tool and the LangChain contracts tool. `{"action": "pause"}` among the
+  parameters replaced the move.
+- **LangChain integration: credentials in the documented order.** Both parameters come before
+  both environment variables; `COSMERGON_API_KEY` in the environment overrode an explicit
+  `player_token`.
+- **Examples open the agent** (`autonomous_agent`, `reactive_agent`, `tournament_ninja`);
+  `act()` on an agent that was never opened raised "Agent not connected".
+- **Dashboard:** the pause state is read from the server on connect (a paused agent showed
+  ACTIVE after a restart and could not be resumed); revoking the active agent's keys and the
+  reconnect after a replaced session keep the running agent and save the fresh keys; the
+  tier 3 energy threshold is the server's. On the first start, the key input opens with K and
+  takes Enter.
+- **`post_reflection` raises `CosmergonError` on a 422**, as documented; it returned `None`.
+
 ## [0.27.34] — 2026-10-23
 
 ### Fixed
