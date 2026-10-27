@@ -217,13 +217,18 @@ def cosmergon_tools(
             "Install it with: pip install langchain-core"
         ) from None
 
-    # Credential resolution — 4 levels, api_key always wins
-    resolved_key = api_key or os.environ.get("COSMERGON_API_KEY", "")
+    # Credential resolution — 4 levels as documented above: both parameters before both
+    # env vars. A COSMERGON_API_KEY in the environment must not override an explicit
+    # player_token (it did, cos20 #587).
+    resolved_key = api_key or ""
+    token = player_token or ""
+    if not resolved_key and not token:
+        resolved_key = os.environ.get("COSMERGON_API_KEY", "")
+        if not resolved_key:
+            token = os.environ.get("COSMERGON_PLAYER_TOKEN", "")
     resolved_agent_id: str | None = None
 
     if not resolved_key:
-        # Try player_token (param or env)
-        token = player_token or os.environ.get("COSMERGON_PLAYER_TOKEN", "")
         name = agent_name or os.environ.get("COSMERGON_AGENT_NAME", "")
         if token:
             from cosmergon_agent._token import TokenResolutionError, resolve_token_sync

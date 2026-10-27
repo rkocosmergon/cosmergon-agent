@@ -14,7 +14,7 @@ Requires the server flag USE_DIRECT_CONTROL (else take_control returns 404) and 
 running tournament your agent is registered in.
 
 Setup:
-    export COSMERGON_API_KEY=csg_...
+    export COSMERGON_API_KEY=AGENT-...:...
     export COSMERGON_CUBE_ID=<arena cube uuid>     # your tournament's cube
     export COSMERGON_TARGET_ID=<rival player uuid> # who to duel (optional)
     python examples/tournament_ninja.py
@@ -64,7 +64,8 @@ async def main() -> None:
     if not cube_id:
         raise SystemExit("set COSMERGON_CUBE_ID to your tournament's arena cube")
     agent = CosmergonAgent(api_key=os.environ.get("COSMERGON_API_KEY"))
-    await duel(agent, cube_id, os.environ.get("COSMERGON_TARGET_ID"))
+    async with agent:  # opens the HTTP client; take_control and every shot need it
+        await duel(agent, cube_id, os.environ.get("COSMERGON_TARGET_ID"))
 
 
 if __name__ == "__main__":

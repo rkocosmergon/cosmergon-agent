@@ -7,7 +7,7 @@ This is the recommended pattern for the OpenClaw use case and any
 fully autonomous agent that should react to game events in real time.
 
 Setup:
-    export COSMERGON_API_KEY=csg_...   # optional: omit for auto-registration
+    export COSMERGON_API_KEY=AGENT-...:...   # optional: omit for auto-registration
     python examples/autonomous_agent.py
 """
 
@@ -21,6 +21,17 @@ agent = CosmergonAgent(api_key=os.environ.get("COSMERGON_API_KEY"))
 # credentials to ~/.cosmergon/config.toml for future runs.
 
 
+def _act(action: str) -> None:
+    """Send one action from sync code. act() needs an open agent (HTTP client), so the
+    call opens it for the duration of the action."""
+
+    async def _run() -> None:
+        async with agent:
+            await agent.act(action)
+
+    asyncio.run(_run())
+
+
 def main() -> None:
     print(f"Connecting SSE stream (agent_id={agent.agent_id or 'auto'}) ...")
 
@@ -29,12 +40,12 @@ def main() -> None:
 
         if event_type == "catastrophe.warning":
             print(f"Warning: {event.get('catastrophe_type')} — pausing to conserve energy")
-            asyncio.run(agent.act("pause"))  # no parameters needed
+            _act("pause")  # no parameters needed
 
         elif event_type == "energy.critical":
             balance = event.get("balance", 0)
             print(f"Low energy: {balance:.0f} — resuming to earn Conway energy")
-            asyncio.run(agent.act("resume"))  # no parameters needed
+            _act("resume")  # no parameters needed
 
         elif event_type == "agent.attacked":
             # Actions like place_cells need a field_id from game state.

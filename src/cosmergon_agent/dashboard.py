@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
 try:
     from textual import work
+    from textual.actions import SkipAction
     from textual.app import App, ComposeResult
     from textual.binding import Binding
     from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -616,7 +617,7 @@ def _cost_str(cost: float) -> str:
 _PLAYER_TIER_REQS: dict[int, dict[str, Any]] = {
     1: {"energy": 10_000.0, "fields_alt": 3},  # T0→T1: energy OR 3 fields
     2: {"energy": 100_000.0, "fields": 5, "entity_tier": 2},
-    3: {"energy": 1_000_000.0, "fields": 10, "entity_tier": 3},
+    3: {"energy": 500_000.0, "fields": 10, "entity_tier": 3},  # server: 500k (cos20 #587)
     4: {"energy": 5_000_000.0, "fields": 20, "entity_tier": 4},
     5: {"energy": 20_000_000.0, "fields": 50, "entity_tier": 5},
 }
@@ -2196,6 +2197,10 @@ class CosmergonDashboard(App):
             await self._follow_arena_chat(state)
             self._follow_talk(state)
 
+        @self.agent.on_connect
+        async def _connect() -> None:
+            await self._read_pause_state()
+
         @self.agent.on_error
         async def _error(result: Any) -> None:
             zeile = f"✗ couldn't {action_word(result.action)}: {result.error_message}"
@@ -2243,33 +2248,40 @@ class CosmergonDashboard(App):
             self._set_feedback("No Master Key found. Use --token to connect.")
             return False
 
-        from cosmergon_agent._token import TokenResolutionError, resolve_token_sync
-        from cosmergon_agent.config import save_all_agents_and_token
+        from cosmergon_agent._token import TokenResolutionError
 
+        state = self.agent.state
         try:
-            result = resolve_token_sync(token, base_url=self.agent.base_url)
+            name = self._reconnect_with_token(token, (state.agent_name if state else None) or None)
         except TokenResolutionError as exc:
             self._set_feedback(f"Reconnect failed: {_roh(exc)}")
             return False
+        self._add_log(_c(self._theme.pos, f"Reconnected to {_roh(name)}"))
 
+        # Restart agent (new worker — exclusive=True ensures old one is done)
+        self._run_agent()
+        return True
+
+    def _reconnect_with_token(self, token: str, agent_name: str | None) -> str:
+        """Fresh key for the agent ``agent_name`` via the Master Key: save all keys and point
+        the agent at it (resets ``_session_replaced``). Returns the agent's name.
+
+        Without the name the server picks the oldest agent, and a reconnect in a running
+        session switched to it (cos20 #587). Raises ``TokenResolutionError``.
+        """
+        from cosmergon_agent._token import resolve_token_sync
+        from cosmergon_agent.config import save_all_agents_and_token
+
+        result = resolve_token_sync(token, base_url=self.agent.base_url, agent_name=agent_name)
         selected = result.selected
-        raw_key = selected.api_key.raw
-
-        # Save updated keys (single write)
         save_all_agents_and_token(
             token,
             [(a.agent_name, a.api_key.raw, a.agent_id) for a in result.agents],
             selected.agent_name,
             base_url=self.agent.base_url,
         )
-
-        # Reconnect agent — resets _session_replaced, updates credentials
-        self.agent.reconnect(raw_key, selected.agent_id)
-        self._add_log(_c(self._theme.pos, f"Reconnected to {_roh(selected.agent_name)}"))
-
-        # Restart agent (new worker — exclusive=True ensures old one is done)
-        self._run_agent()
-        return True
+        self.agent.reconnect(selected.api_key.raw, selected.agent_id)
+        return selected.agent_name
 
     @work
     async def _show_identity_setup(self) -> None:
@@ -3772,6 +3784,22 @@ class CosmergonDashboard(App):
         gesagt = f"{icon} {label}" if r.success else f"✗ {_roh(r.error_message)}"
         self._set_feedback(_c(color, gesagt))
 
+    async def _read_pause_state(self) -> None:
+        """Take the pause state from the server, ``GET /api/v1/agents/{id}`` → ``is_active``.
+
+        The dashboard knew it only from its own [X]: after a restart a paused agent showed
+        ACTIVE, [X] offered Pause and the server refused it, resuming was out of reach
+        (cos20 #587). Without an answer the state stays as it is.
+        """
+        try:
+            resp = await self.agent._request("GET", f"/api/v1/agents/{self.agent.agent_id}")
+            is_active = resp.json().get("is_active")
+        except Exception:
+            logger.debug("_read_pause_state: no agent from server", exc_info=True)
+            return
+        if isinstance(is_active, bool):
+            self._paused = not is_active
+
     async def _game_actions(self) -> dict:
         """The server's rules per action, ``GET /api/v1/game/info`` → ``actions`` (#484).
 
@@ -3934,16 +3962,12 @@ class CosmergonDashboard(App):
             count = resp.json().get("revoked_count", 0)
             self._set_feedback(f"{_roh(count)} key(s) revoked for {_roh(name)}")
             if is_active and count > 0:
-                # Reconnect with a fresh key via token (Panel P4-4)
-                from cosmergon_agent._token import resolve_token_sync
-
+                # Reconnect the same agent with a fresh key via token (Panel P4-4)
                 try:
-                    result = resolve_token_sync(token, base_url=self.agent.base_url)
-                    selected = result.selected
-                    if selected.api_key:
-                        self.agent.reconnect(selected.api_key.raw, selected.agent_id or "")
-                        self._set_feedback(f"Keys revoked + reconnected as {_roh(name)}")
+                    self._reconnect_with_token(token, name)
+                    self._set_feedback(f"Keys revoked + reconnected as {_roh(name)}")
                 except Exception:
+                    logger.debug("_revoke_agent_key: reconnect failed", exc_info=True)
                     self._set_feedback("Keys revoked. Restart dashboard to reconnect.")
         elif resp.status_code == 404:
             self._set_feedback("Agent not found.")
@@ -5694,7 +5718,7 @@ class FirstStartApp(App):
     BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
         Binding("enter", "new_agent", show=False, priority=True),
         Binding("k", "enter_key", show=False, priority=True),
-        Binding("q", "quit", show=False, priority=True),
+        Binding("q", "leave", show=False, priority=True),
         Binding("escape", "quit", show=False, priority=True),
     ]
 
@@ -5713,29 +5737,41 @@ class FirstStartApp(App):
                 "[dim]Your key is always visible in the dashboard. Press \\[K].[/dim]",
                 id="fs-options",
             )
-            yield Input(placeholder="Paste key (AGENT-... or CSMR-...)", id="fs-input")
+            # Disabled while hidden: it is the only focusable widget, a focused Input takes
+            # printable keys ahead of the bindings (Textual `check_consume_key`), and K went
+            # into the hidden field instead of opening it.
+            yield Input(
+                placeholder="Paste key (AGENT-... or CSMR-...)", id="fs-input", disabled=True
+            )
             yield Label("", id="fs-error")
             yield Label("[dim]Enter new · K key · Q or Esc quit[/dim]", id="fs-footer")
 
+    # While the input is open, Enter, K and Q belong to it. The open input takes the
+    # printable keys itself; Enter is no printable key and reaches the priority binding
+    # first, so the actions raise SkipAction and the key goes on to the input. Returning
+    # instead swallowed it: Enter never submitted the key (cos20 #587).
+
+    def _typing(self) -> bool:
+        return bool(self.query_one("#fs-input", Input).display)
+
     def action_new_agent(self) -> None:
-        inp = self.query_one("#fs-input", Input)
-        if inp.display:
-            return  # input is open — Enter submits the input, not this action
+        if self._typing():
+            raise SkipAction()
         self.result_key = ""
         self.exit()
 
+    def action_leave(self) -> None:
+        if self._typing():
+            raise SkipAction()
+        self.exit()
+
     def action_enter_key(self) -> None:
+        if self._typing():
+            raise SkipAction()
         inp = self.query_one("#fs-input", Input)
-        if inp.display:
-            return  # already open
+        inp.disabled = False
         inp.display = True
         inp.focus()
-        # Unbind K so typing works — Textual 0.46+ renamed .keys to .key_to_bindings
-        bindings_store = getattr(
-            self._bindings, "key_to_bindings", getattr(self._bindings, "keys", None)
-        )
-        if bindings_store is not None:
-            bindings_store.pop("k", None)
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         key = event.value.strip()

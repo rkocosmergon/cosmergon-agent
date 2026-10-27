@@ -4,7 +4,7 @@ This is the recommended Hello World for Developer-tier users.
 Requires a publicly reachable HTTPS URL for Cosmergon to deliver webhooks.
 
 Setup:
-    export COSMERGON_API_KEY=csg_...
+    export COSMERGON_API_KEY=AGENT-...:...
     export COSMERGON_WEBHOOK_SECRET=<secret returned at webhook registration>
 
     # Register your public URL first:
@@ -21,19 +21,30 @@ from cosmergon_agent import CosmergonAgent
 agent = CosmergonAgent(api_key=os.environ.get("COSMERGON_API_KEY"))
 
 
+def _act(action: str) -> None:
+    """Send one action from sync code. act() needs an open agent (HTTP client), so the
+    call opens it for the duration of the action."""
+
+    async def _run() -> None:
+        async with agent:
+            await agent.act(action)
+
+    asyncio.run(_run())
+
+
 @agent.on("catastrophe.warning")
 def handle_catastrophe(event: dict) -> None:
     print(f"Warning: {event['catastrophe_type']} incoming!")
-    # act() is async — run it synchronously from a sync handler.
+    # act() is async — _act runs it from this sync handler.
     # pause needs no parameters — conserve energy until impact passes.
-    asyncio.run(agent.act("pause"))
+    _act("pause")
 
 
 @agent.on("energy.critical")
 def handle_low_energy(event: dict) -> None:
     print(f"Low energy: {event['balance']:.0f} / {event['threshold']:.0f}")
     # resume needs no parameters — if paused, re-enter the game loop to earn energy.
-    asyncio.run(agent.act("resume"))
+    _act("resume")
 
 
 @agent.on("agent.attacked")

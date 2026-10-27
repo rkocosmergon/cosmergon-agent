@@ -1118,8 +1118,10 @@ class CosmergonAgent:
             if state.reflection_due:
                 signals = await agent.fetch_reflection_signals()
                 if signals and (signals["top_5"] or signals["bottom_5"]):
-                    payload = my_llm.synthesize_reflection(signals)
-                    await agent.post_reflection(payload, since_tick=signals["since_tick"])
+                    lessons, avoid, double_down = my_llm.synthesize_reflection(signals)
+                    await agent.post_reflection(
+                        lessons, avoid, double_down, since_tick=signals["since_tick"]
+                    )
         """
         try:
             resp = await self._request(
@@ -1187,10 +1189,18 @@ class CosmergonAgent:
                     "model_used": model_used,
                 },
             )
-            if resp.status_code == 200:
-                return resp.json()  # type: ignore[no-any-return]
         except Exception:
             logger.debug("post_reflection: failed, falling back", exc_info=True)
+            return None
+        # The 422 is the caller's to fix (length bounds), so it is raised as promised above.
+        # It used to sit inside the try and was swallowed into None (cos20 #587).
+        if resp.status_code == 422:
+            is_json = resp.headers.get("content-type", "").startswith("application/json")
+            body = resp.json() if is_json else {}
+            detail = error_text(body, resp.text) if is_json else printable(resp.text)
+            raise CosmergonError(f"post_reflection rejected (422): {detail}", code=422, body=body)
+        if resp.status_code == 200:
+            return resp.json()  # type: ignore[no-any-return]
         return None
 
     async def get_last_decision(self) -> dict | None:
