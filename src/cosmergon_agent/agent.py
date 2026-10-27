@@ -45,6 +45,10 @@ logger = logging.getLogger(__name__)
 
 # listen() binds all interfaces on purpose: a webhook receiver must be reachable from outside.
 _ALL_INTERFACES = "0.0.0.0"  # nosec B104
+# listen(): largest body read, and how long one connection may stall the single-threaded
+# server before it is dropped (cos20 #587).
+_WEBHOOK_MAX_BODY = 1024 * 1024
+_WEBHOOK_READ_TIMEOUT = 10
 
 _DEFAULT_MAX_RETRIES = 3
 _INITIAL_BACKOFF = 0.5
@@ -86,6 +90,24 @@ def _retry_after(value: str | None) -> float:
     if not math.isfinite(seconds):
         return 1.0
     return min(max(seconds, 0.0), _MAX_BACKOFF)
+
+
+def _webhook_body_length(value: str | None) -> tuple[int, int]:
+    """Body length from a ``Content-Length`` header, and the error status when unusable (else 0).
+
+    ``listen()`` reads exactly this many bytes, before the signature check. Until 0.27.34 the
+    value went through ``min(int(value), 1 MiB)``: ``-1`` read until the sender closed, with no
+    cap at all, and a non-number ended the request with a ``ValueError`` (cos20 #587).
+    """
+    try:
+        length = int(value or 0)
+    except ValueError:
+        return 0, 400
+    if length < 0:
+        return 0, 400
+    if length > _WEBHOOK_MAX_BODY:
+        return 0, 413
+    return length, 0
 
 
 class CosmergonAgent:
@@ -1338,15 +1360,20 @@ class CosmergonAgent:
         agent = self  # closure for the handler class below
 
         class _WebhookHandler(BaseHTTPRequestHandler):
+            timeout = _WEBHOOK_READ_TIMEOUT
+
             def do_POST(self) -> None:
                 if self.path != path:
                     self.send_response(404)
                     self.end_headers()
                     return
 
-                # Read body — cap at 1 MB to prevent memory exhaustion
-                content_length = min(int(self.headers.get("Content-Length", 0)), 1024 * 1024)
-                body = self.rfile.read(content_length)
+                length, status = _webhook_body_length(self.headers.get("Content-Length"))
+                if status:
+                    self.send_response(status)
+                    self.end_headers()
+                    return
+                body = self.rfile.read(length)
 
                 if secret:
                     sig = self.headers.get("X-Cosmergon-Signature", "")

@@ -28,6 +28,7 @@ import uuid
 import httpx
 
 from cosmergon_agent import __version__, _http
+from cosmergon_agent.action import printable
 from cosmergon_agent.config import (
     load_credentials,
     load_token,
@@ -524,9 +525,32 @@ async def _main() -> None:
             _error(f"Invalid JSON: {line[:100]}")
             continue
 
-        response = await _handle_request(request)
+        response = await _answer(request)
         if response is not None:
             _write(response)
+
+
+async def _answer(request: object) -> dict | None:
+    """Answer one request; never raises, because this loop is the whole server.
+
+    Until 0.27.34 any exception of one tool call ended the MCP server: a non-JSON reply while
+    the backend restarts (an HTML 502), or ``params`` sent as text by the model (cos20 #587).
+    It now returns as a JSON-RPC error, and the next request is served.
+    """
+    if not isinstance(request, dict):
+        return _rpc_error(None, -32600, "Invalid Request: expected a JSON object")
+    try:
+        return await _handle_request(request)
+    except Exception as exc:
+        detail = printable(f"{type(exc).__name__}: {exc}")[:200]
+        _error(f"Request failed: {detail}")
+        if request.get("id") is None:
+            return None  # a notification gets no answer, not even an error
+        return _rpc_error(request.get("id"), -32603, f"Internal error: {detail}")
+
+
+def _rpc_error(req_id: object, code: int, message: str) -> dict:
+    return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
 
 
 def run() -> None:

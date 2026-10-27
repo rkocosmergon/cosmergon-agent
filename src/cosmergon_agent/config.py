@@ -149,7 +149,25 @@ def _write_private(path: Path, data: bytes) -> None:
 def _write_raw(data: dict) -> None:
     """Atomic write of config.toml, 0600 from the first byte, in a 0700 folder."""
     _private_dir()
+    _set_aside_unreadable()
     _write_private(CONFIG_PATH, tomli_w.dumps(data).encode())
+
+
+def _set_aside_unreadable() -> None:
+    """Keep a config.toml that is no valid TOML as ``config.toml.broken`` before it is replaced.
+
+    ``_read_raw()`` reads such a file as ``{}``. Until 0.27.34 the next save then wrote a file
+    holding only its own entry: the Master Key and every other agent key were gone without a
+    word, after one typo in a hand edit (cos20 #587).
+    """
+    try:
+        tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError):
+        broken = CONFIG_PATH.with_suffix(".toml.broken")
+        os.replace(CONFIG_PATH, broken)
+        logger.warning("%s is no valid TOML; kept it as %s, writing a new one", CONFIG_PATH, broken)
 
 
 def _migrate_if_needed(data: dict) -> dict:
@@ -235,7 +253,14 @@ def save_credentials(
     activated: bool = False,
     instance: str | None = None,
 ) -> None:
-    """Persist credentials for an instance.  Migrates old format on first write."""
+    """Persist credentials for an instance.  Migrates old format on first write.
+
+    Once the instance holds an ``agents`` table (``maybe_migrate`` makes one on the first
+    run), the key goes there as the active agent, named by its id: ``load_credentials``
+    reads only the table then. Until 0.27.34 the key was written flat
+    and never loaded again, so ``activate`` did nothing and every start after an expired
+    free key registered yet another agent (cos20 #587).
+    """
     data = _load_config()
 
     name = instance or data.get("default_instance") or _instance_name(base_url)
@@ -245,11 +270,14 @@ def save_credentials(
 
     inst: dict = data["instances"].setdefault(name, {})
     inst["base_url"] = base_url
-    inst["api_key"] = api_key
-    if agent_id:
-        inst["agent_id"] = agent_id
-    elif "agent_id" in inst:
-        del inst["agent_id"]
+    if inst.get("agents"):
+        _put_active_agent(inst, api_key, agent_id)
+    else:
+        inst["api_key"] = api_key
+        if agent_id:
+            inst["agent_id"] = agent_id
+        elif "agent_id" in inst:
+            del inst["agent_id"]
     if activated:
         inst["activated"] = True
     elif "activated" in inst:
@@ -261,6 +289,15 @@ def save_credentials(
         _write_raw(data)
     except Exception as exc:
         logger.warning("Failed to save credentials to %s: %s", CONFIG_PATH, exc)
+
+
+def _put_active_agent(inst: dict, api_key: str, agent_id: str | None) -> None:
+    """Store a key in the instance's ``agents`` table under its id, as the active agent."""
+    entry = agent_id or "agent"
+    inst["agents"][entry] = (
+        {"api_key": api_key, "agent_id": agent_id} if agent_id else {"api_key": api_key}
+    )
+    inst["active_agent"] = entry
 
 
 # ---------------------------------------------------------------------------
