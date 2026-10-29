@@ -12,6 +12,7 @@ import os
 import random
 import time
 import uuid
+import warnings
 from collections import deque
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
@@ -832,19 +833,44 @@ class CosmergonAgent:
         resp = await self._request("GET", "/api/v1/game-fields/", params=params)
         return resp.json()  # type: ignore[no-any-return]
 
-    async def claim_field(self, field_id: str, deadline_ticks: int = 100) -> dict:
-        """Start a capture-claim on a vulnerable field.
+    async def claim_field(
+        self,
+        field_id: str,
+        deadline_ticks: int | None = None,
+        *,
+        x: float | None = None,
+        y: float | None = None,
+    ) -> dict:
+        """Start a capture-claim on a vulnerable field (the ``claim_field`` action).
 
-        Field must satisfy: active_cell_count < tier_threshold * 0.10
-        OR hole_count > 50. Counter expires after deadline_ticks unless
-        a defense action resets it (Konzept-Field-Eroberung).
+        Your body must stand on the field. The server sets the deadline. ``x``/``y`` pick the
+        zone of a shared field; without them the server picks one.
+
+        Args:
+            field_id: The field to claim.
+            deadline_ticks: Deprecated and ignored; the server never accepted it. Removed in 1.0.
+            x: Optional position on the field (zone choice).
+            y: Optional position on the field (zone choice).
+
+        Returns:
+            The server's answer: on success ``{"success": True, "result": {"claim_id",
+            "field_id", "expires_tick"}, ...}``, on a refusal its error body.
         """
-        resp = await self._request(
-            "POST",
-            f"/api/v1/game-fields/{field_id}/claim",
-            json={"deadline_ticks": deadline_ticks},
-        )
-        return resp.json()  # type: ignore[no-any-return]
+        # cos20 #583: until 0.27.35 this posted {"deadline_ticks"} to the claim route, which
+        # requires x/y, so every call ended in 422. The action is the path play_turn uses.
+        if deadline_ticks is not None:
+            warnings.warn(
+                "claim_field(deadline_ticks=...) is ignored: the server sets the deadline",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        # x/y are no fields of the action request; the server reads them from params only.
+        position = {k: v for k, v in (("x", x), ("y", y)) if v is not None}
+        if position:
+            result = await self.act("claim_field", field_id=field_id, params=position)
+        else:
+            result = await self.act("claim_field", field_id=field_id)
+        return result.data
 
     async def heal_holes(self, field_id: str) -> dict:
         """Lump-sum heal of all holes on own field. Cost scales by hole_count^1.5."""

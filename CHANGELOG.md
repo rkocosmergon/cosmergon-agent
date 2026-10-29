@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`claim_field()` reaches the server** (cos20 #583). It posted `{"deadline_ticks": …}` to the
+  claim route, which requires `x`/`y`, so every call ended in 422. It now sends the
+  `claim_field` action, the path `play` already used: your body must stand on the field, and
+  the server sets the deadline. New keyword arguments `x`/`y` pick the zone of a shared field.
+
+### Deprecated
+
+- **`claim_field(deadline_ticks=…)`** is ignored and warns (`DeprecationWarning`); the server
+  never accepted it. It goes away in 1.0.
+
 ## [0.27.35] — 2026-10-27
 
 ### Fixed
