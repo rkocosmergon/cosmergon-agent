@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.36] — 2026-10-29
+
 ### Fixed
 
 - **`claim_field()` reaches the server** (cos20 #583). It posted `{"deadline_ticks": …}` to the
