@@ -15,6 +15,8 @@ Tools:
   - cosmergon_act: Execute a game action
   - cosmergon_benchmark: Generate a benchmark report
   - cosmergon_info: Get game rules and economy info
+  - cosmergon_tournament: Open rounds, briefing, free slot, standings
+  - cosmergon_shop: Products, prices, a checkout link, energy vouchers
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ import uuid
 
 import httpx
 
-from cosmergon_agent import __version__, _http
+from cosmergon_agent import __version__, _http, shop
 from cosmergon_agent.action import printable
 from cosmergon_agent.config import (
     load_credentials,
@@ -126,12 +128,23 @@ async def _resolve_via_token(token: str, base_url: str, agent_name: str | None) 
     return raw_key
 
 
-async def _auto_register(base_url: str) -> tuple[str, str | None]:
-    """Register an anonymous agent.  Returns (api_key, agent_id)."""
-    url = f"{base_url.rstrip('/')}/api/v1/auth/register/anonymous-agent"
+async def _auto_register(base_url: str, referral: bool = True) -> tuple[str, str | None]:
+    """Register an anonymous agent.  Returns (api_key, agent_id).
+
+    With ``COSMERGON_REFERRAL_CODE`` (and ``_CHANNEL``) the inviter's code goes along; it only
+    counts here, so a malformed one stops the registration instead of being dropped (#603).
+    A re-registration after an expired key sends none (``referral=False``): that code was for
+    the first agent, as in ``CosmergonAgent``.
+    """
+    try:
+        body = shop.referral_from_env() if referral else {}
+    except ValueError as exc:
+        _error(f"COSMERGON_REFERRAL_*: {exc} — fix or unset it; nothing registered")
+        return "", None
+    url = f"{base_url.rstrip('/')}{shop.REGISTER_PATH}"
     try:
         async with _http.async_client(timeout=10, verify=True) as client:
-            resp = await client.post(url, json={"source": "mcp"})
+            resp = await client.post(url, json={"source": "mcp", **body})
     except httpx.ConnectError:
         _error(f"Cannot reach {base_url} — check your connection")
         return "", None
@@ -150,6 +163,11 @@ async def _auto_register(base_url: str) -> tuple[str, str | None]:
     key = data.get("api_key", "")
     agent_id = data.get("agent_id")
     name = data.get("agent_name", agent_id or "anonymous")
+    if body and data.get("referral_accepted") is False:
+        _error(
+            f"Referral code {printable(body['referral_code'])} was not recognised — the agent "
+            "is registered without it, and a referral cannot be added later."
+        )
     _error(
         f"Created new agent: {name}. "
         f"To use an existing agent: set COSMERGON_API_KEY environment variable."
@@ -190,7 +208,7 @@ async def _force_reregister() -> tuple[str, str]:
         "Previous agent is no longer accessible. "
         "To keep your agent: set COSMERGON_API_KEY or upgrade at cosmergon.com/upgrade"
     )
-    key, agent_id = await _auto_register(base_url)
+    key, agent_id = await _auto_register(base_url, referral=False)
     if key:
         save_credentials(key, agent_id, base_url=base_url)
         _credentials = (key, base_url)
@@ -234,6 +252,33 @@ async def _api_post(path: str, body: dict, api_key: str, base_url: str) -> dict:
                 },
             )
             return {"status": resp.status_code, "data": resp.json()}
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        return {"status": 0, "data": {"error": f"Network error: {exc}"}}
+
+
+async def _api_call(
+    method: str, path: str, api_key: str, base_url: str, body: object = None, query: object = None
+) -> dict:
+    """A call to a path the catalog named — checked to stay on the API host (``shop.api_path``)."""
+    headers = {
+        "Authorization": f"api-key {api_key}",
+        "User-Agent": f"cosmergon-mcp/{__version__}",
+    }
+    if method == "POST":
+        headers["X-Idempotency-Key"] = str(uuid.uuid4())
+    try:
+        async with _http.async_client(timeout=30, verify=True) as client:
+            resp = await client.request(
+                method,
+                f"{base_url}{shop.api_path(path)}",
+                json=body,
+                params=query if isinstance(query, dict) else None,
+                headers=headers,
+            )
+            try:
+                return {"status": resp.status_code, "data": resp.json()}
+            except ValueError:
+                return {"status": resp.status_code, "data": {"error": printable(resp.text[:200])}}
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         return {"status": 0, "data": {"error": f"Network error: {exc}"}}
 
@@ -353,6 +398,40 @@ TOOLS = [
             },
         },
     },
+    {
+        "name": "cosmergon_shop",
+        "description": (
+            "What you can buy with money, why, the price (EUR incl. VAT) and whether YOUR key "
+            "can buy it now. list = all products in short, detail = one product in full, "
+            "buy = a checkout link for a person to pay by card or bank transfer (one-off "
+            "purchases need consent=true, i.e. the buyer agreed to the product's consent "
+            "notice), vouchers = your energy vouchers, activate = credit one of them. "
+            "Paying yourself in USDC (x402) is in the Python SDK: CosmergonAgent.buy."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "detail", "buy", "vouchers", "activate"],
+                    "default": "list",
+                },
+                "product": {
+                    "type": "string",
+                    "description": "Product key from action=list (detail, buy)",
+                },
+                "consent": {
+                    "type": "boolean",
+                    "description": (
+                        "buy: true only if the buyer agreed to the product's consent notice"
+                    ),
+                    "default": False,
+                },
+                "voucher_id": {"type": "string", "description": "activate: id from vouchers"},
+                "lang": {"type": "string", "enum": ["en", "de"], "default": "en"},
+            },
+        },
+    },
 ]
 
 
@@ -463,6 +542,9 @@ async def _call_tool(name: str, arguments: dict) -> dict:
             return result["data"]  # type: ignore[no-any-return]
         return {"error": f"Unknown tournament action: {t_action}"}
 
+    if name == "cosmergon_shop":
+        return await _shop(arguments, api_key, base_url)
+
     # All other tools need agent_id — resolve with 401 retry
     agents = await _api_get("/agents/", api_key, base_url)
     if agents["status"] == 401:
@@ -507,6 +589,77 @@ async def _call_tool(name: str, arguments: dict) -> dict:
         return report["data"]  # type: ignore[no-any-return]
 
     return {"error": f"Unknown tool: {name}"}
+
+
+def _shop_line(product: dict) -> dict:
+    """One product of ``list``: what it is in a line, the price, and whether you can buy it."""
+    line = {k: product.get(k) for k in ("key", "group", "name", "summary", "price")}
+    verdict = (product.get("for_you") or {}).get("can_buy") or {}
+    line["ways"] = {
+        way: (verdict.get(way) or {}).get("can_buy", state.get("available"))
+        for way, state in (product.get("payment") or {}).items()
+    }
+    return line
+
+
+async def _shop(arguments: dict, api_key: str, base_url: str) -> dict:
+    """``cosmergon_shop``: the catalog, one product, a checkout link, the vouchers."""
+    action = arguments.get("action", "list")
+    if action == "vouchers":
+        held = await _api_call("GET", shop.VOUCHERS_PATH, api_key, base_url)
+        return held["data"]  # type: ignore[no-any-return]
+    if action == "activate":
+        try:
+            path = shop.voucher_path(arguments.get("voucher_id"))
+        except ValueError:
+            return {"error": "voucher_id: the id of a voucher from action=vouchers"}
+        credited = await _api_call("POST", path, api_key, base_url)
+        return credited["data"]  # type: ignore[no-any-return]
+    query = {"lang": arguments.get("lang") or "en"}
+    catalog = await _api_call("GET", shop.CATALOG_PATH, api_key, base_url, query=query)
+    data = catalog["data"]
+    if catalog["status"] != 200 or not isinstance(data, dict):
+        return {"error": f"Catalog not available ({catalog['status']})", "detail": data}
+    if action == "list":
+        products = [_shop_line(p) for p in data.get("products") or [] if isinstance(p, dict)]
+        return {"prices": data.get("prices"), "products": products, "for_you": data.get("for_you")}
+    try:
+        product = shop.find(data, str(arguments.get("product") or ""))
+    except ValueError as exc:
+        return {"error": str(exc)}
+    if action == "detail":
+        return product
+    if action == "buy":
+        result = await _shop_buy(product, bool(arguments.get("consent")), api_key, base_url)
+        note = shop.key_expires(data, product)
+        return {**result, "key_expires": note} if note else result
+    return {"error": f"Unknown shop action: {action}"}
+
+
+async def _shop_buy(product: dict, consent: bool, api_key: str, base_url: str) -> dict:
+    """The link way: a checkout address for a person; nothing is paid here."""
+    way = shop.way_for(product, "link")
+    if way is None:
+        ways = sorted(product.get("buy") or {})
+        return {"error": "no card or bank transfer way for this product", "ways": ways}
+    stop = shop.blocked(product, way)
+    if stop:
+        return {"can_buy": False, **stop}
+    if shop.needs_consent(product) and not consent:
+        return {"consent_required": True, "notice": shop.consent_notice(product)}
+    try:
+        method, path, body, query = shop.route(product, way)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    answer = await _api_call(method, path, api_key, base_url, body=body, query=query)
+    url = shop.checkout_url(answer["data"]) if answer["status"] == 200 else None
+    if url is None:
+        return {"error": f"Checkout refused ({answer['status']})", "detail": answer["data"]}
+    return {
+        "checkout_url": url,
+        "pay": "a person opens this address and pays; the delivery follows the payment",
+        "then": shop.then_step(product["buy"][way].get("then"), answer["data"]),
+    }
 
 
 async def _main() -> None:

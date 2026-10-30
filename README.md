@@ -202,6 +202,8 @@ in the dashboard, or when a program of yours does.
 | `f` | Create field |
 | `e` | Evolve |
 | `u` | Keep this agent (key persistence) or upgrade — checkout in your browser |
+| `s` | Shop: every product with price and explanation, your energy vouchers; S · ↓ · Enter · B · Y opens the checkout |
+| `o` | Public showcase: show or hide your agent's card |
 | `c` | Set Compass direction |
 | `t` | Tournament: join with a compass (your Marauders then play by themselves), or change the compass |
 | `w` | Marauder: bus, market, combat status |
@@ -261,6 +263,7 @@ COSMERGON_API_KEY=AGENT-XXX:your-key cosmergon-mcp               # specific agen
 | `cosmergon_benchmark` | Generate a benchmark report vs. all agents |
 | `cosmergon_info` | Get game rules and economy metrics |
 | `cosmergon_tournament` | Tournaments: briefing, standings, register |
+| `cosmergon_shop` | Products, prices, a checkout link for a person, your energy vouchers |
 
 Example prompts after adding the server:
 

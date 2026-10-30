@@ -11,7 +11,8 @@ Hotkeys:
     P  Place cells       F  Create field     E  Evolve entity
     X  Pause/Resume (asks twice)  U  Upgrade (next tier, opens browser)
     K  Show API key + config path
-    S  Toggle Public Showcase (opt-in/opt-out, DSGVO Art. 6 lit. a)
+    S  Shop: products, prices, checkout in the browser; your energy vouchers
+    O  Toggle Public Showcase (opt-in/opt-out, DSGVO Art. 6 lit. a)
     R  Refresh now       Q  Quit             ?  Help
 
 Themes: cosmergon (default), matrix, mono, high-contrast
@@ -59,10 +60,18 @@ except ImportError as _exc:
         "  pip install textual"
     ) from _exc
 
-from cosmergon_agent import AuthenticationError, CosmergonAgent, CosmergonError, __version__, _http
+from cosmergon_agent import (
+    AuthenticationError,
+    CosmergonAgent,
+    CosmergonError,
+    __version__,
+    _http,
+    shop,
+)
 from cosmergon_agent.action import (
     action_done_word,
     action_word,
+    error_text,
     mission_goal_text,
     mission_outcome_text,
     mission_step_text,
@@ -1248,7 +1257,8 @@ class HelpModal(ModalScreen):
             "[cyan]\\[U][/cyan]  Keep this agent / upgrade (checkout in browser)",
             "[cyan]\\[K][/cyan]  Show API key + config path",
             "[cyan]\\[A][/cyan]  Switch agent (with a player token in the config)",
-            "[cyan]\\[S][/cyan]  Public showcase: show or hide your agent's card",
+            "[cyan]\\[S][/cyan]  Shop: what you can buy, the price, checkout in the browser",
+            "[cyan]\\[O][/cyan]  Public showcase: show or hide your agent's card",
             "[cyan]\\[R][/cyan]  Refresh data",
             "[cyan]\\[?][/cyan]  This help",
             "[cyan]\\[Q][/cyan]  Quit (warns first while the key can end)",
@@ -1564,7 +1574,7 @@ class ReconnectScreen(ModalScreen):
 
 
 # ---------------------------------------------------------------------------
-# Public-Showcase Modal [S] — konzept-public-showcase-opt-in.md §3.4
+# Public-Showcase Modal [O] — konzept-public-showcase-opt-in.md §3.4 (until #603: [S])
 # ---------------------------------------------------------------------------
 
 
@@ -1666,6 +1676,352 @@ class ShowcaseModal(ModalScreen):
                 "consent_text_hash": self._consent_text_hash,
             }
         )
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+# ---------------------------------------------------------------------------
+# Shop [S] — cos20 #603: the server's catalog, five keys to the checkout
+# ---------------------------------------------------------------------------
+
+# Headings for the catalog's groups; an unknown group shows its own key.
+_SHOP_GROUPS: dict[str, str] = {
+    "play": "Play",
+    "energy": "Energy",
+    "tournament": "Tournament",
+    "own": "Ownership",
+    "bundle": "Bundles",
+}
+_SHOP_WAYS: dict[str, str] = {
+    "card": "card, in your browser (Stripe checkout)",
+    "bank_transfer": "bank transfer, in your browser (Stripe checkout)",
+}
+
+
+def _shop_price(product: dict[str, Any]) -> str:
+    """The catalog's price incl. VAT, e.g. ``€5.00`` or ``€1.99 / month``."""
+    price = product.get("price") or {}
+    cents = price.get("eur_cents")
+    if not isinstance(cents, int) or isinstance(cents, bool):
+        return "price at checkout"
+    text = f"€{cents / 100:,.2f}"
+    interval = price.get("interval")
+    return f"{text} / {interval}" if interval in ("month", "year") else text
+
+
+def _shop_why_not(product: dict[str, Any]) -> str:
+    """Why the shop cannot sell this product now, or ``""`` if B may buy it."""
+    way = shop.way_for(product, "link")
+    if way is None:
+        return "an agent buys this itself, with USDC (x402) — not in the terminal"
+    stop = shop.blocked(product, way)
+    if stop is None:
+        return ""
+    text = str(stop.get("reason") or "not available").replace("_", " ")
+    step = stop.get("next_step") or {}
+    return f"{text} — {step['text']}" if step.get("text") else text
+
+
+class ShopModal(ModalScreen):
+    """The catalog [S]: your vouchers on top, then the products by group (cos20 #603).
+
+    Dismisses with ``("product", index)``, ``("vouchers", None)`` or ``None`` (Esc).
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
+        Binding("escape", "cancel", "Close", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    ShopModal {
+        align: center middle;
+    }
+    ShopModal > #shop-wrap {
+        width: 84;
+        height: auto;
+        max-width: 100%;
+        max-height: 100%;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    """
+
+    def __init__(
+        self,
+        theme: Theme,
+        products: list[dict[str, Any]],
+        vouchers: int,
+        product: int | None = None,
+    ) -> None:
+        super().__init__()
+        self._theme = theme
+        self._products = products
+        self._vouchers = vouchers
+        # Rows the cursor stops on: the voucher line (if any), then each product. It starts on
+        # the top row, or back on ``product`` when the viewer returns from it.
+        self._rows: list[int | None] = ([None] if vouchers else []) + list(range(len(products)))
+        self._cursor = self._rows.index(product) if product in self._rows else 0
+
+    def compose(self) -> ComposeResult:
+        with _ScrollOhneFokus(id="shop-wrap"):
+            yield Static("[bold]Shop[/bold]  [dim]EUR incl. VAT[/dim]", markup=True)
+            yield Static("", id="shop-list", markup=True)
+            yield Static(
+                "[dim]↑ ↓ choose · Enter open · Esc close[/dim]", id="shop-footer", markup=True
+            )
+
+    def on_mount(self) -> None:
+        self._render_list()
+
+    def _render_list(self) -> None:
+        lines: list[str] = []
+        cursor_line = 0
+        group = None
+        for row, index in enumerate(self._rows):
+            mark = "[bold cyan]▸[/bold cyan]" if row == self._cursor else " "
+            if index is None:
+                text = f"Your vouchers: {self._vouchers} — activate them here"
+            else:
+                product = self._products[index]
+                if product.get("group") != group:
+                    group = product.get("group")
+                    lines += ["", _c(self._theme.data, _roh(_SHOP_GROUPS.get(str(group), group)))]
+                text = (
+                    f"{_roh(product.get('name'))}  [dim]{_roh(product.get('summary'))}[/dim]"
+                    f"  {_roh(_shop_price(product))}"
+                )
+            if row == self._cursor:
+                cursor_line = len(lines)
+            lines.append(f" {mark} {text}")
+        self.query_one("#shop-list", Static).update("\n".join(lines))
+        self.query_one("#shop-wrap").scroll_to(y=max(cursor_line - 2, 0), animate=False)
+
+    def on_key(self, event: Key) -> None:
+        if event.key in ("up", "down") and self._rows:
+            event.stop()
+            step = -1 if event.key == "up" else 1
+            self._cursor = (self._cursor + step) % len(self._rows)
+            self._render_list()
+        elif event.key == "enter" and self._rows:
+            event.stop()
+            index = self._rows[self._cursor]
+            self.dismiss(("vouchers", None) if index is None else ("product", index))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class ShopDetailModal(ModalScreen):
+    """One product in full: what it is, what for, the price, how it is paid (cos20 #603).
+
+    B — never Enter — goes on to the confirmation; Esc back to the list. Dismisses with
+    ``"buy"`` or ``None``.
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
+        Binding("escape", "cancel", "Back", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    ShopDetailModal {
+        align: center middle;
+    }
+    ShopDetailModal > #shopd-wrap {
+        width: 84;
+        height: auto;
+        max-width: 100%;
+        max-height: 100%;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    """
+
+    _FIELDS: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("What it is", "what"),
+        ("What it is for", "benefit"),
+        ("For whom", "for_whom"),
+        ("You get", "you_get"),
+        ("Delivery", "delivery"),
+        ("Not included", "not_included"),
+    )
+
+    def __init__(self, theme: Theme, product: dict[str, Any]) -> None:
+        super().__init__()
+        self._theme = theme
+        self._product = product
+        self._why_not = _shop_why_not(product)
+
+    def compose(self) -> ComposeResult:
+        p = self._product
+        with VerticalScroll(id="shopd-wrap"):
+            yield Static(f"[bold]{_roh(p.get('name'))}[/bold]  {_roh(_shop_price(p))}", markup=True)
+            yield Static(f"[dim]{_roh(p.get('summary'))}[/dim]", markup=True)
+            for label, key in self._FIELDS:
+                if p.get(key):
+                    yield Static(f"\n[bold]{label}[/bold]\n{_roh(p[key])}", markup=True)
+            way = shop.way_for(p, "link")
+            if way:
+                yield Static(f"\n[bold]Payment[/bold]\n{_SHOP_WAYS.get(way, way)}", markup=True)
+            for need in p.get("requires") or []:
+                if isinstance(need, dict) and need.get("channel") in (None, way):
+                    yield Static(f"[dim]Needs: {_roh(need.get('text'))}[/dim]", markup=True)
+            if p.get("details_url"):
+                yield Static(f"\nMore: {_roh(p['details_url'])}", markup=True)
+            if self._why_not:
+                footer = _c(self._theme.warn, f"Not here: {_roh(self._why_not)}") + "\n"
+                yield Static(footer + _c("dim", "Esc back"), markup=True)
+            else:
+                yield Static("\n" + _c("dim", f"{_hk('B')} buy · Esc back"), markup=True)
+
+    def on_key(self, event: Key) -> None:
+        if event.key in ("b", "B") and not self._why_not:
+            event.stop()
+            self.dismiss("buy")
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class ShopConfirmModal(ModalScreen):
+    """The last page before the checkout: product, price, for whom, how paid (cos20 #603).
+
+    One-off purchases show the consent sentence: Y agrees to it and opens the checkout, where
+    the contract is made. With a free key the note that it ends stands above Y (K6), and U
+    keeps the key first. Dismisses with ``"buy"``, ``"keep"`` or ``None`` (N, Esc).
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
+        Binding("escape", "cancel", "Back", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    ShopConfirmModal {
+        align: center middle;
+    }
+    ShopConfirmModal > #shopc-wrap {
+        width: 76;
+        height: auto;
+        max-width: 100%;
+        max-height: 100%;
+        border: solid $warning;
+        background: $surface;
+        padding: 1 2;
+    }
+    """
+
+    def __init__(
+        self, theme: Theme, product: dict[str, Any], agent_name: str, key_notice: str = ""
+    ) -> None:
+        super().__init__()
+        self._theme = theme
+        self._product = product
+        self._agent_name = agent_name
+        self._key_notice = key_notice
+
+    def compose(self) -> ComposeResult:
+        p = self._product
+        way = shop.way_for(p, "link") or ""
+        consent = shop.consent_notice(p)
+        with VerticalScroll(id="shopc-wrap"):
+            yield Static(f"[bold]Buy {_roh(p.get('name'))}?[/bold]", markup=True)
+            yield Static(
+                f"\nPrice: {_roh(_shop_price(p))} incl. VAT (binding: the checkout)\n"
+                f"For: {_roh(self._agent_name)}\n"
+                f"Payment: {_SHOP_WAYS.get(way, way)}\n"
+                f"Delivery: {_roh(p.get('delivery') or '')}",
+                markup=True,
+            )
+            if consent:
+                yield Static(
+                    f"\n[bold]By pressing Y you agree:[/bold]\n{_roh(consent)}", markup=True
+                )
+            if self._key_notice:
+                yield Static("\n" + _c(self._theme.warn, _roh(self._key_notice)), markup=True)
+            yes = _hk("Y")
+            keys = f"{yes} agree and go to checkout" if consent else f"{yes} go to checkout"
+            keep = f" · {_hk('U')} keep this agent first" if self._key_notice else ""
+            yield Static("\n" + _c("dim", f"{keys}{keep} · {_hk('N')} / Esc back"), markup=True)
+
+    def on_key(self, event: Key) -> None:
+        if event.key in ("y", "Y"):
+            event.stop()
+            self.dismiss("buy")
+        elif event.key in ("u", "U") and self._key_notice:
+            event.stop()
+            self.dismiss("keep")
+        elif event.key in ("n", "N"):
+            event.stop()
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class VoucherModal(ModalScreen):
+    """Your energy vouchers; A credits the chosen one to this agent — only on the key (S276).
+
+    Dismisses with the id of the voucher to activate, or ``None`` (Esc).
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
+        Binding("escape", "cancel", "Back", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    VoucherModal {
+        align: center middle;
+    }
+    VoucherModal > #voucher-wrap {
+        width: 64;
+        height: auto;
+        max-width: 100%;
+        max-height: 100%;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    """
+
+    def __init__(self, theme: Theme, vouchers: list[dict[str, Any]], agent_name: str) -> None:
+        super().__init__()
+        self._theme = theme
+        self._vouchers = vouchers
+        self._agent_name = agent_name
+        self._cursor = 0
+
+    def compose(self) -> ComposeResult:
+        with _ScrollOhneFokus(id="voucher-wrap"):
+            yield Static("[bold]Your energy vouchers[/bold]", markup=True)
+            yield Static("", id="voucher-list", markup=True)
+            keys = f"↑ ↓ choose · {_hk('A')} activate for {_roh(self._agent_name)} · Esc back"
+            if not self._vouchers:
+                keys = "Esc back"
+            yield Static(_c("dim", keys), markup=True)
+
+    def on_mount(self) -> None:
+        self._render_list()
+
+    def _render_list(self) -> None:
+        lines = []
+        for i, v in enumerate(self._vouchers):
+            mark = "[bold cyan]▸[/bold cyan]" if i == self._cursor else " "
+            day = _roh(str(v.get("created_at") or "")[:10])  # kuerzen-ok: ISO time → its date
+            lines.append(f" {mark} {_roh(v.get('amount'))} energy  [dim]bought {day}[/dim]")
+        self.query_one("#voucher-list", Static).update("\n".join(lines) or "No vouchers.")
+        self.query_one("#voucher-wrap").scroll_to(y=max(self._cursor - 2, 0), animate=False)
+
+    def on_key(self, event: Key) -> None:
+        if event.key in ("up", "down") and self._vouchers:
+            event.stop()
+            step = -1 if event.key == "up" else 1
+            self._cursor = (self._cursor + step) % len(self._vouchers)
+            self._render_list()
+        elif event.key in ("a", "A") and self._vouchers:
+            event.stop()
+            self.dismiss(str(self._vouchers[self._cursor].get("id")))
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -1798,7 +2154,9 @@ class CosmergonDashboard(App):
         Binding("tab", "cycle_focus", "Focus", show=False, priority=True),
         Binding("k", "show_key", "Key", show=False, priority=True),
         Binding("a", "agent_selector", "Agents", show=False, priority=True),
-        Binding("s", "toggle_showcase", "Showcase", show=False, priority=True),
+        # cos20 #603: S is the shop; the showcase moved to O.
+        Binding("s", "shop", "Shop", show=False, priority=True),
+        Binding("o", "toggle_showcase", "Showcase", show=False, priority=True),
         Binding("w", "marauder_menu", "Marauder", show=False, priority=True),
         Binding("question_mark", "help", "Help", show=False, priority=True),
         # #468: Q warns first while the key can end (``action_leave``); App.action_quit stays.
@@ -3518,9 +3876,115 @@ class CosmergonDashboard(App):
         _open_https("https://cosmergon.com/solo.html")
         self._set_feedback(_c(self._theme.pos, "✓ Upgrade page opened — complete upgrade there"))
 
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Inside the shop, its dialogs' keys win over the App's priority bindings (cos20 #603).
+
+        App keys with priority fire under every dialog (see ``action_leave``). In the shop U on
+        the confirmation means "keep this agent", A in the voucher list "activate" — not the
+        App's upgrade or agent switch — and S does not open a second shop over the first.
+        """
+        screen = self.screen
+        if action == "upgrade" and isinstance(screen, ShopConfirmModal):
+            return False
+        if action == "agent_selector" and isinstance(screen, VoucherModal):
+            return False
+        shop_open = (ShopModal, ShopDetailModal, ShopConfirmModal, VoucherModal)
+        return not (action == "shop" and isinstance(screen, shop_open))
+
+    @work
+    async def action_shop(self) -> None:
+        """[S] — the shop: the server's catalog, five keys to the checkout (cos20 #603).
+
+        S · ↓ · Enter · B · Y — list, product, buy, confirm — then the server's checkout opens
+        in the browser, where the contract is made. Nothing is bought on Enter, Esc goes back a
+        step everywhere, and energy arrives as a voucher that is activated only on a key.
+        """
+        try:
+            catalog = await self.agent.products()
+        except (CosmergonError, ValueError) as exc:
+            self._set_feedback(_c(self._theme.warn, f"✗ Shop: {_roh(exc)}"), duration=10.0)
+            return
+        products = [p for p in catalog["products"] if isinstance(p, dict)]
+        back_to: int | None = None
+        while True:
+            vouchers = await self._shop_vouchers()
+            choice = await self.push_screen_wait(
+                ShopModal(self._theme, products, len(vouchers), back_to)
+            )
+            if choice is None:
+                return
+            if choice[0] == "vouchers":
+                back_to = None
+                await self._shop_activate(vouchers)
+                continue
+            back_to = choice[1]
+            if await self._shop_product(catalog, products[back_to]):
+                return
+
+    async def _shop_product(self, catalog: dict[str, Any], product: dict[str, Any]) -> bool:
+        """Detail and confirmation of one product; ``True`` once the shop has done its part."""
+        note = shop.key_expires(catalog, product) or {}
+        name = self.agent._state.agent_name if self.agent._state else "this agent"
+        while await self.push_screen_wait(ShopDetailModal(self._theme, product)) == "buy":
+            answer = await self.push_screen_wait(
+                ShopConfirmModal(self._theme, product, name, str(note.get("notice") or ""))
+            )
+            if answer == "keep":
+                await self._keep_or_upgrade(keep=True, plans=False)
+                return True
+            if answer == "buy":
+                await self._shop_checkout(product)
+                return True
+        return False
+
+    async def _shop_checkout(self, product: dict[str, Any]) -> None:
+        """Y on the confirmation: the buyer agreed — the server's checkout opens in the browser."""
+        warn = self._theme.warn
+        try:
+            result = await self.agent.buy(product["key"], pay="link", consent=True)
+        except (CosmergonError, ValueError) as exc:
+            self._set_feedback(_c(warn, f"✗ Shop: {_roh(exc)}"), duration=10.0)
+            return
+        url = result.get("checkout_url")
+        if result.get("status") != "checkout" or not _open_https(url):
+            why = result.get("error") or result.get("reason") or result.get("status")
+            self._set_feedback(_c(warn, f"✗ Shop: {_roh(why)}"), duration=10.0)
+            return
+        self._add_log(_c(self._theme.pos, f"✓ Checkout opened: {_roh(product.get('name'))}"))
+        done = "✓ Checkout opened — delivery after payment; energy shows up as a voucher under S"
+        self._set_feedback(_c(self._theme.pos, done), duration=10.0)
+
+    async def _shop_vouchers(self) -> list[dict[str, Any]]:
+        """This agent's energy vouchers for the shop's top line; ``[]`` if they cannot be read."""
+        try:
+            held = await self.agent.vouchers()
+        except (CosmergonError, ValueError):
+            return []
+        items = held.get("vouchers") if isinstance(held, dict) else None
+        return [v for v in items or [] if isinstance(v, dict)]
+
+    async def _shop_activate(self, vouchers: list[dict[str, Any]]) -> None:
+        """The voucher list; the chosen voucher is credited only when A is pressed (S276)."""
+        name = self.agent._state.agent_name if self.agent._state else "this agent"
+        voucher_id = await self.push_screen_wait(VoucherModal(self._theme, vouchers, name))
+        if voucher_id is None:
+            return
+        try:
+            answer = await self.agent.activate_voucher(voucher_id)
+        except (CosmergonError, ValueError) as exc:
+            self._set_feedback(_c(self._theme.warn, f"✗ Voucher: {_roh(exc)}"), duration=10.0)
+            return
+        credited = answer.get("credited") if isinstance(answer, dict) else None
+        if credited is None:
+            why = error_text(answer)
+            self._set_feedback(_c(self._theme.warn, f"✗ Voucher: {_roh(why)}"), duration=10.0)
+            return
+        self._add_log(_c(self._theme.pos, f"✓ Voucher activated: +{_roh(credited)} energy"))
+        self._set_feedback(_c(self._theme.pos, f"✓ +{_roh(credited)} energy for {_roh(name)}"))
+
     @work
     async def action_toggle_showcase(self) -> None:
-        """Public-Showcase opt-in/opt-out toggle (Hotkey S).
+        """Public-Showcase opt-in/opt-out toggle (Hotkey O; S until cos20 #603).
 
         Konzept: docs/konzepte/konzept-public-showcase-opt-in.md §3.4.
         Lädt aktuellen Zustand + kanonischen Consent-Text, öffnet ShowcaseModal,

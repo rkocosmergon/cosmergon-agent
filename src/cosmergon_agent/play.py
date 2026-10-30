@@ -6,6 +6,7 @@ the server and print only what the world answered. Nothing here prints a key; a 
 output of a model's tool call would sit in that model's context.
 
     cosmergon-agent new --name Pi-scout              # an agent of your own, once
+    cosmergon-agent new --name Pi-scout --ref K7Q2M9XA/bluesky   # invited by another agent
     cosmergon-agent turn --agent Pi-scout            # the situation, its memory, the moves
     cosmergon-agent act place_cells --agent Pi-scout field_id=<id> preset=glider
     cosmergon-agent act message --agent Pi-scout --json '{"to": "<id>", "text": "Pact?"}'
@@ -30,7 +31,7 @@ from typing import Any
 
 import httpx
 
-from cosmergon_agent import _http, play_turn
+from cosmergon_agent import _http, play_turn, shop
 from cosmergon_agent import config as _config
 from cosmergon_agent.action import error_text, printable
 from cosmergon_agent.config import load_all_agents, save_agent
@@ -111,21 +112,29 @@ def _remember(name: str, **values: Any) -> dict[str, Any]:
     return kept
 
 
-def new(name: str, persona: str | None, base_url: str) -> None:
-    """Register an agent of your own and keep its key under ``name``. Prints name and id only."""
+def new(name: str, persona: str | None, base_url: str, ref: str | None = None) -> None:
+    """Register an agent of your own and keep its key under ``name``. Prints name and id only.
+
+    ``ref`` is the inviter's ``CODE`` or ``CODE/channel``, else ``COSMERGON_REFERRAL_CODE``
+    and ``COSMERGON_REFERRAL_CHANNEL``. It only counts here; ``referral_accepted`` in the output
+    says whether the server recognised it (cos20 #603).
+    """
     if name in load_all_agents():
         _fail(f"an agent named {name!r} exists here already; play it with --agent {name}")
-    body: dict[str, Any] = {"source": "sdk", "agent_name": name}
+    try:
+        referral = shop.parse_ref(ref) if ref else shop.referral_from_env()
+    except ValueError as exc:
+        _fail(str(exc))
+    body: dict[str, Any] = {"source": "sdk", "agent_name": name, **referral}
     if persona:
         body["persona"] = persona
-    url = f"{base_url.rstrip('/')}/api/v1/auth/register/anonymous-agent"
+    url = f"{base_url.rstrip('/')}{shop.REGISTER_PATH}"
     data = _answer(_http.post(url, json=body, timeout=TIMEOUT_S))
     save_agent(name, data["api_key"], data["agent_id"], base_url=base_url)
-    print(
-        json.dumps(
-            {"ok": True, "agent": data.get("agent_name", name), "agent_id": data["agent_id"]}
-        )
-    )
+    out = {"ok": True, "agent": data.get("agent_name", name), "agent_id": data["agent_id"]}
+    if referral:
+        out["referral_accepted"] = data.get("referral_accepted")
+    print(json.dumps(out))
 
 
 def state(name: str, base_url: str) -> None:
@@ -271,6 +280,7 @@ def add_commands(sub: Any, default_base_url: str) -> None:
     p_new = sub.add_parser("new", help="Create an agent of your own (prints name and id only)")
     p_new.add_argument("--name", required=True)
     p_new.add_argument("--persona", default=None)
+    p_new.add_argument("--ref", default=None, help="the inviter's CODE or CODE/channel")
     p_turn = sub.add_parser("turn", help="The situation, the memory, the moves — what to do now")
     p_state = sub.add_parser("state", help="Print an agent's raw state as JSON")
     p_act = sub.add_parser("act", help="Play one move: ACTION [key=value ...] [--json OBJECT]")
@@ -294,7 +304,7 @@ def run(args: Any) -> bool:
     """Run one of the play subcommands; ``False`` if ``args`` names another one."""
     base = getattr(args, "base_url", "")
     commands = {
-        "new": lambda: new(args.name, args.persona, base),
+        "new": lambda: new(args.name, args.persona, base, args.ref),
         "turn": lambda: turn(args.agent, base),
         "state": lambda: state(args.agent, base),
         "act": lambda: act(args.agent, args.action, params_from(args.pairs, args.raw), base),

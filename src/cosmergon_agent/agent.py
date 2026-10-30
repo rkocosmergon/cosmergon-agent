@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from cosmergon_agent import __version__, _http
+from cosmergon_agent import __version__, _http, shop
 from cosmergon_agent._token import TokenResolutionError, _SensitiveStr, resolve_token_sync
 from cosmergon_agent.action import ActionResult, error_text, printable
 from cosmergon_agent.config import (
@@ -111,6 +111,35 @@ def _webhook_body_length(value: str | None) -> tuple[int, int]:
     return length, 0
 
 
+def _json_body(resp: httpx.Response) -> dict[str, Any]:
+    """The response body as a dict; ``{}`` if it is not a JSON object."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+def _bought(item: dict[str, Any], answer: dict[str, Any]) -> dict:
+    """The server's answer to a paid purchase, with ``then`` filled in (e.g. the voucher id)."""
+    then = shop.then_step(item["buy"][shop.X402].get("then"), answer)
+    return {**answer, "status": "bought", "product": item.get("key"), "then": then}
+
+
+def _refused(item: dict[str, Any], resp: httpx.Response, answer: dict[str, Any]) -> dict:
+    """A purchase the server did not take, with its words and, for x402, its ``reason``."""
+    refused: dict[str, Any] = {
+        "status": "refused",
+        "product": item.get("key"),
+        "http": resp.status_code,
+        "error": error_text(answer, resp.text),
+    }
+    for field in ("reason", "retryable", "required_header"):
+        if field in answer:
+            refused[field] = answer[field]
+    return refused
+
+
 class CosmergonAgent:
     """Client for the Cosmergon Agent Economy.
 
@@ -143,6 +172,8 @@ class CosmergonAgent:
         agent_name: str | None = None,
         send_check: _http.SendCheck | None = None,
         peer_check: _http.PeerCheck | None = None,
+        referral_code: str | None = None,
+        referral_channel: str | None = None,
     ) -> None:
         """Connect to Cosmergon.
 
@@ -173,6 +204,12 @@ class CosmergonAgent:
                 actually reached, before a byte of a request goes over it; a non-empty answer
                 closes it with ``SendRefusedError``. Catches a name that resolves elsewhere
                 after ``send_check`` and a proxy from the environment.
+            referral_code: The code of the agent that invited you (``/ref/<code>``); falls back
+                to ``COSMERGON_REFERRAL_CODE``. It only counts when this call registers a new
+                agent (level 6) — with a key from levels 1 to 5 it is ignored, and the log says so.
+                ``referral_accepted`` tells whether the server recognised it.
+            referral_channel: The inviter's channel tag (``/ref/<code>/<channel>``); falls back
+                to ``COSMERGON_REFERRAL_CHANNEL``. Letters, digits, ``-`` and ``_``, at most 40.
         """
         # Before the first request, which may come right below (credential resolution).
         self._send_check = send_check
@@ -232,12 +269,20 @@ class CosmergonAgent:
                     _user_provided = True
                 logger.info("Loaded credentials from %s", CONFIG_PATH)
 
-        # Level 6: auto-register anonymous agent
+        # Level 6: auto-register anonymous agent — the only place a referral code counts (#603)
+        referral_accepted: bool | None = None
         if not resolved_key:
-            resolved_key, auto_agent_id = self._auto_register_anonymous(base_url, guards)
+            resolved_key, auto_agent_id, referral_accepted = self._first_registration(
+                base_url, guards, referral_code, referral_channel
+            )
             if not agent_id:
                 agent_id = auto_agent_id
             save_credentials(resolved_key, agent_id, base_url=base_url)
+        elif referral_code or os.environ.get("COSMERGON_REFERRAL_CODE", "").strip():
+            logger.warning(
+                "Referral code ignored: this agent exists already, and a referral only counts "
+                "when an agent is registered."
+            )
         # M1: Input validation
         if not base_url.startswith(("http://", "https://")):
             raise ValueError("base_url must start with http:// or https://")
@@ -270,6 +315,8 @@ class CosmergonAgent:
         # True when 401 + explicitly given key: revoked or expired (cos20 #522)
         self._key_rejected: bool = False
         self._memory: dict[str, Any] = {}
+        # Whether the server recognised the referral code of this registration; None without one
+        self.referral_accepted = referral_accepted
 
     def __repr__(self) -> str:
         """Safe repr that never exposes the full API key."""
@@ -674,6 +721,161 @@ class CosmergonAgent:
             f"/api/v1/market/listings/{listing_id}/buy",
             headers={"X-Idempotency-Key": str(uuid.uuid4())},
         )
+        return resp.json()  # type: ignore[no-any-return]
+
+    # ── Shop (cos20 #603) ─────────────────────────────────────────────────────
+
+    async def products(self, lang: str | None = None) -> dict:
+        """The product catalog: everything you can buy with money, why, the price and how.
+
+        Each product carries its texts (``what``, ``benefit``, ``you_get``, ``not_included``…),
+        ``price`` (EUR incl. VAT), ``consent`` for one-off purchases and ``buy`` per way. With
+        this agent's key, ``for_you`` says per way whether this key can buy it now, and if not
+        why and what to do first. Raises ``CosmergonError`` if the server refuses.
+
+        Args:
+            lang: ``"en"`` (default) or ``"de"``.
+        """
+        params = {"lang": lang} if lang else None
+        resp = await self._request("GET", shop.CATALOG_PATH, params=params)
+        answer = _json_body(resp)
+        if resp.status_code != 200 or not isinstance(answer.get("products"), list):
+            raise CosmergonError(
+                f"Catalog not available ({resp.status_code}): {error_text(answer, resp.text)}"
+            )
+        return answer
+
+    async def buy(
+        self,
+        product: str,
+        *,
+        pay: str = "x402",
+        consent: bool = False,
+        signer: Callable[[dict[str, Any]], Any] | None = None,
+        max_usdc: float | None = None,
+        holder_country: str | None = None,
+    ) -> dict:
+        """Buy a product from the catalog (``products()``) — never without the buyer's consent.
+
+        Args:
+            product: The catalog key, e.g. ``"energie_wachsen"``.
+            pay: ``"x402"`` — USDC from your own wallet through ``signer`` — or ``"link"`` — a
+                checkout address for a person to pay by card or bank transfer.
+            consent: ``True`` once the buyer has agreed to the product's ``consent.notice``
+                (one-off purchases, Sec. 356 BGB). Without it nothing is sent, and the notice
+                comes back.
+            signer: For x402: called with the 402's payment requirement (``accepts[0]``), returns
+                the ``X-PAYMENT`` header value; sync or async. The SDK holds no wallet — bring
+                your own client (e.g. the official ``x402`` package).
+            max_usdc: For x402: the most you allow. Nothing is signed above it or without it.
+            holder_country: For x402: your ISO-3166 alpha-2 country (``X-Halter-Land``). From a
+                data-centre address the server asks for it above an amount.
+
+        Returns:
+            ``{"status": ..., "product": ...}``. Status is ``consent_required`` (``notice``,
+            ``price``), ``not_available`` (``reason``, maybe ``next_step``), ``checkout``
+            (``checkout_url``, ``then``), ``payment_required`` (``offer``, ``usdc``,
+            ``not_signed``), ``bought`` (the server's answer, ``then``) or ``refused``
+            (``http``, ``error``, maybe ``reason``). With a free key every answer also carries
+            ``key_expires``: when the key ends and that the purchase stays with the agent while
+            the way in is lost — ``persistenz_monat``/``_jahr`` keep it. A bought energy voucher is
+            not activated: call ``activate_voucher`` — or the returned ``then`` — for the energy.
+
+        Raises:
+            ValueError: An unknown product or ``pay``, a ``holder_country`` that is no ISO
+                code, or a catalog path that leaves the API host — then nothing is sent.
+            CosmergonError: The catalog could not be read.
+        """
+        catalog = await self.products()
+        item = shop.find(catalog, product)
+        result = await self._buy_step(item, pay, consent, signer, max_usdc, holder_country)
+        note = shop.key_expires(catalog, item)
+        return {**result, "key_expires": note} if note else result
+
+    async def _buy_step(
+        self,
+        item: dict[str, Any],
+        pay: str,
+        consent: bool,
+        signer: Callable[[dict[str, Any]], Any] | None,
+        max_usdc: float | None,
+        holder_country: str | None,
+    ) -> dict:
+        """``buy`` after the catalog: way, the catalog's verdict, consent, then the purchase."""
+        key = item["key"]
+        way = shop.way_for(item, pay)
+        if way is None:
+            ways = sorted(item.get("buy") or {})
+            return {"status": "not_available", "product": key, "reason": "no_way", "ways": ways}
+        stop = shop.blocked(item, way)
+        if stop:
+            return {"status": "not_available", "product": key, **stop}
+        if shop.needs_consent(item) and not consent:
+            notice = shop.consent_notice(item)
+            price = item.get("price")
+            return {"status": "consent_required", "product": key, "notice": notice, "price": price}
+        if way != shop.X402:
+            return await self._buy_link(item, way)
+        headers = shop.holder_header(holder_country)
+        return await self._buy_x402(item, signer, max_usdc, headers)
+
+    async def _buy_link(self, item: dict[str, Any], way: str) -> dict:
+        """The browser way: the server's checkout address, nothing paid yet."""
+        method, path, body, query = shop.route(item, way)
+        resp = await self._request(method, path, json=body, params=query)
+        answer = _json_body(resp)
+        url = shop.checkout_url(answer) if resp.status_code == 200 else None
+        if url is None:
+            return _refused(item, resp, answer)
+        then = shop.then_step(item["buy"][way].get("then"), answer)
+        return {"status": "checkout", "product": item["key"], "checkout_url": url, "then": then}
+
+    async def _buy_x402(
+        self,
+        item: dict[str, Any],
+        signer: Callable[[dict[str, Any]], Any] | None,
+        max_usdc: float | None,
+        headers: dict[str, str],
+    ) -> dict:
+        """x402: ask (402), sign within ``max_usdc``, send again with ``X-PAYMENT``."""
+        method, path, body, query = shop.route(item, shop.X402)
+        resp = await self._request(method, path, json=body, params=query, headers=headers)
+        answer = _json_body(resp)
+        if resp.status_code != 402:
+            ok = resp.status_code == 200
+            return _bought(item, answer) if ok else _refused(item, resp, answer)
+        requirement = shop.offer(answer)
+        usdc = shop.offer_usdc(requirement) if requirement else None
+        reason = shop.not_signed(answer, requirement, usdc, signer is not None, max_usdc)
+        payment = None
+        if reason is None and signer is not None and requirement is not None:
+            payment = signer(requirement)
+            payment = await payment if inspect.isawaitable(payment) else payment
+            if not isinstance(payment, str) or not payment:
+                reason = "the signer returned no X-PAYMENT value"
+        if reason is not None:
+            return {
+                "status": "payment_required",
+                "product": item["key"],
+                "offer": requirement,
+                "usdc": usdc,
+                "not_signed": reason,
+                "error": error_text(answer),
+            }
+        paid = await self._request(
+            method, path, json=body, params=query, headers={**headers, "X-PAYMENT": payment}
+        )
+        answer = _json_body(paid)
+        return _bought(item, answer) if paid.status_code == 200 else _refused(item, paid, answer)
+
+    async def vouchers(self) -> dict:
+        """Your energy vouchers that are not activated yet (``vouchers``, ``total_amount``)."""
+        resp = await self._request("GET", shop.VOUCHERS_PATH)
+        return resp.json()  # type: ignore[no-any-return]
+
+    async def activate_voucher(self, voucher_id: str) -> dict:
+        """Credit one energy voucher to this agent (``voucher_id``, ``credited``)."""
+        resp = await self._request("POST", shop.voucher_path(voucher_id))
         return resp.json()  # type: ignore[no-any-return]
 
     # ── Combat ────────────────────────────────────────────────────────────────
@@ -1676,11 +1878,45 @@ class CosmergonAgent:
         """Register an anonymous agent. Returns (api_key, agent_id).
 
         Called automatically when no api_key is provided.
-        The agent gets 1000 energy and a 24h session.
+        The agent gets 1000 energy and a 24h session. A re-registration after an expired key
+        comes here too and sends no referral code: that code was for the first agent.
         """
-        url = f"{base_url.rstrip('/')}/api/v1/auth/register/anonymous-agent"
+        key, agent_id, _ = CosmergonAgent._register_anonymous(base_url, guards, {})
+        return key, agent_id
+
+    @staticmethod
+    def _first_registration(
+        base_url: str,
+        guards: dict[str, Any],
+        referral_code: str | None,
+        referral_channel: str | None,
+    ) -> tuple[str, str | None, bool | None]:
+        """Level 6: register, with the referral code from the arguments or the environment.
+
+        Without a code it stays the plain ``_auto_register_anonymous`` call (#603).
+        """
+        referral = (
+            shop.referral_body(referral_code, referral_channel)
+            if referral_code or referral_channel
+            else shop.referral_from_env()
+        )
+        if referral:
+            return CosmergonAgent._register_anonymous(base_url, guards, referral)
+        key, agent_id = CosmergonAgent._auto_register_anonymous(base_url, guards)
+        return key, agent_id, None
+
+    @staticmethod
+    def _register_anonymous(
+        base_url: str, guards: dict[str, Any] | None, referral: dict[str, str]
+    ) -> tuple[str, str | None, bool | None]:
+        """Register an anonymous agent with ``referral`` in the body (``shop.referral_body``).
+
+        Returns ``(api_key, agent_id, referral_accepted)``. A code the server did not recognise
+        is logged as a warning: the referral only counts here and cannot be added later.
+        """
+        url = f"{base_url.rstrip('/')}{shop.REGISTER_PATH}"
         with _http.client(timeout=10.0, **(guards or {})) as client:
-            resp = client.post(url, json={"source": "sdk"})
+            resp = client.post(url, json={"source": "sdk", **referral})
         if resp.status_code != 200:
             is_json = resp.headers.get(
                 "content-type",
@@ -1698,7 +1934,14 @@ class CosmergonAgent:
             (agent_id or "?")[:8],
             data.get("expires_at", "?"),
         )
-        return key, agent_id
+        accepted = data.get("referral_accepted")
+        if referral and accepted is False:
+            logger.warning(
+                "Referral code %s was not recognised — the agent is registered without it, "
+                "and a referral cannot be added later.",
+                printable(referral.get("referral_code", "")),
+            )
+        return key, agent_id, accepted if isinstance(accepted, bool) else None
 
     # --- Internal ---
 

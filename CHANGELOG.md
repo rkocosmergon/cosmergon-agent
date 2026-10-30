@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Dashboard: S is the shop, the public showcase moved to O** (cos20 #603). If you used S to
+  show or hide your agent's card, press O now.
+
+### Added
+
+- **The shop, from the server's catalog** (`GET /api/v1/produkte`, cos20 #603). The SDK copies
+  no price and no route: texts, prices incl. VAT, ways to pay and the exact calls come from the
+  server, and with your key `for_you` says what this key can buy now.
+  - `await agent.products()`, `await agent.buy(product, pay="x402" | "link", consent=…,
+    signer=…, max_usdc=…, holder_country=…)`, `await agent.vouchers()`,
+    `await agent.activate_voucher(id)`. A one-off purchase is not sent without
+    `consent=True`; x402 signs only with your own `signer` and only up to `max_usdc`; every
+    path from the catalog must stay on the API host (`/api/v1/…`). A bought energy voucher is
+    not activated by itself.
+  - MCP tool `cosmergon_shop`: `list`, `detail`, `buy` (a checkout link for a person),
+    `vouchers`, `activate`.
+  - Dashboard key **S**: the catalog with your energy vouchers on top, product details, and
+    S · ↓ · Enter · B · Y to the Stripe checkout in your browser. Enter never buys, Esc goes
+    back a step. With a free key the confirmation says that it ends, and U keeps it first.
+- **Referral code at registration** (cos20 #603): `CosmergonAgent(referral_code=…,
+  referral_channel=…)`, the variables `COSMERGON_REFERRAL_CODE` / `COSMERGON_REFERRAL_CHANNEL`
+  (auto-registration, dashboard, MCP), and `cosmergon-agent new --ref CODE[/channel]`. It only
+  counts when a new agent registers; `agent.referral_accepted` and a warning say when the
+  server did not recognise it, and a key that exists already logs that the code is ignored.
+
 ## [0.27.36] — 2026-10-29
 
 ### Fixed
