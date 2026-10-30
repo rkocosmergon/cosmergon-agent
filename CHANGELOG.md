@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.28.1] — 2026-10-30
+
+### Fixed
+
+- **A paid purchase is sent once** (cos20 #606). With the default `max_retries`, `buy(...,
+  pay="x402")` sent the request with `X-PAYMENT` again after a server error or a lost answer —
+  the same payment a second time. If that second try was refused, `buy` reported `refused`
+  although the first payment may have gone through. Now the paid request goes out exactly once
+  and an open outcome is `unknown` ("do not pay again; check vouchers() later"). Requests
+  without a payment keep their retries.
+- **An answer that cannot be read raises `ConnectionError`** (a `CosmergonError`) instead of a
+  raw `httpx.DecodingError`, and is not retried. After a payment that is `unknown`, as
+  promised; the dashboard's handlers now catch it too.
+
 ## [0.28.0] — 2026-10-30
 
 ### Changed

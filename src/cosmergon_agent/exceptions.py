@@ -60,7 +60,7 @@ class ServerError(CosmergonError):
 
 
 class ConnectionError(CosmergonError):
-    """Network failure after all retries exhausted."""
+    """Network failure after all retries exhausted, or an answer that cannot be read."""
 
 
 class NotConnectedError(CosmergonError, RuntimeError):

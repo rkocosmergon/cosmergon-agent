@@ -112,6 +112,15 @@ def _webhook_body_length(value: str | None) -> tuple[int, int]:
     return length, 0
 
 
+async def _backoff(attempt: int, what: str) -> None:
+    """Wait before the next try of ``_request``: exponential, with jitter."""
+    # Backoff jitter, not cryptography.
+    jitter = random.random()  # nosec B311
+    delay = min(_INITIAL_BACKOFF * (2**attempt) + jitter, _MAX_BACKOFF)
+    logger.warning("%s, retry in %.1fs", what, delay)
+    await asyncio.sleep(delay)
+
+
 def _json_body(resp: httpx.Response) -> dict[str, Any]:
     """The response body as a dict; ``{}`` if it is not a JSON object."""
     try:
@@ -886,11 +895,14 @@ class CosmergonAgent:
 
         A lost answer, a 429 or a 5xx (the server's 503 ``settlement_unknown`` among them) leave
         open whether the payment was settled; that is ``unknown``, not ``refused`` and not an
-        exception, so the caller does not pay a second time (cos20 #606 F3, F4).
+        exception, so the caller does not pay a second time (cos20 #606 F3, F4). It goes out
+        once: a retry would send the same payment again (R1).
         """
         method, path, body, query = shop.route(item, shop.X402)
         try:
-            paid = await self._request(method, path, json=body, params=query, headers=headers)
+            paid = await self._request(
+                method, path, json=body, params=query, headers=headers, retry=False
+            )
         except CosmergonError as exc:
             return _outcome_unknown(item, None, str(exc))
         answer = _json_body(paid)
@@ -1990,6 +2002,8 @@ class CosmergonAgent:
         self,
         method: str,
         path: str,
+        *,
+        retry: bool = True,
         **kwargs: Any,
     ) -> httpx.Response:
         """HTTP request with retry and backoff (C2).
@@ -1998,6 +2012,9 @@ class CosmergonAgent:
         same game tick is pointless. Callers decide whether to queue or abort.
         5xx responses retry with exponential backoff up to max_retries.
         Transport errors (network) retry with exponential backoff.
+        ``retry=False`` sends once: a paid request must not go out a second time
+        (cos20 #606 R1). An answer that cannot be read raises ConnectionError, not
+        retried — the server has answered (R2).
         """
         if self._client is None:
             raise NotConnectedError("Agent not connected. Call run() or use async with.")
@@ -2010,8 +2027,9 @@ class CosmergonAgent:
             headers.setdefault("X-Idempotency-Key", str(uuid.uuid4()))
             kwargs["headers"] = headers
 
+        retries = self.max_retries if retry else 0
         last_exc: Exception | None = None
-        for attempt in range(self.max_retries + 1):
+        for attempt in range(retries + 1):
             try:
                 resp = await self._client.request(
                     method,
@@ -2022,26 +2040,21 @@ class CosmergonAgent:
                 if resp.status_code == 429:
                     raise RateLimitError(retry_after=_retry_after(resp.headers.get("Retry-After")))
 
-                if resp.status_code >= 500 and attempt < self.max_retries:
-                    # Backoff jitter, not cryptography.
-                    jitter = random.random()  # nosec B311
-                    delay = min(_INITIAL_BACKOFF * (2**attempt) + jitter, _MAX_BACKOFF)
-                    logger.warning("Server error %d, retry in %.1fs", resp.status_code, delay)
-                    await asyncio.sleep(delay)
+                if resp.status_code >= 500 and attempt < retries:
+                    await _backoff(attempt, f"Server error {resp.status_code}")
                     continue
 
                 return resp
 
             except httpx.TransportError as exc:
                 last_exc = exc
-                if attempt < self.max_retries:
-                    # Backoff jitter, not cryptography.
-                    jitter = random.random()  # nosec B311
-                    delay = min(_INITIAL_BACKOFF * (2**attempt) + jitter, _MAX_BACKOFF)
-                    logger.warning("Transport error, retry in %.1fs: %s", delay, exc)
-                    await asyncio.sleep(delay)
+                if attempt < retries:
+                    await _backoff(attempt, f"Transport error ({exc})")
+            except httpx.RequestError as exc:
+                # The answer came but cannot be read (e.g. a broken content-encoding).
+                raise CsgConnectionError(f"Unreadable answer: {exc}") from exc
 
-        raise CsgConnectionError(f"Failed after {self.max_retries + 1} attempts") from last_exc
+        raise CsgConnectionError(f"Failed after {retries + 1} attempts") from last_exc
 
     async def _resolve_agent_id(self) -> None:
         """Get agent_id from the API key's associated agent."""
