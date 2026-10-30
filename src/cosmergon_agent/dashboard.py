@@ -3464,7 +3464,7 @@ class CosmergonDashboard(App):
     async def _keep_agent(self, interval: str) -> None:
         """Open the key-persistence checkout (``POST /api/v1/billing/persist-checkout``, #468).
 
-        The server keeps this agent's newest active key; prices and terms are on the checkout.
+        The server keeps the key this call is made with; prices and terms are on the checkout.
         """
         warn = self._theme.warn
         try:
