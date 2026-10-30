@@ -1707,7 +1707,9 @@ def _shop_price(product: dict[str, Any]) -> str:
         return "price at checkout"
     text = f"€{cents / 100:,.2f}"
     interval = price.get("interval")
-    return f"{text} / {interval}" if interval in ("month", "year") else text
+    # Any word the server sends, not only month/year: the field is free text there, and a
+    # subscription shown without its interval would read as a one-off price.
+    return f"{text} / {interval}" if isinstance(interval, str) and interval.isalpha() else text
 
 
 def _shop_why_not(product: dict[str, Any]) -> str:
@@ -3882,14 +3884,14 @@ class CosmergonDashboard(App):
         App keys with priority fire under every dialog (see ``action_leave``). In the shop U on
         the confirmation means "keep this agent", A in the voucher list "activate" — not the
         App's upgrade or agent switch — and S does not open a second shop over the first.
+        A switches no agent under any shop dialog: the confirmation names the agent it buys for,
+        and a switch underneath would buy with another key (cos20 #606 F7).
         """
         screen = self.screen
         if action == "upgrade" and isinstance(screen, ShopConfirmModal):
             return False
-        if action == "agent_selector" and isinstance(screen, VoucherModal):
-            return False
         shop_open = (ShopModal, ShopDetailModal, ShopConfirmModal, VoucherModal)
-        return not (action == "shop" and isinstance(screen, shop_open))
+        return not (action in ("shop", "agent_selector") and isinstance(screen, shop_open))
 
     @work
     async def action_shop(self) -> None:
@@ -4839,7 +4841,12 @@ class ChatScreen(ModalScreen):
 
     @work
     async def _send(self, text: str) -> None:
-        result = await self._agent.send_message(text)
+        try:
+            result = await self._agent.send_message(text)
+        except CosmergonError as exc:
+            # Not connected, rate-limited, network gone: a line here, not the end of the
+            # dashboard (cos20 #606 V6b).
+            result = {"error": exc.message}
         if not self.is_attached:
             return  # closed while the server answered
         scroll = self.query_one("#history-scroll", VerticalScroll)

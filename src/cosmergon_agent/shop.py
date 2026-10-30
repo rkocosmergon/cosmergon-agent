@@ -13,6 +13,7 @@ the checking before anything leaves:
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import uuid
@@ -181,6 +182,9 @@ def not_signed(
         return "no signer given"
     if max_usdc is None:
         return "no max_usdc given — nothing is signed without a limit"
+    # NaN compares false with everything: ``usdc > nan`` let any amount through (cos20 #606 F9).
+    if not math.isfinite(max_usdc) or max_usdc < 0:
+        return f"max_usdc must be a finite number of at least 0, not {max_usdc!r}"
     if usdc > max_usdc:
         return f"{usdc} USDC is above max_usdc {max_usdc}"
     return None
@@ -223,10 +227,16 @@ def referral_body(code: str | None, channel: str | None) -> dict[str, str]:
     return body
 
 
-def referral_from_env() -> dict[str, str]:
-    """``COSMERGON_REFERRAL_CODE`` and ``COSMERGON_REFERRAL_CHANNEL``, checked."""
+def referral_from_env(code: str | None = None, channel: str | None = None) -> dict[str, str]:
+    """``code`` and ``channel``, each one not given from its environment variable, checked.
+
+    ``COSMERGON_REFERRAL_CODE`` and ``COSMERGON_REFERRAL_CHANNEL`` stand in one by one: a
+    channel given alone keeps the code from the environment, and the other way round
+    (cos20 #606 F8).
+    """
     return referral_body(
-        os.environ.get("COSMERGON_REFERRAL_CODE"), os.environ.get("COSMERGON_REFERRAL_CHANNEL")
+        code or os.environ.get("COSMERGON_REFERRAL_CODE"),
+        channel or os.environ.get("COSMERGON_REFERRAL_CHANNEL"),
     )
 
 

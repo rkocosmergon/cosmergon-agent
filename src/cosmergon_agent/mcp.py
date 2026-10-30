@@ -630,7 +630,9 @@ async def _shop(arguments: dict, api_key: str, base_url: str) -> dict:
     if action == "detail":
         return product
     if action == "buy":
-        result = await _shop_buy(product, bool(arguments.get("consent")), api_key, base_url)
+        # Only the boolean true counts: bool("false") is True (cos20 #606 F5).
+        consent = arguments.get("consent") is True
+        result = await _shop_buy(product, consent, api_key, base_url)
         note = shop.key_expires(data, product)
         return {**result, "key_expires": note} if note else result
     return {"error": f"Unknown shop action: {action}"}

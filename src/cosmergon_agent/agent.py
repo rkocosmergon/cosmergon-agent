@@ -32,6 +32,7 @@ from cosmergon_agent.config import (
 from cosmergon_agent.exceptions import (
     AuthenticationError,
     CosmergonError,
+    NotConnectedError,
     RateLimitError,
     WebhookSignatureError,
     WebhookTimestampError,
@@ -124,6 +125,18 @@ def _bought(item: dict[str, Any], answer: dict[str, Any]) -> dict:
     """The server's answer to a paid purchase, with ``then`` filled in (e.g. the voucher id)."""
     then = shop.then_step(item["buy"][shop.X402].get("then"), answer)
     return {**answer, "status": "bought", "product": item.get("key"), "then": then}
+
+
+def _outcome_unknown(item: dict[str, Any], http: int | None, error: str) -> dict:
+    """A paid request whose outcome is open: the signature may have left, no answer settled it."""
+    return {
+        "status": "unknown",
+        "product": item.get("key"),
+        "http": http,
+        "error": error,
+        "note": "the payment may have gone out, its outcome is unknown — do not pay again; "
+        "check vouchers() later",
+    }
 
 
 def _refused(item: dict[str, Any], resp: httpx.Response, answer: dict[str, Any]) -> dict:
@@ -424,7 +437,7 @@ class CosmergonAgent:
         for ~33h. ``refresh_state()`` is the supported way to do it.
         """
         if self._client is None:
-            raise RuntimeError("Agent not connected. Call run() or use async with.")
+            raise NotConnectedError("Agent not connected. Call run() or use async with.")
         resp = await self._request("GET", f"/api/v1/agents/{self.agent_id}/state")
         if resp.status_code in (401, 403):
             raise AuthenticationError(
@@ -775,8 +788,11 @@ class CosmergonAgent:
             ``{"status": ..., "product": ...}``. Status is ``consent_required`` (``notice``,
             ``price``), ``not_available`` (``reason``, maybe ``next_step``), ``checkout``
             (``checkout_url``, ``then``), ``payment_required`` (``offer``, ``usdc``,
-            ``not_signed``), ``bought`` (the server's answer, ``then``) or ``refused``
-            (``http``, ``error``, maybe ``reason``). With a free key every answer also carries
+            ``not_signed``), ``bought`` (the server's answer, ``then``), ``refused``
+            (``http``, ``error``, maybe ``reason``) or ``unknown`` (``http``, ``error``,
+            ``note``): the signed request was on its way, but no answer settled it — a lost
+            answer, a 429, a server error (503 ``settlement_unknown``). Do not pay again; look at
+            ``vouchers()`` or the products you hold later. With a free key every answer also carries
             ``key_expires``: when the key ends and that the purchase stays with the agent while
             the way in is lost — ``persistenz_monat``/``_jahr`` keep it. A bought energy voucher is
             not activated: call ``activate_voucher`` — or the returned ``then`` — for the energy.
@@ -784,7 +800,8 @@ class CosmergonAgent:
         Raises:
             ValueError: An unknown product or ``pay``, a ``holder_country`` that is no ISO
                 code, or a catalog path that leaves the API host — then nothing is sent.
-            CosmergonError: The catalog could not be read.
+            CosmergonError: The catalog could not be read, or a request before any payment
+                failed. Once a payment was sent nothing raises (status ``unknown``).
         """
         catalog = await self.products()
         item = shop.find(catalog, product)
@@ -853,7 +870,7 @@ class CosmergonAgent:
             payment = await payment if inspect.isawaitable(payment) else payment
             if not isinstance(payment, str) or not payment:
                 reason = "the signer returned no X-PAYMENT value"
-        if reason is not None:
+        if reason is not None or not isinstance(payment, str):
             return {
                 "status": "payment_required",
                 "product": item["key"],
@@ -862,11 +879,26 @@ class CosmergonAgent:
                 "not_signed": reason,
                 "error": error_text(answer),
             }
-        paid = await self._request(
-            method, path, json=body, params=query, headers={**headers, "X-PAYMENT": payment}
-        )
+        return await self._send_paid(item, {**headers, "X-PAYMENT": payment})
+
+    async def _send_paid(self, item: dict[str, Any], headers: dict[str, str]) -> dict:
+        """The request with ``X-PAYMENT``: once the signature is out, nothing raises.
+
+        A lost answer, a 429 or a 5xx (the server's 503 ``settlement_unknown`` among them) leave
+        open whether the payment was settled; that is ``unknown``, not ``refused`` and not an
+        exception, so the caller does not pay a second time (cos20 #606 F3, F4).
+        """
+        method, path, body, query = shop.route(item, shop.X402)
+        try:
+            paid = await self._request(method, path, json=body, params=query, headers=headers)
+        except CosmergonError as exc:
+            return _outcome_unknown(item, None, str(exc))
         answer = _json_body(paid)
-        return _bought(item, answer) if paid.status_code == 200 else _refused(item, paid, answer)
+        if paid.status_code == 200:
+            return _bought(item, answer)
+        if paid.status_code >= 500:
+            return _outcome_unknown(item, paid.status_code, error_text(answer, paid.text))
+        return _refused(item, paid, answer)
 
     async def vouchers(self) -> dict:
         """Your energy vouchers that are not activated yet (``vouchers``, ``total_amount``)."""
@@ -1895,11 +1927,7 @@ class CosmergonAgent:
 
         Without a code it stays the plain ``_auto_register_anonymous`` call (#603).
         """
-        referral = (
-            shop.referral_body(referral_code, referral_channel)
-            if referral_code or referral_channel
-            else shop.referral_from_env()
-        )
+        referral = shop.referral_from_env(referral_code, referral_channel)
         if referral:
             return CosmergonAgent._register_anonymous(base_url, guards, referral)
         key, agent_id = CosmergonAgent._auto_register_anonymous(base_url, guards)
@@ -1972,7 +2000,7 @@ class CosmergonAgent:
         Transport errors (network) retry with exponential backoff.
         """
         if self._client is None:
-            raise RuntimeError("Agent not connected. Call run() or use async with.")
+            raise NotConnectedError("Agent not connected. Call run() or use async with.")
 
         # One key per logical call, created BEFORE the retry loop: a retry after a
         # timeout reuses it, and the server returns the stored result instead of
@@ -2018,7 +2046,7 @@ class CosmergonAgent:
     async def _resolve_agent_id(self) -> None:
         """Get agent_id from the API key's associated agent."""
         if self._client is None:
-            raise RuntimeError("Agent not connected")
+            raise NotConnectedError("Agent not connected")
         resp = await self._request("GET", "/api/v1/agents/")
         if resp.status_code == 200:
             agents = resp.json()
@@ -2104,7 +2132,7 @@ class CosmergonAgent:
     async def _poll_loop(self) -> None:
         """Main loop: fetch state, call handler, sleep."""
         if self._client is None:
-            raise RuntimeError("Agent not connected")
+            raise NotConnectedError("Agent not connected")
         last_tick = -1
 
         while self._running:

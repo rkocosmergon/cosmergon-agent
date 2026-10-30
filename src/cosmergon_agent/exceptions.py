@@ -63,6 +63,14 @@ class ConnectionError(CosmergonError):
     """Network failure after all retries exhausted."""
 
 
+class NotConnectedError(CosmergonError, RuntimeError):
+    """A request before ``run()``/``async with`` opened the connection, or after it closed.
+
+    Also a ``RuntimeError``, which it was before: code that catches either keeps working, and
+    the dashboard's handlers, which catch ``CosmergonError``, now catch it too (cos20 #606 F6).
+    """
+
+
 class SendRefusedError(CosmergonError):
     """The caller's ``send_check`` refused a request before it left (cos20 #492).
 

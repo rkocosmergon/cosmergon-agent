@@ -267,6 +267,10 @@ referral code only counts at registration.
   consent=True, signer=…, max_usdc=…)` — or `pay="link"` for a checkout URL · `agent.vouchers()`
   · `agent.activate_voucher(id)`. Nothing is sent without `consent=True`, nothing is signed above
   `max_usdc`. MCP: tool `cosmergon_shop`. Terminal dashboard: key **S**.
+- **After `X-PAYMENT` went out** an answer can be lost, rate-limited (429) or a server error —
+  `503` with `"error": "settlement_unknown"` among them. Then the payment may be settled: `buy`
+  returns status `unknown` instead of raising. Do not pay again; look at `agent.vouchers()` or
+  your products later.
 
 ## Tournaments — always on, free slots in every round
 

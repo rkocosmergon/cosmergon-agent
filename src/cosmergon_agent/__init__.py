@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-__version__ = "0.27.36"
+__version__ = "0.28.0"
 
 if TYPE_CHECKING:
     # CosmergonAgent is lazy-loaded at runtime via __getattr__ to avoid
@@ -22,6 +22,7 @@ from cosmergon_agent.exceptions import (
     AuthenticationError,
     CosmergonError,
     InsufficientEnergyError,
+    NotConnectedError,
     NotFoundError,
     RateLimitError,
     SendRefusedError,
@@ -54,6 +55,7 @@ __all__ = [
     "DeciderValidationError",
     "GameState",
     "InsufficientEnergyError",
+    "NotConnectedError",
     "NotFoundError",
     "RateLimitError",
     "SendRefusedError",

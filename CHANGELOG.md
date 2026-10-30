@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.28.0] — 2026-10-30
 
 ### Changed
 
@@ -28,6 +28,27 @@
   (auto-registration, dashboard, MCP), and `cosmergon-agent new --ref CODE[/channel]`. It only
   counts when a new agent registers; `agent.referral_accepted` and a warning say when the
   server did not recognise it, and a key that exists already logs that the code is ignored.
+
+### Fixed (before release, from a fault search over the shop — cos20 #606)
+
+- **A paid request whose answer is lost no longer raises or reads `refused`.** Once
+  `X-PAYMENT` went out, a lost answer, a 429 or a server error (the server's 503
+  `settlement_unknown` among them) leaves the outcome open. `buy` now returns status `unknown`
+  with a note: do not pay again, look at `vouchers()` later. Before, it raised
+  `ConnectionError`/`RateLimitError` or said `refused`, which invited a second payment.
+- **`max_usdc` must be a finite number of at least 0.** `float("nan")` let any amount be signed,
+  because every comparison with NaN is false.
+- **MCP `cosmergon_shop`: only the boolean `true` is consent.** A string `"false"` counted as
+  consent and fetched a checkout link.
+- **Not connected is a `CosmergonError`.** New `NotConnectedError`, also a `RuntimeError` as
+  before, so existing `except RuntimeError` keeps working. The dashboard no longer quits on S,
+  C → 1 or a chat message while the agent is not connected.
+- **Dashboard: A does not switch the agent under a shop dialog.** The confirmation names the
+  agent it buys for; a switch underneath bought with the other agent's key.
+- **Referral code and channel each fall back to the environment.** A code given as argument
+  kept `COSMERGON_REFERRAL_CHANNEL` out, and a channel given alone failed registration even
+  with `COSMERGON_REFERRAL_CODE` set.
+- **Dashboard prices show any interval the server sends**, not only month and year.
 
 ## [0.27.36] — 2026-10-29
 
