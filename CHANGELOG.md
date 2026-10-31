@@ -9,6 +9,17 @@
   The packs now deliver 50,000 (Grow, €5) and 200,000 (Compete, €20) energy — set by the server.
 - **`[S] Shop` stands in the bottom line, behind `[K] Key`**, on the color of the economy frame,
   so the shop can be found without opening the help. A key warning still comes first.
+- **`[K] Key` and `[S] Shop` end the bottom line at every terminal width** (cos20 #610), and
+  never move to the key bar above it. Where the line is too narrow, the rest makes room step
+  by step: the plan, the agent's name, "Keep agent" becomes "Keep", the weekday, "unless used",
+  "key". The warning itself, its time and `[U] Keep` always stay. Before, below about 88
+  columns the shop stood nowhere.
+
+### Fixed
+
+- **A catalog amount that is not a finite number no longer crashes the shop** (cos20 #610).
+  An `energy` of `inf` raised `OverflowError` in the shop dialogs; such an amount is now not
+  shown.
 
 ## [0.28.1] — 2026-10-30
 
