@@ -1719,7 +1719,9 @@ def _shop_energy(product: dict[str, Any]) -> str:
     without this line the buyer never saw how much the price buys.
     """
     energy = product.get("energy")
-    if isinstance(energy, bool) or not isinstance(energy, (int, float)) or not energy > 0:
+    if isinstance(energy, bool) or not isinstance(energy, (int, float)):
+        return ""
+    if not math.isfinite(energy) or not energy > 0:  # int(inf) raised OverflowError (cos20 #610)
         return ""
     return f"{int(energy):,} energy"
 
@@ -3277,6 +3279,7 @@ class CosmergonDashboard(App):
                 agents=bool(load_token()),
                 advisor=bool(self._advisor),
                 key_in_status=self._key_hint_in_status(state),
+                shop_in_status=self._key_hint_in_status(state),  # [S] goes with [K] (#610)
             )
         ]
         self._update_panel("fix-bar", "  ".join(keys))
@@ -3286,10 +3289,12 @@ class CosmergonDashboard(App):
         return self.agent._api_key.raw if self.agent._api_key else ""
 
     def _key_hint_in_status(self, state: GameState | None) -> bool:
-        """Whether ``[K] Key`` fits at the end of the status bar (else the bottom bar keeps it).
+        """Whether ``[K] Key`` and the ``[S] Shop`` chip fit at the end of the status bar.
 
-        The bar is one line and is cut on the right; the hint is its last entry. Counted with
-        the longer ``[U]`` word, so the answer does not flip with that word's choice.
+        Else the bottom bar keeps both, [S] right behind [K] (cos20 #610: before, the line cut
+        the chip off below about 88 columns, and with a key that ends unless used the shop stood
+        nowhere). Counted with the longer ``[U]`` word, so the answer does not flip with that
+        word's choice.
         """
         name = (state.agent_name if state and state.agent_name else None) or (
             (self.agent.agent_id or "?")[:8]
@@ -3320,13 +3325,13 @@ class CosmergonDashboard(App):
         line = f"[dim]{sep.join([_roh(name), _roh(tier)])}[/dim]"
         # [K] Key stands where the shortened key used to stand (founder on the device,
         # 12.10.2026): the key itself is shown by [K], its first characters said nothing.
-        # Where the line has no room for it, [K] stays the last entry of the bottom bar.
+        # [S] Shop right behind it, on its own surface (founder, 31.10.2026: "in die unterste
+        # Zeile, hinter K Key"). Where the line has no room for both, the bottom bar ends with
+        # them, [S] behind [K] (cos20 #610).
         if self._key_hint_in_status(state):
             line += f"[dim]{sep}[/dim]" + _c(self._theme.cmd, _hk("K")) + "[dim] Key[/dim]"
-        # [S] Shop last, on its own surface (founder, 31.10.2026: "in die unterste Zeile, hinter
-        # K Key"). The key warning below goes in front, so a narrow window cuts [S] before it.
-        surface, text = _chip_colors(self._theme)
-        line += f" [{text} on {surface}] {_hk('S')} Shop [/]"
+            surface, text = _chip_colors(self._theme)
+            line += f" [{text} on {surface}] {_hk('S')} Shop [/]"
         # #468: when the agent is lost comes FIRST, so a narrow terminal cuts the rest, not it.
         # What to do about it stands right behind the warning, not among the keys.
         ends = _key_ends(state)
@@ -5338,6 +5343,7 @@ def _fix_bar_keys(
     agents: bool = False,
     advisor: bool = False,
     key_in_status: bool = False,
+    shop_in_status: bool = True,
 ) -> list[tuple[str, str]]:
     """The keys the bottom bar shows — only those that do something right now (#468 S2).
 
@@ -5373,10 +5379,13 @@ def _fix_bar_keys(
     if agents:  # agent selector — only with a player token in the config
         keys.append(("A", "Agents"))
     keys += [("?", "Help"), ("Q", "Quit")]
-    # [K] Key stands in the status bar, in place of the shortened key (#484). Only where
-    # that line has no room is it the last entry here.
+    # [K] Key stands in the status bar, in place of the shortened key (#484), the [S] Shop chip
+    # right behind it. Only where that line has no room do both end this bar, [S] behind [K]
+    # (cos20 #610: before, the line cut the chip off and the shop stood nowhere).
     if not key_in_status:
         keys.append(("K", "Key"))
+    if not shop_in_status:
+        keys.append(("S", "Shop"))
     return keys
 
 
