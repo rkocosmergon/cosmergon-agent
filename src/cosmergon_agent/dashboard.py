@@ -33,7 +33,7 @@ import shlex
 import time
 import webbrowser
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
@@ -3278,8 +3278,6 @@ class CosmergonDashboard(App):
                 state,
                 agents=bool(load_token()),
                 advisor=bool(self._advisor),
-                key_in_status=self._key_hint_in_status(state),
-                shop_in_status=self._key_hint_in_status(state),  # [S] goes with [K] (#610)
             )
         ]
         self._update_panel("fix-bar", "  ".join(keys))
@@ -3287,26 +3285,6 @@ class CosmergonDashboard(App):
     def _get_plain_key(self) -> str:
         """Return the unmasked API key (for KeyModal display)."""
         return self.agent._api_key.raw if self.agent._api_key else ""
-
-    def _key_hint_in_status(self, state: GameState | None) -> bool:
-        """Whether ``[K] Key`` and the ``[S] Shop`` chip fit at the end of the status bar.
-
-        Else the bottom bar keeps both, [S] right behind [K] (cos20 #610: before, the line cut
-        the chip off below about 88 columns, and with a key that ends unless used the shop stood
-        nowhere). Counted with the longer ``[U]`` word, so the answer does not flip with that
-        word's choice.
-        """
-        name = (state.agent_name if state and state.agent_name else None) or (
-            (self.agent.agent_id or "?")[:8]
-        )
-        tier = (state.subscription_tier if state else None) or "free"
-        text = " │ ".join([name, tier, "[K] Key"]) + " " + _SHOP_CHIP
-        ends = _key_ends(state)
-        if ends and ends[1]:
-            text = f"⚠ key ends {ends[0]} unless used · [U] Keep agent │ " + text
-        elif ends:
-            text = f"key kept until {ends[0]} │ " + text
-        return bool(len(text) <= self.size.width - 2)  # the bar's padding: 0 1
 
     def _agent_name_or_id(self) -> str:
         """The agent's name for a log line; the start of its id while the state has none."""
@@ -3319,30 +3297,30 @@ class CosmergonDashboard(App):
         name = (state.agent_name if state and state.agent_name else None) or (
             (self.agent.agent_id or "?")[:8]
         )
-        sep = " │ "
         # subscription tier in status bar (tick already shown in hint-bar — no duplicate)
         tier = (state.subscription_tier if state else None) or "free"
-        line = f"[dim]{sep.join([_roh(name), _roh(tier)])}[/dim]"
+        stufe = _status_stufe(name, tier, state, self.size.width - 2)  # the bar's padding: 0 1
+        sep = " │ "
+        teile = [_roh(t) for t in (stufe.name, stufe.tier) if t]
         # [K] Key stands where the shortened key used to stand (founder on the device,
         # 12.10.2026): the key itself is shown by [K], its first characters said nothing.
-        # [S] Shop right behind it, on its own surface (founder, 31.10.2026: "in die unterste
-        # Zeile, hinter K Key"). Where the line has no room for both, the bottom bar ends with
-        # them, [S] behind [K] (cos20 #610).
-        if self._key_hint_in_status(state):
-            line += f"[dim]{sep}[/dim]" + _c(self._theme.cmd, _hk("K")) + "[dim] Key[/dim]"
-            surface, text = _chip_colors(self._theme)
-            line += f" [{text} on {surface}] {_hk('S')} Shop [/]"
-        # #468: when the agent is lost comes FIRST, so a narrow terminal cuts the rest, not it.
-        # What to do about it stands right behind the warning, not among the keys.
-        ends = _key_ends(state)
-        if ends and ends[1]:
+        # [S] Shop right behind it, on its own surface, as the line's last entry (founder,
+        # 31.10.2026: "s als letzter eintrag in die statuszeile").
+        surface, text = _chip_colors(self._theme)
+        keys = (
+            _c(self._theme.cmd, _hk("K"))
+            + "[dim] Key[/dim]"
+            + f" [{text} on {surface}] {_hk('S')} Shop [/]"
+        )
+        line = (f"[dim]{sep.join(teile)}{sep}[/dim]" if teile else "") + keys
+        # #468: when the agent is lost comes FIRST; what to do about it stands right behind
+        # the warning, not among the keys.
+        if stufe.keep:
             warn = self._theme.warn
-            warning = f"⚠ key ends {_roh(ends[0])} unless used · "
-            word = _keep_word(len(warning), self.size.width - 2)  # the bar's padding: 0 1
-            keep = _c(self._theme.cmd, _hk("U")) + _c(warn, " " + word)
-            line = _c(warn, warning) + keep + sep + line
-        elif ends:
-            line = _c("dim", f"key kept until {_roh(ends[0])}") + sep + line
+            keep = _c(self._theme.cmd, _hk("U")) + _c(warn, " " + stufe.keep)
+            line = _c(warn, _roh(stufe.lead)) + keep + sep + line
+        elif stufe.lead:
+            line = _c("dim", _roh(stufe.lead)) + sep + line
         self._update_panel("status-bar", line)
 
     def _set_feedback(self, msg: str, duration: float = 4.0, at_tick: bool | None = None) -> None:
@@ -5342,8 +5320,6 @@ def _fix_bar_keys(
     *,
     agents: bool = False,
     advisor: bool = False,
-    key_in_status: bool = False,
-    shop_in_status: bool = True,
 ) -> list[tuple[str, str]]:
     """The keys the bottom bar shows — only those that do something right now (#468 S2).
 
@@ -5353,7 +5329,8 @@ def _fix_bar_keys(
     The bindings stay: a key that is not shown still answers with its hint. Pause ([X]) is
     deliberately absent — it is an explicit action and lives in the help. [W] carries the
     name of the menu it opens (bus, market, combat status). While the agent's key ends unless
-    used, [U] is absent too: it stands in the status bar, right behind that warning.
+    used, [U] is absent too: it stands in the status bar, right behind that warning. [K] Key and
+    [S] Shop are never here: they end the status bar (founder, 31.10.2026, cos20 #610).
     """
     actions = (state.available_actions if state else None) or {}
     has_fields = bool(state and state.fields)
@@ -5379,18 +5356,74 @@ def _fix_bar_keys(
     if agents:  # agent selector — only with a player token in the config
         keys.append(("A", "Agents"))
     keys += [("?", "Help"), ("Q", "Quit")]
-    # [K] Key stands in the status bar, in place of the shortened key (#484), the [S] Shop chip
-    # right behind it. Only where that line has no room do both end this bar, [S] behind [K]
-    # (cos20 #610: before, the line cut the chip off and the shop stood nowhere).
-    if not key_in_status:
-        keys.append(("K", "Key"))
-    if not shop_in_status:
-        keys.append(("S", "Shop"))
     return keys
 
 
-# The chip as it reads (``_key_hint_in_status`` counts it); drawn in ``_draw_status_bar``.
-_SHOP_CHIP = " [S] Shop "
+# The end of every status bar as it reads: [K] Key, then the [S] Shop chip (``_draw_status_bar``).
+_STATUS_KEYS = "[K] Key" + "  [S] Shop "
+
+
+@dataclass(frozen=True)
+class _StatusStufe:
+    """One version of the status bar; ``keep`` is the word behind [U] after the warning."""
+
+    lead: str = ""
+    keep: str = ""
+    name: str = ""
+    tier: str = ""
+
+    def laenge(self) -> int:
+        teile = [t for t in (self.name, self.tier) if t]
+        vorn = self.lead + (f"[U] {self.keep}" if self.keep else "")
+        if vorn:
+            teile.insert(0, vorn)
+        return sum(len(t) + 3 for t in teile) + len(_STATUS_KEYS)  # " │ " after each
+
+
+def _status_stufen(name: str, tier: str, state: GameState | None) -> list[_StatusStufe]:
+    """The status bar's versions, fullest first; [K] Key and [S] Shop end every one.
+
+    btop's way, seen on the Omarchy device (31.10.2026): its hints keep their place, and the
+    least important go first as the window narrows ("per-core" and "reverse" at 80 columns,
+    "tree" stays). Founder 31.10.: [K] and [S] never in the bottom bar, [S] the line's last
+    entry (cos20 #610). What yields here, in this order: the tier, the name, the long [U]
+    word, the weekday, "unless used", "key". The warning itself (⚠, the time, [U] Keep) stays.
+    """
+    ends = _key_ends(state)
+    if ends is None:
+        return [_StatusStufe(name=name, tier=tier), _StatusStufe(name=name)]
+    kurz = _ortszeit((state.key_expiry or {}).get("at") if state else None, "%d %b %H:%M")
+    if not ends[1]:
+        lead = f"key kept until {ends[0]}"
+        return [
+            _StatusStufe(lead=lead, name=name, tier=tier),
+            _StatusStufe(lead=lead, name=name),
+            _StatusStufe(lead=lead),
+            _StatusStufe(lead=f"key kept until {kurz}"),
+        ]
+    lead = f"⚠ key ends {ends[0]} unless used · "
+    return [
+        _StatusStufe(lead=lead, keep="Keep agent", name=name, tier=tier),
+        _StatusStufe(lead=lead, keep="Keep agent", name=name),
+        _StatusStufe(lead=lead, keep="Keep agent"),
+        _StatusStufe(lead=lead, keep="Keep"),
+        _StatusStufe(lead=f"⚠ key ends {kurz} unless used · ", keep="Keep"),
+        _StatusStufe(lead=f"⚠ key ends {kurz} · ", keep="Keep"),
+        _StatusStufe(lead=f"⚠ ends {kurz} · ", keep="Keep"),
+    ]
+
+
+def _status_stufe(name: str, tier: str, state: GameState | None, width: int) -> _StatusStufe:
+    """The fullest version that fits ``width``; else the shortest, a long name cut with "…"."""
+    stufen = _status_stufen(name, tier, state)
+    for stufe in stufen:
+        if stufe.laenge() <= width:
+            return stufe
+    letzte = stufen[-1]
+    if letzte.name:
+        rest = len(letzte.name) - (letzte.laenge() - width)
+        letzte = replace(letzte, name=letzte.name[: max(rest - 1, 1)] + "…")
+    return letzte
 
 
 def _chip_colors(theme: Theme) -> tuple[str, str]:
@@ -5407,15 +5440,6 @@ def _chip_colors(theme: Theme) -> tuple[str, str]:
             break
     text = max(("#000000", "#ffffff"), key=lambda c: _contrast(c, surface))
     return surface, text
-
-
-def _keep_word(used: int, width: int) -> str:
-    """The word behind [U] in the key warning: the long one where the status bar has room.
-
-    ``used`` is the length of the warning in front of it. On a narrow terminal the short
-    word keeps the key itself on the line.
-    """
-    return "Keep agent" if used + len("[U] Keep agent") <= width else "Keep"
 
 
 _WELCOME_KEYS = ("F", "C", "P", "V", "T", "?")
@@ -5450,12 +5474,12 @@ def _key_ends(state: GameState | None) -> tuple[str, bool] | None:
     return when, bool((expiry or {}).get("renews_on_use"))
 
 
-def _ortszeit(iso: object) -> str | None:
+def _ortszeit(iso: object, fmt: str = "%a %d %b, %H:%M") -> str | None:
     """A server time (ISO, UTC) in the viewer's local time, e.g. ``Sat 10 Oct, 20:30``."""
     if not iso:
         return None
     try:
-        return datetime.fromisoformat(str(iso)).astimezone().strftime("%a %d %b, %H:%M")
+        return datetime.fromisoformat(str(iso)).astimezone().strftime(fmt)
     except ValueError:
         return None
 
