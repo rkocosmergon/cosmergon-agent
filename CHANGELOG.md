@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.28.2] — 2026-10-31
+
+### Changed
+
+- **The shop shows how much energy a pack delivers** (cos20 #609). List, detail and the last
+  page before the checkout read e.g. `€5.00 · 50,000 energy`, from the catalog's `energy` field.
+  The packs now deliver 50,000 (Grow, €5) and 200,000 (Compete, €20) energy — set by the server.
+- **`[S] Shop` stands in the bottom line, behind `[K] Key`**, on the color of the economy frame,
+  so the shop can be found without opening the help. A key warning still comes first.
+
 ## [0.28.1] — 2026-10-30
 
 ### Fixed

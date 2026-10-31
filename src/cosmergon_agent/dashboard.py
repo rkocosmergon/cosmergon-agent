@@ -1712,6 +1712,18 @@ def _shop_price(product: dict[str, Any]) -> str:
     return f"{text} / {interval}" if isinstance(interval, str) and interval.isalpha() else text
 
 
+def _shop_energy(product: dict[str, Any]) -> str:
+    """The energy an energy pack delivers, e.g. ``50,000 energy`` — ``""`` for other products.
+
+    From the catalog's ``energy`` field (cos20 #609): the server's texts stay free of numbers, so
+    without this line the buyer never saw how much the price buys.
+    """
+    energy = product.get("energy")
+    if isinstance(energy, bool) or not isinstance(energy, (int, float)) or not energy > 0:
+        return ""
+    return f"{int(energy):,} energy"
+
+
 def _shop_why_not(product: dict[str, Any]) -> str:
     """Why the shop cannot sell this product now, or ``""`` if B may buy it."""
     way = shop.way_for(product, "link")
@@ -1790,9 +1802,10 @@ class ShopModal(ModalScreen):
                 if product.get("group") != group:
                     group = product.get("group")
                     lines += ["", _c(self._theme.data, _roh(_SHOP_GROUPS.get(str(group), group)))]
+                energy = _shop_energy(product)
                 text = (
                     f"{_roh(product.get('name'))}  [dim]{_roh(product.get('summary'))}[/dim]"
-                    f"  {_roh(_shop_price(product))}"
+                    f"  {_roh(_shop_price(product))}" + (f" · {energy}" if energy else "")
                 )
             if row == self._cursor:
                 cursor_line = len(lines)
@@ -1859,7 +1872,12 @@ class ShopDetailModal(ModalScreen):
     def compose(self) -> ComposeResult:
         p = self._product
         with VerticalScroll(id="shopd-wrap"):
-            yield Static(f"[bold]{_roh(p.get('name'))}[/bold]  {_roh(_shop_price(p))}", markup=True)
+            energy = _shop_energy(p)
+            yield Static(
+                f"[bold]{_roh(p.get('name'))}[/bold]  {_roh(_shop_price(p))}"
+                + (f" · [bold]{energy}[/bold]" if energy else ""),
+                markup=True,
+            )
             yield Static(f"[dim]{_roh(p.get('summary'))}[/dim]", markup=True)
             for label, key in self._FIELDS:
                 if p.get(key):
@@ -1929,9 +1947,11 @@ class ShopConfirmModal(ModalScreen):
         consent = shop.consent_notice(p)
         with VerticalScroll(id="shopc-wrap"):
             yield Static(f"[bold]Buy {_roh(p.get('name'))}?[/bold]", markup=True)
+            energy = _shop_energy(p)
             yield Static(
                 f"\nPrice: {_roh(_shop_price(p))} incl. VAT (binding: the checkout)\n"
-                f"For: {_roh(self._agent_name)}\n"
+                + (f"You get: {energy}, as a voucher\n" if energy else "")
+                + f"For: {_roh(self._agent_name)}\n"
                 f"Payment: {_SHOP_WAYS.get(way, way)}\n"
                 f"Delivery: {_roh(p.get('delivery') or '')}",
                 markup=True,
@@ -3275,7 +3295,7 @@ class CosmergonDashboard(App):
             (self.agent.agent_id or "?")[:8]
         )
         tier = (state.subscription_tier if state else None) or "free"
-        text = " │ ".join([name, tier, "[K] Key"])
+        text = " │ ".join([name, tier, "[K] Key"]) + " " + _SHOP_CHIP
         ends = _key_ends(state)
         if ends and ends[1]:
             text = f"⚠ key ends {ends[0]} unless used · [U] Keep agent │ " + text
@@ -3303,6 +3323,10 @@ class CosmergonDashboard(App):
         # Where the line has no room for it, [K] stays the last entry of the bottom bar.
         if self._key_hint_in_status(state):
             line += f"[dim]{sep}[/dim]" + _c(self._theme.cmd, _hk("K")) + "[dim] Key[/dim]"
+        # [S] Shop last, on its own surface (founder, 31.10.2026: "in die unterste Zeile, hinter
+        # K Key"). The key warning below goes in front, so a narrow window cuts [S] before it.
+        surface, text = _chip_colors(self._theme)
+        line += f" [{text} on {surface}] {_hk('S')} Shop [/]"
         # #468: when the agent is lost comes FIRST, so a narrow terminal cuts the rest, not it.
         # What to do about it stands right behind the warning, not among the keys.
         ends = _key_ends(state)
@@ -5354,6 +5378,26 @@ def _fix_bar_keys(
     if not key_in_status:
         keys.append(("K", "Key"))
     return keys
+
+
+# The chip as it reads (``_key_hint_in_status`` counts it); drawn in ``_draw_status_bar``.
+_SHOP_CHIP = " [S] Shop "
+
+
+def _chip_colors(theme: Theme) -> tuple[str, str]:
+    """Surface and text of the [S] Shop chip in the status bar (cos20 #609, UI panel 31.10.).
+
+    No new theme color: the shop belongs to the economy, and every theme (Omarchy too) already
+    has that frame. Lifted towards white until it separates from the status bar's surface
+    (``bg``, ``_FRAME_CONTRAST``); the text is black or white, whichever reads better on it.
+    """
+    surface = theme.frame_economy
+    for step in range(21):
+        surface = _mix("#ffffff", theme.frame_economy, step / 20)
+        if _contrast(surface, theme.bg) >= _FRAME_CONTRAST:
+            break
+    text = max(("#000000", "#ffffff"), key=lambda c: _contrast(c, surface))
+    return surface, text
 
 
 def _keep_word(used: int, width: int) -> str:
