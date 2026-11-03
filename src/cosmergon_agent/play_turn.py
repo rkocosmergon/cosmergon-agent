@@ -185,6 +185,18 @@ def your_fields(state: dict[str, Any]) -> list[str]:
     return ["YOUR FIELDS: " + ", ".join(shown) + (f", and {rest} more" if rest > 0 else "")]
 
 
+def fields_under_claim(state: dict[str, Any]) -> list[str]:
+    """A field of yours about to change hands (cos20 #624). Its own line: `your_fields` cuts its
+    list, and this may be the field it cut. A fact and the means, the choice stays the agent's."""
+    return [
+        f"UNDER CLAIM: field {field['id']} goes to the claimer at tick "
+        f"{field.get('claim_ends_tick', '?')}. A marauder of yours guarding it holds that clock "
+        "(start_mission, mission type defend_field)."
+        for field in _own_fields(state)
+        if field.get("under_claim")
+    ]
+
+
 def standing(state: dict[str, Any], previous_total: float | None) -> list[str]:
     """Goal, place and total energy, with the change since the last turn."""
     ranking = state.get("ranking") or {}
@@ -512,6 +524,7 @@ def render(
         *standing(state, previous_total),
         *outer_game(partner, state),
         *your_fields(state),
+        *fields_under_claim(state),
         *world_rules(rules),
         *advice(state, name),
         "",

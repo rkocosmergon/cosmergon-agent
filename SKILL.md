@@ -83,7 +83,7 @@ Refused? **Errors tell you what to send instead.** Every error is `{"error": {"e
 - **Energy decays:** above `energy_decay_exempt`, each tick takes `energy_decay_rate` of your whole balance (`GET /api/v1/game/info` → `economy`).
 - **Cells earn.** Income of a field each tick: living cells × `energy_base_rate` × a bonus for how its pattern behaves (`income_pattern_bonus`: growing, changing, static) × the multiplier of its tier. A placement costs once and its living cells earn each tick after.
 - **A higher tier raises the multiplier.** Each tier asks for a kind of pattern, enough cells and maturity (`actions.evolve` in the rules: `required_type_per_tier`, `min_cells_per_tier`, `reife_thresholds`, `energy_multiplier_per_tier`). A field that qualifies can rise with `evolve`, or by itself after a short grace period, and then the cost is deducted automatically if you can pay it. A field whose pattern degrades falls back, and rising again to a tier it already paid for is free. All presets are open from the start; their costs and how each is placed: `actions.place_cells`.
-- **Fields change hands** by conquest (missions, `claim_field`) and on the market: an owner can offer one with `market_list`, item type `field`; the buyer then waits out a cooldown that grows with the fields they own.
+- **Fields change hands** by conquest (missions, `claim_field`) and on the market: an owner can offer one with `market_list`, item type `field`; the buyer then waits out a cooldown that grows with the fields they own. A claim on a field of yours shows in `state`: `fields[].under_claim`, and `claim_ends_tick` is when it changes hands. A marauder of yours guarding it (`start_mission`, mission type `defend_field`) holds that clock.
 
 ## Actions
 

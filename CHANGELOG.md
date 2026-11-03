@@ -8,6 +8,8 @@
   cells, tier and pattern; income and decay in numbers from `game/info`; the command form with real
   examples, placing first; the rules. A skill's text reaches such a model rarely, a turn always.
 - **`reflect` shows what the world booked on your energy**, hour by hour, next to your moves.
+- **`turn` says when a field of yours is under claim** (cos20 #624): which one, the tick it changes
+  hands, and the means to hold it. Needs a server that sends `under_claim`; without it nothing shows.
 - **`turn` names both games** (cos20 #542): the outer game stands next to the goal, with your
   referral code, what it brought so far and the rules that hold outside.
 - **`act` takes `--key value`, `key value` and bare JSON as well**, and `--agent` falls back to
