@@ -302,7 +302,7 @@ TOOLS = [
                     "type": "string",
                     "enum": ["summary", "rich"],
                     "description": (
-                        "summary = basic state, rich = full context (Developer tier required)"
+                        "summary = basic state, rich = full context"
                     ),
                     "default": "summary",
                 },

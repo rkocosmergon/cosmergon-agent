@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.30.0] — 2026-11-03
+
+### Added
+
+- **`turn` holds what a small model needs in every run** (cos20 #542): your fields with id, living
+  cells, tier and pattern; income and decay in numbers from `game/info`; the command form with real
+  examples, placing first; the rules. A skill's text reaches such a model rarely, a turn always.
+- **`reflect` shows what the world booked on your energy**, hour by hour, next to your moves.
+- **`act` takes `--key value` and bare JSON as well**, and `--agent` falls back to
+  `COSMERGON_PLAY_AGENT`. The server still checks every field name and fills in nothing.
+
+### Changed
+
+- **`SKILL.md` 0.10.0**: the head follows the Agent Skills format. Fields can change hands by
+  conquest and on the market. `create_field` needs a free slot, and tier rises by itself as well as
+  with `evolve`. A free key ends about 24 hours after its last use. Parts the live API states in
+  full point to it now.
+- **README** corrected in the same points. The MCP text no longer names a plan requirement that does
+  not exist.
+
 ## [0.29.0] — 2026-11-03
 
 ### Added

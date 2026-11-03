@@ -151,7 +151,7 @@ def params_from(pairs: list[str], raw: str | None) -> dict[str, Any]:
     for pair in pairs:
         key, sep, value = pair.partition("=")
         if not sep or not key:
-            _fail(f"expected key=value, got {pair!r}")
+            _fail(f"expected key=value, got {pair!r}; write it as key=value (fields: help-action)")
         try:
             params[key] = json.loads(value)
         except ValueError:
@@ -165,6 +165,48 @@ def params_from(pairs: list[str], raw: str | None) -> dict[str, Any]:
             _fail("--json must be an object")
         params.update(extra)
     return params
+
+
+def act_words(words: list[str]) -> tuple[list[str], dict[str, str]]:
+    """What stands after the move, in the forms a model writes: ``(pairs, the CLI's own flags)``.
+
+    On the device 172 of 615 ``act`` calls failed on the form before the server saw them (cos20
+    #542): ``--room world``, a bare JSON object, ``--agent`` behind the fields. These forms say the
+    same as ``key=value`` and become that. Nothing is added: a guessed field still goes to the
+    server, which refuses it and names the right ones (``strict``).
+    """
+    pairs: list[str] = []
+    own: dict[str, str] = {}
+    rest = list(words)
+    while rest:
+        word = rest.pop(0)
+        if word in ("-h", "--help"):
+            _fail("what a move needs: cosmergon-agent help-action ACTION --agent NAME")
+        if word.startswith("{"):
+            own["raw"] = word
+        elif word.startswith("--") and len(word) > 2:
+            key, sep, value = word[2:].partition("=")
+            if not sep:
+                if not rest or rest[0].startswith("--"):
+                    _fail(f"--{key} needs a value")
+                value = rest.pop(0)
+            if key in ("agent", "json", "base-url"):
+                own[{"json": "raw", "base-url": "base_url"}.get(key, key)] = value
+            else:
+                pairs.append(f"{key}={value}")
+        else:
+            pairs.append(word)
+    return pairs, own
+
+
+def _act_from(args: Any) -> None:
+    """``act`` from the command line, with the agent from ``--agent`` or the environment."""
+    pairs, own = act_words(args.pairs)
+    name = own.get("agent") or args.agent or os.environ.get("COSMERGON_PLAY_AGENT")
+    if not name:
+        _fail("name your agent: --agent NAME")
+    params = params_from(pairs, own.get("raw") or args.raw)
+    act(str(name), args.action, params, own.get("base_url") or args.base_url)
 
 
 def body_for(action: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -215,10 +257,35 @@ def turn(name: str, base_url: str) -> None:
     entry = _entry(name)
     data = _get(entry, base_url, "/state")
     memory = str((_get(entry, base_url, "/memory/prompt") or {}).get("prompt") or "")
-    _say(play_turn.render(data, memory, name, _remember(name).get("total")))
+    rules = _quietly(f"{base_url.rstrip('/')}/api/v1/game/info")
+    _say(play_turn.render(data, memory, name, _remember(name).get("total"), rules))
     total = play_turn.total_energy(data)
     if total is not None:
         _remember(name, total=total)
+
+
+def _quietly(url: str, **kwargs: Any) -> Any:
+    """Facts that help a turn and must not stop it: ``None`` when they cannot be had."""
+    try:
+        resp = _http.get(url, timeout=TIMEOUT_S, **kwargs)
+        return resp.json() if resp.status_code == 200 else None
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+def _booked_block(entry: Any, base_url: str) -> str:
+    """The world's bookings for a look back (cos20 #533, #542): its moves' consequences."""
+    base = f"{base_url.rstrip('/')}/api/v1/energy"
+    headers = {"Authorization": f"api-key {entry.api_key}"}
+    events = _quietly(f"{base}/events?tier=hourly&limit=40", headers=headers)
+    transactions = _quietly(f"{base}/transactions?limit=100", headers=headers)
+    lines = play_turn.booked(
+        events.get("events") if isinstance(events, dict) else None, transactions
+    )
+    if not lines:
+        return ""
+    joined = "\n".join(lines)
+    return f"WHAT THE WORLD BOOKED on your energy, by hour, newest first:\n{joined}\n"
 
 
 def reflect(name: str, texts: dict[str, str | None], base_url: str) -> None:
@@ -229,6 +296,7 @@ def reflect(name: str, texts: dict[str, str | None], base_url: str) -> None:
         memory = str((_get(entry, base_url, "/memory/prompt") or {}).get("prompt") or "")
         _say(
             f"LOOK BACK on your moves.\n{memory}\nBest and worst moves: {json.dumps(signals)}\n"
+            f"{_booked_block(entry, base_url)}"
             "Write three texts in English, then send them:\n"
             f"cosmergon-agent reflect --agent {name} --lessons '<100-500 chars: what you learned>' "
             "--avoid '<50-200 chars: what to stop doing>' --double-down '<50-200 chars: what "
@@ -283,10 +351,15 @@ def add_commands(sub: Any, default_base_url: str) -> None:
     p_new.add_argument("--ref", default=None, help="the inviter's CODE or CODE/channel")
     p_turn = sub.add_parser("turn", help="The situation, the memory, the moves — what to do now")
     p_state = sub.add_parser("state", help="Print an agent's raw state as JSON")
-    p_act = sub.add_parser("act", help="Play one move: ACTION [key=value ...] [--json OBJECT]")
+    p_act = sub.add_parser(
+        "act",
+        help="Play one move: ACTION key=value ... (or --key value, or a JSON object)",
+        description="Fields of a move: cosmergon-agent help-action ACTION --agent NAME",
+    )
     p_act.add_argument("action")
-    p_act.add_argument("pairs", nargs="*", metavar="key=value")
+    p_act.add_argument("pairs", nargs=argparse.REMAINDER, metavar="key=value")
     p_act.add_argument("--json", dest="raw", default=None)
+    p_act.add_argument("--agent", default=None)
     p_reflect = sub.add_parser("reflect", help="Look back and keep three lessons")
     for flag in ("--lessons", "--avoid", "--double-down"):
         p_reflect.add_argument(flag, default=None)
@@ -294,8 +367,9 @@ def add_commands(sub: Any, default_base_url: str) -> None:
     p_join.add_argument("--tournament", required=True)
     p_help = sub.add_parser("help-action", help="What an action needs, now")
     p_help.add_argument("action")
-    for parser in (p_turn, p_state, p_act, p_reflect, p_join, p_help):
-        parser.add_argument("--agent", required=True)
+    named = os.environ.get("COSMERGON_PLAY_AGENT")  # a run that plays one agent names it once
+    for parser in (p_turn, p_state, p_reflect, p_join, p_help):
+        parser.add_argument("--agent", default=named, required=not named)
     for parser in (p_new, p_turn, p_state, p_act, p_reflect, p_join, p_help):
         parser.add_argument("--base-url", default=default_base_url, help=argparse.SUPPRESS)
 
@@ -307,7 +381,7 @@ def run(args: Any) -> bool:
         "new": lambda: new(args.name, args.persona, base, args.ref),
         "turn": lambda: turn(args.agent, base),
         "state": lambda: state(args.agent, base),
-        "act": lambda: act(args.agent, args.action, params_from(args.pairs, args.raw), base),
+        "act": lambda: _act_from(args),
         "reflect": lambda: reflect(
             args.agent,
             {
