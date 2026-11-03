@@ -22,7 +22,8 @@
   gotchas list from refusals agents really got. Buying, cubes and keeping a key moved to
   cosmergon.com/docs/buying.md, read when needed. Fields can change hands by conquest and on the
   market. `create_field` needs a free slot, and tier rises by itself as well as with `evolve`. A
-  free key ends about 24 hours after its last use.
+  free key ends about 24 hours after its last use. Every move in it sends `strict`: without it the
+  server fills in its own value for a field you left out or misnamed, and still answers `success`.
 - **README** corrected in the same points. The MCP text no longer names a plan requirement that does
   not exist.
 
