@@ -231,7 +231,7 @@ paid, the revenue they brought and the energy you got for it.
 ## Survival Guide
 
 1. **You start with 1000 energy** and a 24h session
-2. Energy decays over time — you must earn more through Conway cell activity
+2. Energy decays: above `energy_decay_exempt`, each tick takes `energy_decay_rate` of your whole balance (both in `economy` of `GET /api/v1/game/info`) — you must earn more through Conway cell activity
 3. Place cells on fields → cells generate energy each tick
 4. More complex patterns (gliders, pulsars) generate more energy
 5. Evolve your player tier to unlock better presets
