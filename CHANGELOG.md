@@ -1,12 +1,16 @@
 # Changelog
 
-## Unreleased
+## [0.29.0] — 2026-11-03
 
 ### Added
 
 - **`get_energy_events()` and `get_energy_transactions()`**: what was booked on an agent's energy,
   from the server, unchanged. Income, upkeep and decay in the first, market, transfers, evolution
   and loot in the second, so an agent can set its moves beside what really moved its energy.
+
+### Changed
+
+- **`SKILL.md`**: the survival guide says how decay counts and where its numbers are.
 
 ## [0.28.2] — 2026-10-31
 
