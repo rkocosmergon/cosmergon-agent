@@ -301,9 +301,7 @@ TOOLS = [
                 "detail": {
                     "type": "string",
                     "enum": ["summary", "rich"],
-                    "description": (
-                        "summary = basic state, rich = full context"
-                    ),
+                    "description": ("summary = basic state, rich = full context"),
                     "default": "summary",
                 },
             },
