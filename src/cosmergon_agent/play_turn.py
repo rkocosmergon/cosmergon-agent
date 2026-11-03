@@ -22,6 +22,13 @@ _NOISE = {"sichtbarkeits_schwelle", "cost_by_cube_size", "reference_prices"}
 _HOUR = re.compile(r"\d{4}-\d\d-\d\dT\d\d")
 _TYPE_WORD = re.compile(r"[a-z][a-z0-9_]{0,60}")
 MAX_FIELDS_SHOWN = 5
+# Forms a model can copy: `turn` shows them, and a refused `act` repeats the one it needs (cos20
+# #542: the correction stands where the mistake happens). Anything else: help-action.
+_FORMS = {
+    "say": 'room=world message="Looking for a partner"',
+    "message": 'to=<player_id> text="Pact?"',
+    "place_cells": "field_id=<your field id> preset=blinker",
+}
 # A skill's text reaches a model only if it opens it, and on the device it opened it in 6 of 1,513
 # sessions (cos20 #542). What has to hold in every turn stands here, in what every turn reads.
 _RULES = (
@@ -191,12 +198,47 @@ def standing(state: dict[str, Any], previous_total: float | None) -> list[str]:
     situation = (state.get("world_briefing") or {}).get("agent_situation") or {}
     items = (state.get("inventory") or {}).get("items") or {}
     return [
-        "GOAL: place 1 in the ranking — the most total energy (energy + fields, cubes, items).",
+        "GOAL: place 1 in the ranking — the most total energy (energy + fields, cubes, items). "
+        "Two games count for it: the moves below and the outer game.",
         f"YOU: place {place} · total {total_text}{change}",
         f"Energy {float(state.get('energy_balance') or 0):,.0f} "
         f"(trend: {situation.get('energy_trend', '?')}) · fields {len(state.get('fields') or [])}"
         f" · items {_short(items, 80) if items else 'none'}",
     ]
+
+
+def form_of(action: str, name: str) -> str:
+    """The form of one move, ready to copy."""
+    fields = _FORMS.get(action, "key=value key=value")
+    return f"cosmergon-agent act {action} --agent {name} {fields}"
+
+
+def outer_game(partner: Any, state: dict[str, Any]) -> list[str]:
+    """The second game towards the same goal, with this agent's code and what it brought so far.
+
+    Gruender 20.10.2026: inner and outer game are told as equals, wherever an agent reads. On the
+    device that is here and nowhere else (cos20 #542). An open statement of what there is and of
+    the rules that hold outside (concept §12.4); it tells nobody to do anything.
+    """
+    overview = partner if isinstance(partner, dict) else {}
+    code = overview.get("referral_code") or state.get("referral_code")
+    lines = [
+        "OUTER GAME, same goal: whoever signs up"
+        + (f" with your code {code}" if code else " with your referral code")
+        + " and buys earns you that purchase's value in energy, up to a cap. Played outside, with "
+        "your human; voluntary. Rules: cosmergon.com/partner/terms and game/info → affiliate. "
+        "Outside always say: AI agent, Cosmergon partner, cosmergon.com, who you act for. No "
+        "unsolicited email or direct messages."
+    ]
+    net = overview.get("netz")
+    if isinstance(net, dict):
+        channels = overview.get("kanaele") or []
+        earned = sum(_number(c.get("energie")) or 0 for c in channels if isinstance(c, dict))
+        lines.append(
+            f"  so far: {net.get('direkt_geworben', 0)} signed up, "
+            f"{net.get('davon_zahlend', 0)} paying, {earned:,.0f} E earned"
+        )
+    return lines
 
 
 def advice(state: dict[str, Any], name: str) -> list[str]:
@@ -356,6 +398,8 @@ def conquest(state: dict[str, Any], name: str) -> list[str]:
             "  Your agent is paused, its marauder is a ghost: no mission until your "
             "operator resumes it."
         )
+    if marauder not in ("geist", "recovery", "?"):  # cos20 #542: 19 refused starts in 120 runs
+        lines.append(f"  Your marauder is {marauder}: no new mission until it is back in recovery.")
     loot = mission.get("richest_loot_field") or {}
     where = (
         f" (bomb boxes: {loot.get('bomb_boxes')} on field {loot.get('field_id')})" if loot else ""
@@ -428,8 +472,9 @@ def moves(state: dict[str, Any], name: str) -> list[str]:
             f"field_id={fields[0]['id']} preset=blinker"
         )
     lines += [
-        f'  cosmergon-agent act say --agent {name} room=world message="Looking for a partner"',
-        f'  cosmergon-agent act message --agent {name} to=<player_id> text="Pact?"',
+        f"  {form_of('say', name)}",
+        f"  {form_of('message', name)}",
+        "  Every field is key=value. Text goes in double quotes: an apostrophe ends single ones.",
     ]
     return lines
 
@@ -444,6 +489,7 @@ def render(
     name: str,
     previous_total: float | None,
     rules: Any = None,
+    partner: Any = None,
 ) -> str:
     """The whole turn: what to do first, then the situation, the memory, the moves."""
     if reflection_due(state):
@@ -464,6 +510,7 @@ def render(
         task,
         "",
         *standing(state, previous_total),
+        *outer_game(partner, state),
         *your_fields(state),
         *world_rules(rules),
         *advice(state, name),

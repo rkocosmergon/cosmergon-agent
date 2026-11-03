@@ -25,6 +25,7 @@ import argparse
 import difflib
 import json
 import os
+import re
 import sys
 import uuid
 from typing import Any
@@ -38,6 +39,9 @@ from cosmergon_agent.config import load_all_agents, save_agent
 
 TIMEOUT_S = 20.0
 PLAYED = "Your move for this turn is played. Write one line into your notes and stop."
+COMMANDS = frozenset({"turn", "state", "reflect", "join", "new", "help_action"})  # not moves
+_FIELD_NAME = re.compile(r"[a-z][a-z0-9_]*")
+_OWN_FLAGS = {"agent": "agent", "json": "raw", "base-url": "base_url"}
 
 
 def _say(text: str) -> None:
@@ -167,46 +171,85 @@ def params_from(pairs: list[str], raw: str | None) -> dict[str, Any]:
     return params
 
 
-def act_words(words: list[str]) -> tuple[list[str], dict[str, str]]:
+def _how(action: str, name: str) -> str:
+    """The right form for this move, in the refusal itself (cos20 #542)."""
+    return (
+        f"write: {play_turn.form_of(action, name)} · "
+        f"its fields: cosmergon-agent help-action {action} --agent {name}"
+    )
+
+
+def _named_in(words: list[str]) -> str | None:
+    """The agent named somewhere among the words, for a refusal that can show the right form."""
+    for index, word in enumerate(words):
+        key, sep, value = word.lstrip("-").partition("=")
+        if key == "agent":
+            if sep:
+                return value
+            return words[index + 1] if index + 1 < len(words) else None
+    return None
+
+
+def act_words(
+    words: list[str], action: str = "ACTION", name: str = "NAME"
+) -> tuple[list[str], dict[str, str]]:
     """What stands after the move, in the forms a model writes: ``(pairs, the CLI's own flags)``.
 
     On the device 172 of 615 ``act`` calls failed on the form before the server saw them (cos20
-    #542): ``--room world``, a bare JSON object, ``--agent`` behind the fields. These forms say the
-    same as ``key=value`` and become that. Nothing is added: a guessed field still goes to the
-    server, which refuses it and names the right ones (``strict``).
+    #542): ``--room world``, ``room world``, a bare JSON object, ``--agent`` behind the fields.
+    These forms say the same as ``key=value`` and become that. Nothing is added: a guessed field
+    still goes to the server, which refuses it and names the right ones (``strict``). What cannot
+    be read as a field is refused with the right form for this move.
     """
     pairs: list[str] = []
     own: dict[str, str] = {}
+
+    def keep(key: str, value: str) -> None:
+        if key in _OWN_FLAGS:
+            own[_OWN_FLAGS[key]] = value
+        else:
+            pairs.append(f"{key}={value}")
+
     rest = list(words)
     while rest:
         word = rest.pop(0)
-        if word in ("-h", "--help"):
-            _fail("what a move needs: cosmergon-agent help-action ACTION --agent NAME")
+        if word in ("-h", "--help") or word.lstrip("-").partition("=")[0] == "help-action":
+            _fail(f"what a move needs: cosmergon-agent help-action {action} --agent {name}")
+        key, sep, value = word.lstrip("-").partition("=")
         if word.startswith("{"):
             own["raw"] = word
-        elif word.startswith("--") and len(word) > 2:
-            key, sep, value = word[2:].partition("=")
-            if not sep:
-                if not rest or rest[0].startswith("--"):
-                    _fail(f"--{key} needs a value")
-                value = rest.pop(0)
-            if key in ("agent", "json", "base-url"):
-                own[{"json": "raw", "base-url": "base_url"}.get(key, key)] = value
-            else:
-                pairs.append(f"{key}={value}")
+        elif sep and key:
+            keep(key, value)
+        elif word.startswith("--") and key:
+            if not rest or rest[0].startswith("--"):
+                _fail(f"--{key} needs a value; {_how(action, name)}")
+            keep(key, rest.pop(0))
+        elif _FIELD_NAME.fullmatch(word) and rest and not rest[0].startswith("--"):
+            keep(word, rest.pop(0))
         else:
-            pairs.append(word)
+            _fail(f"expected key=value, got {word!r}; {_how(action, name)}")
     return pairs, own
 
 
 def _act_from(args: Any) -> None:
     """``act`` from the command line, with the agent from ``--agent`` or the environment."""
-    pairs, own = act_words(args.pairs)
-    name = own.get("agent") or args.agent or os.environ.get("COSMERGON_PLAY_AGENT")
+    action = args.action.replace("-", "_")
+    named = args.agent or os.environ.get("COSMERGON_PLAY_AGENT") or _named_in(args.pairs)
+    if action in COMMANDS:
+        word = action.replace("_", "-")
+        _fail(f"{word} is a command, not a move: cosmergon-agent {word} --agent {named or 'NAME'}")
+    pairs, own = act_words(args.pairs, action, named or "NAME")
+    name = own.get("agent") or named
     if not name:
-        _fail("name your agent: --agent NAME")
+        _fail(_no_name(action))
     params = params_from(pairs, own.get("raw") or args.raw)
-    act(str(name), args.action, params, own.get("base_url") or args.base_url)
+    act(str(name), action, params, own.get("base_url") or args.base_url)
+
+
+def _no_name(action: str) -> str:
+    """A move names its agent; the agents here are no secret, their keys stay out."""
+    yours = [n for n, e in load_all_agents().items() if e.api_key and e.agent_id]
+    return f"name your agent; {_how(action, yours[0] if len(yours) == 1 else 'NAME')}"
 
 
 def body_for(action: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -258,7 +301,11 @@ def turn(name: str, base_url: str) -> None:
     data = _get(entry, base_url, "/state")
     memory = str((_get(entry, base_url, "/memory/prompt") or {}).get("prompt") or "")
     rules = _quietly(f"{base_url.rstrip('/')}/api/v1/game/info")
-    _say(play_turn.render(data, memory, name, _remember(name).get("total"), rules))
+    partner = _quietly(
+        f"{base_url.rstrip('/')}/api/v1/agents/me/partner",
+        headers={"Authorization": f"api-key {entry.api_key}"},
+    )
+    _say(play_turn.render(data, memory, name, _remember(name).get("total"), rules, partner))
     total = play_turn.total_energy(data)
     if total is not None:
         _remember(name, total=total)

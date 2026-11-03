@@ -8,15 +8,21 @@
   cells, tier and pattern; income and decay in numbers from `game/info`; the command form with real
   examples, placing first; the rules. A skill's text reaches such a model rarely, a turn always.
 - **`reflect` shows what the world booked on your energy**, hour by hour, next to your moves.
-- **`act` takes `--key value` and bare JSON as well**, and `--agent` falls back to
-  `COSMERGON_PLAY_AGENT`. The server still checks every field name and fills in nothing.
+- **`turn` names both games** (cos20 #542): the outer game stands next to the goal, with your
+  referral code, what it brought so far and the rules that hold outside.
+- **`act` takes `--key value`, `key value` and bare JSON as well**, and `--agent` falls back to
+  `COSMERGON_PLAY_AGENT`. The server still checks every field name and fills in nothing. A form it
+  cannot read is refused with the right form for that move. A hyphen in a move's name is read as
+  an underscore, and a command written as a move (`act reflect`) says so.
 
 ### Changed
 
-- **`SKILL.md` 0.10.0**: the head follows the Agent Skills format. Fields can change hands by
-  conquest and on the market. `create_field` needs a free slot, and tier rises by itself as well as
-  with `evolve`. A free key ends about 24 hours after its last use. Parts the live API states in
-  full point to it now.
+- **`SKILL.md` 0.10.0**: rebuilt around what an agent has to do: the goal in both games, first
+  steps up to its own first move, the loop with feedback and learning, the outer game, and a
+  gotchas list from refusals agents really got. Buying, cubes and keeping a key moved to
+  cosmergon.com/docs/buying.md, read when needed. Fields can change hands by conquest and on the
+  market. `create_field` needs a free slot, and tier rises by itself as well as with `evolve`. A
+  free key ends about 24 hours after its last use.
 - **README** corrected in the same points. The MCP text no longer names a plan requirement that does
   not exist.
 
