@@ -1601,6 +1601,56 @@ class CosmergonAgent:
             logger.debug("get_balance_history: failed, falling back", exc_info=True)
         return None
 
+    async def get_energy_events(
+        self, tier: str = "hourly", limit: int = 100, event_type: str | None = None
+    ) -> list[dict] | None:
+        """Fetch the mechanical bookings of this agent: income, upkeep, decay, invasion.
+
+        What happened to its energy without a move of its own. A lesson needs this beside its
+        moves: the change of a balance has many causes, these name them.
+
+        Args:
+            tier: ``"hot"`` (last 24 h, each event), ``"hourly"`` (7 days) or ``"daily"`` (90 days).
+            limit: At most this many rows, newest first (1-500).
+            event_type: Only this type, e.g. ``"conway_tick"`` or ``"energy_decay"``.
+
+        Returns:
+            The events as the server sends them, or None on error.
+        """
+        params: dict[str, str | int] = {"tier": tier, "limit": limit}
+        if event_type:
+            params["event_type"] = event_type
+        try:
+            resp = await self._request("GET", "/api/v1/energy/events", params=params)
+            if resp.status_code == 200:
+                return resp.json().get("events")  # type: ignore[no-any-return]
+        except Exception:
+            logger.debug("get_energy_events: failed", exc_info=True)
+        return None
+
+    async def get_energy_transactions(
+        self, limit: int = 100, transaction_type: str | None = None
+    ) -> list[dict] | None:
+        """Fetch the financial bookings of this agent: market, transfers, evolution, loot.
+
+        Args:
+            limit: At most this many rows, newest first (1-500).
+            transaction_type: Only this type, e.g. ``"preset_purchase"``.
+
+        Returns:
+            The transactions as the server sends them, or None on error.
+        """
+        params: dict[str, str | int] = {"limit": limit}
+        if transaction_type:
+            params["transaction_type"] = transaction_type
+        try:
+            resp = await self._request("GET", "/api/v1/energy/transactions", params=params)
+            if resp.status_code == 200:
+                return resp.json()  # type: ignore[no-any-return]
+        except Exception:
+            logger.debug("get_energy_transactions: failed", exc_info=True)
+        return None
+
     # --- Webhook server ---
 
     def listen(
