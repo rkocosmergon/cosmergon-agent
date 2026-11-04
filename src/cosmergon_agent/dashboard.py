@@ -2056,6 +2056,19 @@ class VoucherModal(ModalScreen):
 # ---------------------------------------------------------------------------
 
 
+class _LogPanel(Static):
+    """Lines are cut to the panel's rows, so new rows mean new lines.
+
+    The key bar takes its rows from the log after the log was drawn (founder on the device,
+    04.11.2026): without this, the newest lines stay cut off until the next tick.
+    """
+
+    def on_resize(self) -> None:
+        app = self.app
+        if isinstance(app, CosmergonDashboard) and app.is_running:
+            app._draw_log_panel(app.agent.state)
+
+
 class CosmergonDashboard(App):
     """btop-inspired Textual dashboard for Cosmergon agents."""
 
@@ -2136,8 +2149,10 @@ class CosmergonDashboard(App):
         padding: 0 1;
     }
 
+    /* As high as its keys need right now, taken from the log when they wrap: no line is held
+       free for a wrap that may not come (founder on the device, 04.11.2026). */
     #fix-bar {
-        height: 4;
+        height: auto;
         background: $csg-bg;
         border-top: solid $csg-frame-log;
     }
@@ -2235,7 +2250,7 @@ class CosmergonDashboard(App):
         with Horizontal(id="top-row"):
             yield Static("", id="agent-panel")
             yield Static("", id="economy-panel")
-        yield Static("", id="log-panel")
+        yield _LogPanel("", id="log-panel")
         yield Static("", id="context-bar")
         yield Static("", id="fix-bar")
         yield Static("", id="status-bar")
@@ -2259,11 +2274,18 @@ class CosmergonDashboard(App):
                 w.display = not zu_klein
         hinweis = self.query_one("#too-small", Static)
         hinweis.display = zu_klein
+        self._platz_der_kontextzeile()
         if zu_klein:
             hinweis.update(
                 f"Window too small — needs at least {_MIN_COLS}x{_MIN_ROWS}, "
                 f"now {breite}x{hoehe}.\n\n[dim]Make the window larger, or Q to quit.[/dim]"
             )
+
+    def _platz_der_kontextzeile(self) -> None:
+        """The line takes its row only while it has something to say; the log has it otherwise."""
+        hat_text = bool(self._panel_cache.get("context-bar"))
+        zu_klein = self.query_one("#too-small", Static).display
+        self.query_one("#context-bar", Static).display = hat_text and not zu_klein
 
     def get_css_variables(self) -> dict[str, str]:
         """The theme's surfaces and frames as CSS variables; dialogs follow via accent/surface."""
@@ -3203,9 +3225,10 @@ class CosmergonDashboard(App):
 
         # The rows are measured: counted by hand from the neighbours' heights they came out
         # too many, and the panel cuts at the bottom — a full log lost its newest lines
-        # (#475). Before the first layout the size is 0; then: hint 1 + top 14 + ctx 1 +
-        # fix 4 + status 1 + the panel's own frame 2 = 23. Every row is the log's: the chat
-        # has its own key and no rows here (it took three of six on the founder's device).
+        # (#475). Before the first layout the size is 0, so the neighbours count at their usual
+        # most: hint 1 + top 14 + ctx 1 + fix 4 + status 1 + the panel's own frame 2 = 23;
+        # _LogPanel draws again as soon as the real rows are known. Every row is the log's: the
+        # chat has its own key and no rows here (it took three of six on the founder's device).
         panel_h = panel.content_size.height or max(4, self.app.size.height - 23)
         breite = panel.content_size.width or max(20, self.app.size.width - 4)
         lines: list[str] = []
@@ -3263,6 +3286,7 @@ class CosmergonDashboard(App):
             self._update_panel("context-bar", _c("dim", f"[↑/↓] Scroll{zurueck}") + esc)
         else:
             self._update_panel("context-bar", "")
+        self._platz_der_kontextzeile()
 
     def _draw_fix_bar(self, state: GameState | None = None) -> None:
         t = self._theme
@@ -3305,12 +3329,13 @@ class CosmergonDashboard(App):
         # [K] Key stands where the shortened key used to stand (founder on the device,
         # 12.10.2026): the key itself is shown by [K], its first characters said nothing.
         # [S] Shop right behind it, on its own surface, as the line's last entry (founder,
-        # 31.10.2026: "s als letzter eintrag in die statuszeile").
+        # 31.10.2026: "s als letzter eintrag in die statuszeile"), set off by the bar's own
+        # separator (founder on the device, 04.11.2026).
         surface, text = _chip_colors(self._theme)
         keys = (
             _c(self._theme.cmd, _hk("K"))
-            + "[dim] Key[/dim]"
-            + f" [{text} on {surface}] {_hk('S')} Shop [/]"
+            + f"[dim] Key{sep}[/dim]"
+            + f"[{text} on {surface}] {_hk('S')} Shop [/]"
         )
         line = (f"[dim]{sep.join(teile)}{sep}[/dim]" if teile else "") + keys
         # #468: when the agent is lost comes FIRST; what to do about it stands right behind
@@ -5359,8 +5384,9 @@ def _fix_bar_keys(
     return keys
 
 
-# The end of every status bar as it reads: [K] Key, then the [S] Shop chip (``_draw_status_bar``).
-_STATUS_KEYS = "[K] Key" + "  [S] Shop "
+# The end of every status bar as it reads: [K] Key, the separator, the [S] Shop chip
+# (``_draw_status_bar``).
+_STATUS_KEYS = "[K] Key" + " │ " + " [S] Shop "
 
 
 @dataclass(frozen=True)
@@ -5387,7 +5413,8 @@ def _status_stufen(name: str, tier: str, state: GameState | None) -> list[_Statu
     least important go first as the window narrows ("per-core" and "reverse" at 80 columns,
     "tree" stays). Founder 31.10.: [K] and [S] never in the bottom bar, [S] the line's last
     entry (cos20 #610). What yields here, in this order: the tier, the name, the long [U]
-    word, the weekday, "unless used", "key". The warning itself (⚠, the time, [U] Keep) stays.
+    word, the weekday, "unless used", "key", "ends". The warning itself (⚠, the time,
+    [U] Keep) stays.
     """
     ends = _key_ends(state)
     if ends is None:
@@ -5410,6 +5437,7 @@ def _status_stufen(name: str, tier: str, state: GameState | None) -> list[_Statu
         _StatusStufe(lead=f"⚠ key ends {kurz} unless used · ", keep="Keep"),
         _StatusStufe(lead=f"⚠ key ends {kurz} · ", keep="Keep"),
         _StatusStufe(lead=f"⚠ ends {kurz} · ", keep="Keep"),
+        _StatusStufe(lead=f"⚠ {kurz} · ", keep="Keep"),
     ]
 
 

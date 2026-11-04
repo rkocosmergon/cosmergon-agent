@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **The dashboard holds no empty line free** (cos20 #603): the key bar is as high as its keys need
+  right now and takes the rows from the log when they wrap; the context line takes a row only while
+  it has something to say. The log draws again as soon as its rows change.
+- **A separator stands before the shop chip** in the status bar: `[K] Key │ [S] Shop`. In the
+  narrowest window the key warning gives way first, the chip stays whole.
+
 ## [0.30.0] — 2026-11-03
 
 ### Added
