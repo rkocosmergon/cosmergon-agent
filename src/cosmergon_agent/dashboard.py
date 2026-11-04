@@ -35,6 +35,7 @@ import webbrowser
 from collections import deque
 from dataclasses import dataclass, replace
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 from urllib.parse import urlsplit
@@ -43,7 +44,7 @@ if TYPE_CHECKING:
     from cosmergon_agent.action import ActionResult
 
 try:
-    from textual import work
+    from textual import work as _textual_work
     from textual.actions import SkipAction
     from textual.app import App, ComposeResult
     from textual.binding import Binding
@@ -51,6 +52,7 @@ try:
     from textual.events import Key
     from textual.screen import ModalScreen
     from textual.widgets import Input, Label, Select, Static
+    from textual.worker import Worker, WorkerState
 except ImportError as _exc:
     raise ImportError(
         "The cosmergon-agent dashboard requires textual.\n"
@@ -89,6 +91,11 @@ from cosmergon_agent.config import (
 from cosmergon_agent.exceptions import ConnectionError as CsgConnectionError
 from cosmergon_agent.exceptions import RateLimitError
 from cosmergon_agent.state import AgentSituation, Field, GameState, Ranking
+
+# A worker's exception must not end the dashboard, whichever of the keys started it: one
+# boundary here and ``CosmergonDashboard.on_worker_state_changed`` says so in the log, instead
+# of a ``try`` in every handler (cos20 #628 F21).
+work: Any = partial(_textual_work, exit_on_error=False)
 
 logger = logging.getLogger(__name__)
 
@@ -919,6 +926,8 @@ def _num(value: object) -> str:
         zahl = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return "?"
+    if not math.isfinite(zahl):
+        return "?"
     return f"{int(zahl):,}" if zahl == int(zahl) else f"{zahl:g}"
 
 
@@ -1641,7 +1650,7 @@ class ShowcaseModal(ModalScreen):
     def compose(self) -> ComposeResult:
         with Vertical(id="sc-wrap"):
             with VerticalScroll(id="sc-scroll"):
-                yield Label(self._consent_text, id="sc-text")
+                yield Label(self._consent_text, id="sc-text", markup=False)
             yield Label(
                 "[dim]Turning it on also accepts the Terms: cosmergon.com/agb.html[/dim]",
                 id="sc-terms",
@@ -2205,6 +2214,8 @@ class CosmergonDashboard(App):
         Binding("q", "leave", "Quit", show=False, priority=True),
     ]
 
+    _APP_KEYS: ClassVar[frozenset[str]] = frozenset(key.action for key in BINDINGS)
+
     def __init__(self, agent: CosmergonAgent, theme: Theme) -> None:
         self._theme = theme  # before super(): the stylesheet reads it through the variables
         super().__init__()
@@ -2613,7 +2624,9 @@ class CosmergonDashboard(App):
             zeile = f"✗ couldn't {action_word(result.action)}: {result.error_message}"
             self._add_log(_c(self._theme.warn, _roh(zeile)))
 
-    @work(exclusive=True)
+    # A group of its own: ``exclusive`` ends only an older loop, not the dialog of another key
+    # that waits in the default group (cos20 #628 F18).
+    @work(exclusive=True, group="agent")
     async def _run_agent(self) -> None:
         try:
             await self.agent.start()
@@ -2660,7 +2673,7 @@ class CosmergonDashboard(App):
         state = self.agent.state
         try:
             name = self._reconnect_with_token(token, (state.agent_name if state else None) or None)
-        except TokenResolutionError as exc:
+        except (TokenResolutionError, OSError) as exc:  # OSError: the keys could not be saved
             self._set_feedback(f"Reconnect failed: {_roh(exc)}")
             return False
         self._add_log(_c(self._theme.pos, f"Reconnected to {_roh(name)}"))
@@ -3055,6 +3068,24 @@ class CosmergonDashboard(App):
         except CosmergonError as exc:
             self._add_log(_c(self._theme.warn, f"✗ couldn't {_roh(pending.display)}: {_roh(exc)}"))
             self._set_feedback(_c(self._theme.warn, f"✗ {_roh(pending.display)} failed"))
+        except Exception as exc:  # from a timer: no worker's boundary here (cos20 #628)
+            logger.debug("_fire_pending failed", exc_info=True)
+            said = f"✗ {_roh(pending.display)} failed ({type(exc).__name__})"
+            self._add_log(_c(self._theme.warn, said))
+            self._set_feedback(_c(self._theme.warn, said))
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        """Says that a key's work failed; the dashboard goes on (``work``, cos20 #628 F21).
+
+        Only the kind of error: its text can come from the server, and the player's next step is
+        the same. The details go to the debug log."""
+        if event.state != WorkerState.ERROR:
+            return
+        error = event.worker.error
+        logger.debug("worker %s failed", event.worker.name, exc_info=error)
+        said = f"✗ that did not work ({type(error).__name__}), the dashboard goes on"
+        self._add_log(_c(self._theme.warn, said))
+        self._set_feedback(_c(self._theme.warn, said))
 
     # --- Redraw ---
 
@@ -3914,19 +3945,27 @@ class CosmergonDashboard(App):
         self._set_feedback(_c(self._theme.pos, "✓ Upgrade page opened — complete upgrade there"))
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        """Inside the shop, its dialogs' keys win over the App's priority bindings (cos20 #603).
+        """An open dialog owns its keys: the App's own keys do not fire under it (cos20 #628).
 
-        App keys with priority fire under every dialog (see ``action_leave``). In the shop U on
-        the confirmation means "keep this agent", A in the voucher list "activate" — not the
-        App's upgrade or agent switch — and S does not open a second shop over the first.
-        A switches no agent under any shop dialog: the confirmation names the agent it buys for,
-        and a switch underneath would buy with another key (cos20 #606 F7).
+        App keys have priority (Textual 8 needs it, see ``BINDINGS``) and fire before the dialog,
+        so without this rule R never reached the key dialog or the reconnect screen, Tab never
+        the persona list, and C opened a dialog over the shop's confirmation, where A then
+        switched the agent and Y bought with another key (cos20 #606 F7, #628 F12).
+
+        The exceptions are the keys a dialog offers itself: Q closes it (``action_leave``), the
+        welcome names C, W, T and ?, the field view R and F, the full-screen log L.
         """
-        screen = self.screen
-        if action == "upgrade" and isinstance(screen, ShopConfirmModal):
-            return False
-        shop_open = (ShopModal, ShopDetailModal, ShopConfirmModal, VoucherModal)
-        return not (action in ("shop", "agent_selector") and isinstance(screen, shop_open))
+        if action not in self._APP_KEYS or not isinstance(self.screen, ModalScreen):
+            return True
+        if action == "leave":
+            return True
+        if isinstance(self.screen, OnboardingModal):
+            return action in ("compass", "marauder_menu", "join_tournament", "help")
+        if isinstance(self.screen, FieldScreen):
+            return action in ("refresh_now", "create_field")
+        if isinstance(self.screen, LogScreen):
+            return action in ("log_next", "log_screen")
+        return False
 
     @work
     async def action_shop(self) -> None:
@@ -4526,6 +4565,7 @@ class CosmergonDashboard(App):
                 raw_key = entry.api_key
                 self.agent.reconnect(raw_key, entry.agent_id or "")
                 set_active_agent(name)
+                await self._now_another_agent()
                 # Immediate refresh (Panel decision: no 3s delay)
                 self._redraw()
                 self._set_feedback(f"Switched to {_roh(name)}")
@@ -4565,8 +4605,42 @@ class CosmergonDashboard(App):
             save_agent(new_name, new_key, new_id, base_url=self.agent.base_url)
             self.agent.reconnect(new_key, new_id)
             set_active_agent(new_name)
+            await self._now_another_agent()
             self._redraw()
             self._set_feedback(f"Agent created: {_roh(new_name)}")
+
+    async def _now_another_agent(self) -> None:
+        """What the dashboard knows of the agent it showed stays with that agent (cos20 #628).
+
+        A move queued for the old agent went out with the new key (F13); its pause and mission
+        stood beside the new agent's name, and a loop that had ended stayed ended (F16). The next
+        tick brings the rest. The world log stays: it tells what the player saw, also of the old
+        agent; the tournament and arena tabs are a body's, and go.
+        """
+        self._pending_action = None
+        self._paused = False
+        self._mission = None
+        self._missions_known = None
+        self._situation_seen = {}
+        self._moves_seen.clear()
+        self._moves_from_tick = -1
+        self._last_energy = None
+        self._last_tick = -1
+        self._compass_preset = "autonomous"
+        self._compass_ever_set = False
+        self._log_tournament = []
+        self._log_arena = []
+        self._log_new.clear()
+        self._talk_seen.clear()
+        self._arena_seen.clear()
+        self._arena_missions = None
+        self._story_seen = None
+        self._world_fields = set()
+        self._mission_steps = {}
+        self._messages = []
+        await self._read_pause_state()
+        if not self.agent._running:
+            self._run_agent()
 
     @work
     async def action_help(self) -> None:
@@ -6139,7 +6213,7 @@ class PauseConfirmModal(ModalScreen):
                 f"You can resume it only after {self._waiting}.",
                 id="pause-body",
             )
-            yield Label(_c("dim", "[Y] continue · [N] / Esc cancel"), id="pause-footer")
+            yield Label(_c("dim", "\\[Y] continue · \\[N] / Esc cancel"), id="pause-footer")
             # Disabled until step 2: a hidden but focusable field swallowed the [Y] of step 1.
             yield Input(placeholder=self._agent_name, id="pause-name", disabled=True)
 
@@ -6304,6 +6378,7 @@ class FirstStartApp(App):
     def __init__(self, base_url: str = "https://cosmergon.com") -> None:
         super().__init__()
         self.result_key: str = ""  # populated if user enters a key
+        self.left = True  # until the player chose: Q, Esc and a closed terminal register nobody
         self._base_url = base_url
 
     def compose(self) -> ComposeResult:
@@ -6337,6 +6412,7 @@ class FirstStartApp(App):
         if self._typing():
             raise SkipAction()
         self.result_key = ""
+        self.left = False
         self.exit()
 
     def action_leave(self) -> None:
@@ -6507,6 +6583,8 @@ def main() -> None:
             first_start.run()
             if first_start.result_key:
                 resolved_key = first_start.result_key
+            elif first_start.left:  # Q or Esc: nobody is registered (cos20 #628 F20)
+                return
             # else: result_key is "" → auto-register (default behavior)
         except Exception:
             # graceful degradation: auto-register if FirstStartApp fails
