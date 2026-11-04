@@ -82,6 +82,7 @@ from cosmergon_agent.action import (
     printable,
 )
 from cosmergon_agent.config import (
+    AgentEntry,
     is_onboarding_dismissed,
     load_all_agents,
     load_token,
@@ -3052,27 +3053,9 @@ class CosmergonDashboard(App):
         self._add_log(_c(self._theme.data, f"⠋ trying again: {_roh(pending.display)}…"))
         try:
             if pending.kind == "compass":
-                result = await self.agent.set_compass(pending.action)
-                if result.get("error"):
-                    self._add_log(_c(self._theme.warn, f"✗ {_roh(pending.display)}: failed"))
-                    self._set_feedback(_c(self._theme.warn, f"✗ {_roh(pending.display)} failed"))
-                else:
-                    self._compass_preset = pending.action
-                    self._compass_ever_set = True
-                    self._add_log(_c(self._theme.pos, f"✓ {_roh(pending.display)}"))
-                    self._set_feedback(_c(self._theme.pos, f"✓ Compass → {_roh(pending.display)}"))
+                await self._fire_compass(pending)
             else:
-                r = await self.agent.act(pending.action, **pending.params)
-                cs = _cost_str(_action_cost(r)) if r.success else ""
-                color = self._theme.pos if r.success else self._theme.warn
-                msg = r.error_message or "failed"
-                label = (
-                    f"✓ done: {_roh(pending.display)}{cs}"
-                    if r.success
-                    else f"✗ couldn't {_roh(pending.display)}: {_roh(msg)}"
-                )
-                self._add_log(_c(color, label))
-                self._set_feedback(_c(color, label))
+                await self._fire_move(pending)
         except RateLimitError as exc:
             # Re-queue with another timer — tick boundary not yet reached
             self._schedule_pending(pending, retry_after=exc.retry_after)
@@ -3088,6 +3071,30 @@ class CosmergonDashboard(App):
             said = f"✗ {_roh(pending.display)} failed ({type(exc).__name__})"
             self._add_log(_c(self._theme.warn, said))
             self._set_feedback(_c(self._theme.warn, said))
+
+    async def _fire_compass(self, pending: _PendingAction) -> None:
+        result = await self.agent.set_compass(pending.action)
+        if result.get("error"):
+            self._add_log(_c(self._theme.warn, f"✗ {_roh(pending.display)}: failed"))
+            self._set_feedback(_c(self._theme.warn, f"✗ {_roh(pending.display)} failed"))
+            return
+        self._compass_preset = pending.action
+        self._compass_ever_set = True
+        self._add_log(_c(self._theme.pos, f"✓ {_roh(pending.display)}"))
+        self._set_feedback(_c(self._theme.pos, f"✓ Compass → {_roh(pending.display)}"))
+
+    async def _fire_move(self, pending: _PendingAction) -> None:
+        r = await self.agent.act(pending.action, **pending.params)
+        cs = _cost_str(_action_cost(r)) if r.success else ""
+        color = self._theme.pos if r.success else self._theme.warn
+        msg = r.error_message or "failed"
+        label = (
+            f"✓ done: {_roh(pending.display)}{cs}"
+            if r.success
+            else f"✗ couldn't {_roh(pending.display)}: {_roh(msg)}"
+        )
+        self._add_log(_c(color, label))
+        self._set_feedback(_c(color, label))
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         """Says that a key's work failed; the dashboard goes on (``work``, cos20 #628 F21).
@@ -4574,16 +4581,18 @@ class CosmergonDashboard(App):
             if name == active_name:
                 return  # already active
 
-            # Find key in config
-            entry = agents_dict.get(name)
-            if entry and entry.api_key:
-                raw_key = entry.api_key
-                self.agent.reconnect(raw_key, entry.agent_id or "")
-                set_active_agent(name)
-                await self._now_another_agent()
-                # Immediate refresh (Panel decision: no 3s delay)
-                self._redraw()
-                self._set_feedback(f"Switched to {_roh(name)}")
+            await self._switch_to(name, agents_dict.get(name))
+
+    async def _switch_to(self, name: str, entry: AgentEntry | None) -> None:
+        """Switch to the agent in the config; without a key there nothing happens."""
+        if not entry or not entry.api_key:
+            return
+        self.agent.reconnect(entry.api_key, entry.agent_id or "")
+        set_active_agent(name)
+        await self._now_another_agent()
+        # Immediate refresh (Panel decision: no 3s delay)
+        self._redraw()
+        self._set_feedback(f"Switched to {_roh(name)}")
 
     async def _create_agent_via_token(self, token: str) -> None:
         """Create a new agent via POST /players/me/agents (Token-Auth)."""
@@ -6542,6 +6551,20 @@ def _resolve_token(token: str, base_url: str) -> str | None:
     return selected.api_key.raw
 
 
+def _ask_first_start(base_url: str) -> str | None:
+    """The first-start screen: a key, ``""`` to register on its own, ``None`` if they left."""
+    try:
+        first_start = FirstStartApp(base_url=base_url)
+        first_start.run()
+    except Exception:
+        # graceful degradation: auto-register if FirstStartApp fails
+        logger.debug("main: FirstStartApp failed, auto-registering", exc_info=True)
+        return ""
+    if first_start.result_key:
+        return first_start.result_key
+    return None if first_start.left else ""
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Cosmergon Agent Dashboard",
@@ -6593,17 +6616,10 @@ def main() -> None:
 
     # First-start screen: shown when no credentials exist
     if _needs_first_start(resolved_key):
-        try:
-            first_start = FirstStartApp(base_url=args.base_url)
-            first_start.run()
-            if first_start.result_key:
-                resolved_key = first_start.result_key
-            elif first_start.left:  # Q or Esc: nobody is registered (cos20 #628 F20)
-                return
-            # else: result_key is "" → auto-register (default behavior)
-        except Exception:
-            # graceful degradation: auto-register if FirstStartApp fails
-            logger.debug("main: FirstStartApp failed, auto-registering", exc_info=True)
+        chosen = _ask_first_start(args.base_url)
+        if chosen is None:  # Q or Esc: nobody is registered (cos20 #628 F20)
+            return
+        resolved_key = chosen or resolved_key
 
     try:
         agent = CosmergonAgent(api_key=resolved_key, base_url=args.base_url, poll_interval=10.0)
