@@ -33,6 +33,7 @@ import shlex
 import time
 import webbrowser
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from functools import partial
@@ -96,6 +97,20 @@ from cosmergon_agent.state import AgentSituation, Field, GameState, Ranking
 # boundary here and ``CosmergonDashboard.on_worker_state_changed`` says so in the log, instead
 # of a ``try`` in every handler (cos20 #628 F21).
 work: Any = partial(_textual_work, exit_on_error=False)
+
+
+def _on_time(draw: Callable[[], None]) -> Callable[[], None]:
+    """``draw`` for a timer, which has no worker's boundary: an odd value of the server costs one
+    picture, not the dashboard (cos20 #628 F21)."""
+
+    def drawn() -> None:
+        try:
+            draw()
+        except Exception:
+            logger.debug("drawing failed", exc_info=True)
+
+    return drawn
+
 
 logger = logging.getLogger(__name__)
 
@@ -2329,7 +2344,7 @@ class CosmergonDashboard(App):
         log_panel.border_subtitle = rf"\[L] next  \[Shift+L] full  \[M] {mit_wem}"
         self._register_agent_handlers()
         self._run_agent()
-        self.set_interval(0.5, self._redraw)
+        self.set_interval(0.5, _on_time(self._redraw))
 
     # ── Marauder action sub-menu (S212 action parity) ──────────────────────
     _MARAUDER_SELL_PRICE: ClassVar[dict[str, float]] = {
@@ -5078,7 +5093,7 @@ class FieldScreen(ModalScreen):
     def on_mount(self) -> None:
         # Approximate usable content width from terminal size (92% - borders)
         self._content_w = max(40, int(self.app.size.width * 0.92) - 4)
-        self.set_interval(0.25, self._redraw)
+        self.set_interval(0.25, _on_time(self._redraw))
         self._redraw()  # immediate first render — shows "Loading…" without 0.25s flash
         self._fetch_cells()
 
@@ -5585,7 +5600,7 @@ def _ortszeit(iso: object, fmt: str = "%a %d %b, %H:%M") -> str | None:
         return None
     try:
         return datetime.fromisoformat(str(iso)).astimezone().strftime(fmt)
-    except ValueError:
+    except (ValueError, OverflowError, OSError):  # year 1 or 9999 has no local time
         return None
 
 
@@ -5845,7 +5860,7 @@ def _wann(iso: object) -> str:
     """Weekday and time in the player's local time: ``Sun 06:30`` — ``?`` when unreadable."""
     try:
         return datetime.fromisoformat(str(iso)).astimezone().strftime("%a %H:%M")
-    except ValueError:
+    except (ValueError, OverflowError, OSError):  # year 1 or 9999 has no local time
         return "?"
 
 

@@ -22,7 +22,8 @@
   out with the new key, its pause and mission no longer stand beside the new name, and a loop that
   had ended starts again.
 - **A failed key no longer ends the dashboard** (cos20 #628): whatever the server answers, the log
-  and the hint line say that this did not work, and the dashboard goes on.
+  and the hint line say that this did not work, and the dashboard goes on. A failed redraw on the
+  timer is said the same way, and a time the server sends out of range shows as it came.
 - `[Y]` and `[N]` show in the pause dialog again. `Q` and `Esc` on the first start quit, as its
   footer says: until now they registered an anonymous agent. A consent text is shown as the server
   sent it, brackets too.
