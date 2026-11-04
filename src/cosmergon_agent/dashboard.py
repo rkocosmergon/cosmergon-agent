@@ -2150,9 +2150,12 @@ class CosmergonDashboard(App):
     }
 
     /* As high as its keys need right now, taken from the log when they wrap: no line is held
-       free for a wrap that may not come (founder on the device, 04.11.2026). */
+       free for a wrap that may not come (founder on the device, 04.11.2026). One row stands
+       between it and the status bar at any height: right below the keys the shop chip touched
+       them (same day). */
     #fix-bar {
         height: auto;
+        margin-bottom: 1;
         background: $csg-bg;
         border-top: solid $csg-frame-log;
     }
