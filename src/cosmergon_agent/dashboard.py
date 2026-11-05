@@ -766,6 +766,10 @@ class _PendingAction:
 
 
 _FV_SIDE = 128  # the usual side; an arena's is its cube's, the server says so with the cells
+# Twice the largest side the world has (128). The zoom and the map look up every cell of the side
+# squared on every redraw, four times a second: a server's 10**9 would freeze the dashboard in a
+# loop no exception ends, past ``_on_time`` (cos20 #492, betreuer pass 026bb73, B5).
+_FV_SIDE_MOST = 256
 
 
 def _fv_parse_cells(raw: dict[str, int]) -> set[tuple[int, int]]:
@@ -784,8 +788,9 @@ def _fv_parse_cells(raw: dict[str, int]) -> set[tuple[int, int]]:
 
 
 def _fv_side(value: Any) -> int:
-    """A side of the field as the server states it, or the usual one if it states none."""
-    return value if isinstance(value, int) and value > 0 else _FV_SIDE
+    """A side of the field as the server states it, up to ``_FV_SIDE_MOST``, or the usual one if
+    it states none."""
+    return min(value, _FV_SIDE_MOST) if isinstance(value, int) and value > 0 else _FV_SIDE
 
 
 def _fv_centroid(cells: set[tuple[int, int]], field_w: int, field_h: int) -> tuple[int, int]:

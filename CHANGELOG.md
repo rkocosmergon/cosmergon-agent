@@ -26,7 +26,8 @@
 - **A field that could not be read says so** (cos20 #630), and no longer looks like a field with no
   living cell. The next tick or `[R]` tries again.
 - **The field view uses the field's own size** (cos20 #630): it took every field for 128 by 128,
-  also an arena's, whose side is its cube's. It now uses the size the server states.
+  also an arena's, whose side is its cube's. It now uses the size the server states, up to 256 by
+  256: a larger one froze the dashboard (cos20 #492).
 - **The answer for the field you left no longer lands on the field you see** (cos20 #630).
 - **A name that cannot be saved says why** (cos20 #630): a rate limit or an answer that could not be
   read left the identity dialog at `Saving…` for good.
