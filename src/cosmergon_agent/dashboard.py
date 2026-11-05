@@ -765,6 +765,9 @@ class _PendingAction:
 # ---------------------------------------------------------------------------
 
 
+_FV_SIDE = 128  # the usual side; an arena's is its cube's, the server says so with the cells
+
+
 def _fv_parse_cells(raw: dict[str, int]) -> set[tuple[int, int]]:
     """Parse sparse ``{"x,y": 1}`` dict into a set of ``(x, y)`` int tuples.
 
@@ -778,6 +781,11 @@ def _fv_parse_cells(raw: dict[str, int]) -> set[tuple[int, int]]:
         except (ValueError, AttributeError):
             pass
     return cells
+
+
+def _fv_side(value: Any) -> int:
+    """A side of the field as the server states it, or the usual one if it states none."""
+    return value if isinstance(value, int) and value > 0 else _FV_SIDE
 
 
 def _fv_centroid(cells: set[tuple[int, int]], field_w: int, field_h: int) -> tuple[int, int]:
@@ -1120,7 +1128,7 @@ class SelectModal(ModalScreen):
             event.stop()
             body = self.query_one("#body", VerticalScroll)
             body.scroll_relative(y=-1 if event.key == "up" else 1, animate=False)
-        elif event.key.isdigit():
+        elif event.key.isdecimal():  # isdigit() also takes a ², and int() ends on it (cos20 #630)
             event.stop()
             idx = int(event.key) - 1
             if 0 <= idx < len(self._options):
@@ -1726,7 +1734,9 @@ _SHOP_WAYS: dict[str, str] = {
 
 def _shop_price(product: dict[str, Any]) -> str:
     """The catalog's price incl. VAT, e.g. ``€5.00`` or ``€1.99 / month``."""
-    price = product.get("price") or {}
+    price = product.get("price")
+    if not isinstance(price, dict):  # a word here ended the dashboard (cos20 #630)
+        return "price at checkout"
     cents = price.get("eur_cents")
     if not isinstance(cents, int) or isinstance(cents, bool):
         return "price at checkout"
@@ -3040,7 +3050,14 @@ class CosmergonDashboard(App):
 
         Uses set_timer as a fallback so the retry fires even when the game tick
         counter is stuck at 0 (on_tick would never fire in that case).
+
+        One waits, as the world takes one move per tick: the last key wins. Each was told "queued",
+        so the one it pushes out is said (cos20 #630).
         """
+        waiting = self._pending_action
+        if waiting and waiting != pending:
+            said = f"✗ no longer waiting: {_roh(waiting.display)}, {_roh(pending.display)} instead"
+            self._add_log(_c(self._theme.warn, said))
         self._pending_action = pending
         self.set_timer(max(retry_after, 5.0), self._fire_pending)
 
@@ -3672,7 +3689,7 @@ class CosmergonDashboard(App):
             r = await self.agent.act(
                 "place_cells", field_id=state.fields[fi].id, preset=_PRESETS[pi]
             )
-            icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
+            color = self._theme.pos if r.success else self._theme.warn
             cs = _cost_str(_action_cost(r))
             ziel = f"a {_PRESETS[pi]} on {state.fields[fi].id[:8]}"
             zeile = (
@@ -3681,8 +3698,9 @@ class CosmergonDashboard(App):
                 else f"✗ couldn't place {ziel}: {r.error_message or 'refused'}"
             )
             self._add_log(_c(color, _roh(zeile)))
-            label = f"{icon} Cells placed ({_PRESETS[pi]}){cs} — evolves next tick"
-            self._set_feedback(_c(color, label))
+            # What the world refused has no "placed" and no "next tick" (cos20 #630).
+            label = f"✓ Cells placed ({_PRESETS[pi]}){cs} — evolves next tick"
+            self._set_feedback(_c(color, label if r.success else _roh(zeile)))
         except RateLimitError as exc:
             display = f"place a {_PRESETS[pi]} on {state.fields[fi].id[:8]}"
             wait_str = f" ~{int(exc.retry_after)}s" if exc.retry_after > 1 else ""
@@ -3716,7 +3734,7 @@ class CosmergonDashboard(App):
             if ci is None:
                 return
             r = await self.agent.act("create_field", cube_id=cubes[ci].id)
-            icon, color = ("✓", self._theme.pos) if r.success else ("✗", self._theme.warn)
+            color = self._theme.pos if r.success else self._theme.warn
             cs = _cost_str(_action_cost(r))
             zeile = (
                 f"✓ you created a field in cube {cubes[ci].name}{cs}"
@@ -3724,7 +3742,8 @@ class CosmergonDashboard(App):
                 else f"✗ couldn't create a field: {r.error_message or 'refused'}"
             )
             self._add_log(_c(color, _roh(zeile)))
-            self._set_feedback(_c(color, f"{icon} Field created{cs} — press \\[P] to place cells"))
+            label = f"✓ Field created{cs} — press \\[P] to place cells"
+            self._set_feedback(_c(color, label if r.success else _roh(zeile)))
         except RateLimitError as exc:
             wait_str = f" ~{int(exc.retry_after)}s" if exc.retry_after > 1 else ""
             self._schedule_pending(
@@ -5084,8 +5103,9 @@ class FieldScreen(ModalScreen):
         self._theme = theme
         self._idx = max(0, min(initial_idx, len(fields) - 1)) if fields else 0
         self._cells: set[tuple[int, int]] = set()
-        self._field_w: int = 128
-        self._field_h: int = 128
+        self._field_w: int = _FV_SIDE
+        self._field_h: int = _FV_SIDE
+        self._unread: bool = False  # the last read failed: not the same as a field with no cell
         self._vp_x: int = 0
         self._vp_y: int = 0
         self._zoom: int = 1
@@ -5106,9 +5126,12 @@ class FieldScreen(ModalScreen):
         self._redraw()  # immediate first render — shows "Loading…" without 0.25s flash
         self._fetch_cells()
 
-    @work
+    @work(exclusive=True, group="cells")
     async def _fetch_cells(self) -> None:
-        """Fetch cell data for the current field; centres viewport on first load."""
+        """Fetch cell data for the current field; centres viewport on first load.
+
+        One at a time: the answer for the field you have just left never lands on the one you
+        are looking at (cos20 #630)."""
         self._loading = True
         state = self._agent.state
         self._last_fetched_tick = state.tick if state else 0
@@ -5118,18 +5141,27 @@ class FieldScreen(ModalScreen):
         field = self._fields[self._idx]
         was_empty = not self._cells
         try:
-            raw = await self._agent.get_field_cells(field.id)
-            new_cells = _fv_parse_cells(raw)
+            raw = await self._agent.field_cells(field.id)
+            new_cells = _fv_parse_cells(raw.get("cells") or {})
+            self._field_w, self._field_h = (
+                _fv_side(raw.get("field_width")),
+                _fv_side(raw.get("field_height")),
+            )
+            vp_w, vp_h = self._viewport_dims()  # the last field may have been a larger one
+            self._vp_x = min(self._vp_x, max(0, self._field_w - vp_w))
+            self._vp_y = min(self._vp_y, max(0, self._field_h - vp_h))
             # Centre viewport when transitioning from empty → cells (catches the case where
             # cells were placed after the view was opened and the first fetch returned nothing).
             if was_empty and new_cells:
                 cx, cy = _fv_centroid(new_cells, self._field_w, self._field_h)
-                vp_w, vp_h = self._viewport_dims()
                 self._vp_x = max(0, cx - vp_w // 2)
                 self._vp_y = max(0, cy - vp_h // 2)
             self._cells = new_cells
+            self._unread = False
         except Exception:
+            logger.debug("_fetch_cells failed", exc_info=True)
             self._cells = set()
+            self._unread = True
         self._loading = False
         self._redraw()  # render immediately after cells arrive, don't wait for next interval
 
@@ -5178,6 +5210,9 @@ class FieldScreen(ModalScreen):
             content_widget.update(_c("dim", "  Loading…"))
         elif not self._fields:
             content_widget.update("")
+        elif self._unread:
+            said = "  This field could not be read. It tries again next tick, or press \\[R]."
+            content_widget.update(_c(t.warn, said))
         elif self._zoom == 2:
             # Dynamic size: fill available content area, not hardcoded square
             content_h = max(10, min(50, int(self.app.size.height * 0.88) - 4))
@@ -5414,7 +5449,10 @@ class IdentitySetupScreen(ModalScreen):
     @work
     async def _save(self, name: str, persona: str) -> None:
         self._set_status("Saving…")
-        result = await self._agent.patch_identity(agent_name=name, persona=persona)
+        try:
+            result = await self._agent.patch_identity(agent_name=name, persona=persona)
+        except (CosmergonError, ValueError) as exc:  # it stood at "Saving…" (cos20 #630)
+            result = {"error": exc}
         if "error" in result:
             status = result.get("status_code", 0)
             if status == 409:

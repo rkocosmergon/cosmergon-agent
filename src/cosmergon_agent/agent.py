@@ -1552,6 +1552,27 @@ class CosmergonAgent:
             logger.debug("get_field_cells: failed, falling back", exc_info=True)
         return {}
 
+    async def field_cells(self, field_id: str) -> dict[str, Any]:
+        """The live cells of a game field and its size, as the server states them.
+
+        Unlike ``get_field_cells``, which answers ``{}`` for a field it could not read as well as
+        for a field with no alive cell, this one raises: a dashboard can say which it was.
+
+        Args:
+            field_id: UUID of the game field to inspect.
+
+        Returns:
+            The server's answer, among it ``cells`` (``{"x,y": 1}``), ``field_width`` and
+            ``field_height``.
+
+        Raises:
+            CosmergonError: The field could not be read.
+        """
+        resp = await self._request("GET", f"/api/v1/game-fields/{field_id}/cells")
+        if resp.status_code != 200:
+            raise CosmergonError(f"field_cells: HTTP {resp.status_code}", code=resp.status_code)
+        return _json_body(resp)
+
     async def get_benchmark_report(self, days: int = 7) -> dict | None:
         """Fetch the benchmark report for this agent.
 

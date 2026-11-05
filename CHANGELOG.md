@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`CosmergonAgent.field_cells(field_id)`** (cos20 #630): the live cells of a field with its size,
+  and a `CosmergonError` if it could not be read. `get_field_cells` stays as it is, `{}` on error.
+
 ### Changed
 
 - **The dashboard holds no empty line free** (cos20 #603): the key bar is as high as its keys need
@@ -12,6 +17,19 @@
 
 ### Fixed
 
+- **A refused move no longer says it worked** (cos20 #630): the line under the panels read `✗ Cells
+  placed — evolves next tick` and `✗ Field created — press [P]`. It now says what the world refused.
+- **A waiting move that is pushed out says so** (cos20 #630): one move waits, the last key wins, and
+  the one before it went without a word although it had been told "queued".
+- **A field that could not be read says so** (cos20 #630), and no longer looks like a field with no
+  living cell. The next tick or `[R]` tries again.
+- **The field view uses the field's own size** (cos20 #630): it took every field for 128 by 128,
+  also an arena's, whose side is its cube's. It now uses the size the server states.
+- **The answer for the field you left no longer lands on the field you see** (cos20 #630).
+- **A name that cannot be saved says why** (cos20 #630): a rate limit or an answer that could not be
+  read left the identity dialog at `Saving…` for good.
+- **An odd key or price no longer ends the dashboard** (cos20 #630): a `²` in a choice dialog, and a
+  shop price that is no object.
 - **No control character from the world reaches your terminal through the dashboard's log** (cos20
   #492): every log line goes through one filter, and the refusal of an encoded answer no longer
   quotes the header as it came. A world could otherwise reset your terminal or leave its alternate
