@@ -19,6 +19,35 @@
 
 ### Fixed
 
+- **A crash of the dashboard shows no values** (cos20 #631): Textual's crash picture listed local
+  variables, among them a Master Key on the first start. It no longer does.
+- **`TEXTUAL_LOG` holds failures only** (cos20 #631): with it set, Textual wrote every event to the
+  file, each key typed and each paste with it, and the help asks to paste that file into an issue.
+  It now holds where a failure happened and of what kind, no text and no value.
+- **A key goes only to the world it was saved for** (cos20 #631): with a second address the
+  dashboard, the MCP server, `play` and `export` read the first instance in `config.toml` and sent
+  its Master Key or agent key to the new address. Saving wrote to the instance in front as well.
+- **A reconnect that fails at the connection or on an unreadable answer leaves the way back open**
+  (cos20 #631): the dialog went and the picture stood still. The first start says the same, and no
+  longer ends.
+- **A key that closes a dialog does only that** (cos20 #631): `1` in the help or the full-screen log
+  also set the compass or opened a field behind it, and `Esc` took the panel's focus.
+- **A persona the dashboard does not know yet, odd values in the shop, a chat answer or the consent
+  text no longer end it** (cos20 #631). Dialogs and the keys of the main view now have one boundary:
+  what could not be shown is said, and `Esc` closes.
+- **A refusal is no success** (cos20 #631): a bus ticket the world refused said `✓ Ticket`, hit points
+  it refused read `alive`, a refused bus status `On the bus`. Bus, market and showcase now show the
+  server's own reason.
+- **"takes effect at next tick" stands only under moves** (cos20 #631): it also stood under a
+  checkout, a voucher, a showcase, a bus ticket and a sale, which take effect at once or on payment.
+- **An expired anonymous key says that this is a new agent** (cos20 #631): a move queued for the old
+  agent went out with the new key, and its pause and mission stood beside the new name.
+- **A rejected key stands in the hint line also after a state came** (cos20 #631).
+- **Messages to you and to the world have their own colours again** (cos20 #631).
+- **The agent list no longer shows `0 E` for an agent it knows nothing about** (cos20 #631).
+- **A list of more than nine says how many more** (cos20 #631): in a choice dialog the tenth field
+  was neither shown nor to be chosen, without a word.
+
 - **A refused move no longer says it worked** (cos20 #630): the line under the panels read `✗ Cells
   placed — evolves next tick` and `✗ Field created — press [P]`. It now says what the world refused.
 - **A waiting move that is pushed out says so** (cos20 #630): one move waits, the last key wins, and

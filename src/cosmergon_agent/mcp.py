@@ -80,7 +80,7 @@ async def _resolve_credentials() -> tuple[str, str]:
             return key, base_url
 
     # 3. Config.toml
-    saved_key, _, _ = load_credentials()
+    saved_key, _, _ = load_credentials(base_url=base_url)
     if saved_key:
         _error("Loaded credentials from ~/.cosmergon/config.toml")
         _credentials = (saved_key, base_url)
@@ -192,7 +192,7 @@ async def _force_reregister() -> tuple[str, str]:
     )
 
     # Check for token — Paid users must reconnect manually
-    has_token = bool(os.environ.get("COSMERGON_PLAYER_TOKEN", "") or load_token())
+    has_token = bool(os.environ.get("COSMERGON_PLAYER_TOKEN", "") or load_token(base_url=base_url))
     if has_token:
         _error(
             "API key was replaced by another session. "

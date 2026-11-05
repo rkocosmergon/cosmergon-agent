@@ -30,13 +30,15 @@ import math
 import os
 import re
 import shlex
+import sys
 import time
+import traceback
 import webbrowser
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
-from functools import partial
+from functools import partial, wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 from urllib.parse import urlsplit
@@ -45,6 +47,11 @@ if TYPE_CHECKING:
     from cosmergon_agent.action import ActionResult
 
 try:
+    import rich
+    from rich.segment import Segments
+    from rich.text import Text
+    from rich.traceback import Traceback
+    from textual import constants as _textual_constants
     from textual import work as _textual_work
     from textual.actions import SkipAction
     from textual.app import App, ComposeResult
@@ -107,13 +114,133 @@ def _on_time(draw: Callable[[], None]) -> Callable[[], None]:
     def drawn() -> None:
         try:
             draw()
-        except Exception:
+        except Exception as error:
             logger.debug("drawing failed", exc_info=True)
+            _note_crash(error)
 
     return drawn
 
 
 logger = logging.getLogger(__name__)
+
+_crash_log: str | None = None
+_crashes_noted: set[str] = set()
+_CRASHES_NOTED_MAX = 50
+
+
+def _note_crash(error: BaseException) -> None:
+    """Add a failure to the file ``TEXTUAL_LOG`` names: where it happened and of what kind.
+
+    The player is asked to paste that file into a public issue (help, bug report template). So no
+    value of a variable, and no text of the exception either: that can carry a value too."""
+    if _crash_log is None:
+        return
+    text = ""
+    seen: BaseException | None = error
+    while seen is not None:  # from the outermost to what caused it
+        text += "".join(traceback.format_tb(seen.__traceback__)) + type(seen).__name__ + "\n"
+        seen = seen.__cause__ or seen.__context__
+    if text in _crashes_noted or len(_crashes_noted) >= _CRASHES_NOTED_MAX:
+        return  # a picture that fails fails twice a second, and this file is one to paste
+    _crashes_noted.add(text)
+    with contextlib.suppress(OSError):
+        fd = os.open(_crash_log, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8", errors="replace") as out:
+            out.write(text + "\n")
+
+
+def _server_refusal(body: Any) -> str:
+    """Why the server said no, from its answer ``{"error": {"message": …}}``; ``""`` if it did not.
+
+    Calls that hand back the answer as it came carry a refusal as a normal dict (cos20 #631, K-CR).
+    """
+    if not isinstance(body, dict):
+        return ""
+    error = body.get("error") or body.get("detail")
+    if not error:
+        return ""
+    said = error.get("message") if isinstance(error, dict) else error
+    return str(said) if said else "the server refused"
+
+
+def _offers(actions: Any, name: str) -> bool:
+    """Whether the server's ``available_actions`` offer this one (cos20 #631, K-AM)."""
+    entry = actions.get(name) if isinstance(actions, dict) else None
+    return isinstance(entry, dict) and bool(entry.get("available"))
+
+
+def _kept(handler: Callable[..., Any]) -> Callable[..., Any]:
+    """A dialog's handler: an odd value of the server costs that key, not the dashboard."""
+
+    @wraps(handler)
+    def kept(self: Any, *args: Any) -> Any:
+        try:
+            return handler(self, *args)
+        except Exception as error:
+            logger.debug("%s failed", handler.__name__, exc_info=True)
+            _note_crash(error)
+            return None
+
+    return kept
+
+
+def _kept_compose(compose: Callable[[Any], Any]) -> Callable[[Any], Any]:
+    """A dialog's ``compose``: what it could not build is said, and Esc still closes it."""
+
+    @wraps(compose)
+    def composed(self: Any) -> Any:
+        try:
+            yield from compose(self)
+        except Exception as error:
+            logger.debug("compose failed", exc_info=True)
+            _note_crash(error)
+            yield Label("[dim]The server's answer could not be shown here. Esc closes.[/dim]")
+
+    return composed
+
+
+class _Dialog(ModalScreen):
+    """Every dialog: ``compose``, ``on_mount`` and ``on_key`` run behind one boundary.
+
+    Textual ends the app on an exception in these (cos20 #631, K-AT, K-AO), and they have no
+    worker's boundary. Here, not in ``App``: there the failed widget's message loop has already
+    ended, and the dashboard would go on with a screen that no longer answers.
+    """
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        for name, boundary in (("compose", _kept_compose), ("on_mount", _kept), ("on_key", _kept)):
+            if name in cls.__dict__:
+                setattr(cls, name, boundary(cls.__dict__[name]))
+
+
+class _PrivateApp(App):
+    """What the two apps here share: a crash shows no values, the log holds nothing typed.
+
+    Textual draws a crash with ``show_locals=True``, so a Master Key in a local variable stood on
+    the screen (cos20 #631, K-BT). With ``TEXTUAL_LOG`` it writes every event to that file, each
+    key typed and each paste among them, so a key pasted into the first-start screen stood in the
+    file the help asks to paste into an issue (K-CV). The file now gets the failures only.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        global _crash_log
+        super().__init__(*args, **kwargs)
+        if _textual_constants.LOG_FILE:
+            _crash_log = _textual_constants.LOG_FILE
+            _textual_constants.LOG_FILE = None  # type: ignore[misc]  # it is read at each event
+
+    def _fatal_error(self) -> None:
+        """Textual's own, without ``show_locals``. A test ends the app and reads the picture, so
+        a later Textual that no longer calls this turns the test red."""
+        error = sys.exc_info()[1]
+        if error is not None:
+            _note_crash(error)
+        self.bell()
+        picture = Traceback(show_locals=False, width=None, suppress=[rich])
+        self._exit_renderables.append(Segments(self.console.render(picture, self.console.options)))
+        self._close_messages_no_wait()
+
 
 _MAX_LOG = 80
 _MAX_FIELDS = 5
@@ -725,7 +852,9 @@ def _tier_progress_lines(state: GameState, t: Theme) -> list[str]:
     if next_t > 5:
         return [_c(t.pos, "✓ Max tier (T5 Breeder)")]
 
-    reqs = _PLAYER_TIER_REQS[next_t]
+    reqs = _PLAYER_TIER_REQS.get(next_t)
+    if reqs is None:  # a tier this client does not know (cos20 #631, K-AM)
+        return []
     tier_label = _ENTITY_TIER_NAMES.get(next_t, "").title()
     header = _c(t.struct, f"─ NEXT T{next_t} {tier_label}")
 
@@ -1034,9 +1163,11 @@ def _evolve_body(fields: list[Field], ready: list[Field], info: dict, energy: fl
         teile.append("No field can evolve right now.")
     if wartend:
         zeilen = ["Not ready:"]
-        for f in wartend[:9]:  # kuerzen-ok: keys 1-9
+        for f in wartend[:9]:  # kuerzen-ok: the line after says how many more
             stufe = f"T{f.entity_tier or 0}"
             zeilen.append(f"  {f.id[:8]}  {stufe}  {_evolve_blocker(f, info, energy)}")
+        if len(wartend) > 9:
+            zeilen.append(f"  ... (+{len(wartend) - 9} more)")
         teile.append("\n".join(zeilen))
     return "\n\n".join(teile)
 
@@ -1051,7 +1182,7 @@ class _ScrollOhneFokus(VerticalScroll):
     can_focus = False
 
 
-class SelectModal(ModalScreen):
+class SelectModal(_Dialog):
     """Numbered selection overlay — dismisses with index (int) or None (Esc)."""
 
     DEFAULT_CSS = """
@@ -1091,6 +1222,7 @@ class SelectModal(ModalScreen):
         super().__init__()
         self._title = title
         self._options = options[:9]  # kuerzen-ok: keys 1-9
+        self._more = max(0, len(options) - 9)
         self._body = body
         # Where the viewer is in a dialog of several steps, e.g. (1, ("Field", "Pattern")).
         self._steps = steps
@@ -1116,6 +1248,8 @@ class SelectModal(ModalScreen):
             yield Label("")
             for i, opt in enumerate(self._options):
                 yield Label(f"[cyan][{i + 1}][/cyan] {_roh(opt)}")
+            if self._more:  # said, not cut off without a word (cos20 #631, K-CZ)
+                yield Label(f"[dim]+{self._more} more: only these 9 can be chosen here[/dim]")
             yield Label("")
             mehr = "  [↑/↓] scroll" if self._body else ""
             if self._options:
@@ -1140,7 +1274,7 @@ class SelectModal(ModalScreen):
                 self.dismiss(idx)
 
 
-class HelpModal(ModalScreen):
+class HelpModal(_Dialog):
     """Scrollable guide: what is Cosmergon, hotkeys, and FAQ."""
 
     DEFAULT_CSS = """
@@ -1317,10 +1451,11 @@ class HelpModal(ModalScreen):
 
     def on_key(self, event: Any) -> None:
         if event.key not in self._SCROLL_KEYS:
+            event.stop()  # it closes the dialog, and sets no compass behind it (cos20 #631, K-DO)
             self.dismiss(None)
 
 
-class KeyModal(ModalScreen):
+class KeyModal(_Dialog):
     """Show API key, config path, and upgrade tip. Esc/Enter/Space to close.
 
     Dismissed with None (close) or "rotate" (trigger token rotation).
@@ -1441,7 +1576,7 @@ class KeyModal(ModalScreen):
 # ---------------------------------------------------------------------------
 
 
-class AgentSelectorModal(ModalScreen):
+class AgentSelectorModal(_Dialog):
     """Select an agent from the account, or create a new one.
 
     Dismissed with:
@@ -1513,13 +1648,15 @@ class AgentSelectorModal(ModalScreen):
         lines: list[str] = []
         for i, a in enumerate(self._agents):
             name = a.get("agent_name", "?")
-            energy = a.get("energy", 0)
+            energy = a.get("energy")  # from the config there is none (cos20 #631, K-CX)
+            known = isinstance(energy, (int, float)) and not isinstance(energy, bool)
+            stand = f"{energy:.0f} E  " if known else ""
             persona = a.get("persona", "")
             marker = "[bold cyan]▸[/bold cyan]" if i == self._cursor else " "
             active_mark = " ★" if name == self._active else ""
             lines.append(
                 f" {marker} {_roh(name)}{active_mark}    "
-                f"[dim]{energy:.0f} E  {_roh(persona)}  {_roh(self._tier)}[/dim]"
+                f"[dim]{stand}{_roh(persona)}  {_roh(self._tier)}[/dim]"
             )
         is_new = self._cursor == len(self._agents)
         marker = "[bold cyan]▸[/bold cyan]" if is_new else " "
@@ -1564,7 +1701,7 @@ class AgentSelectorModal(ModalScreen):
 # ---------------------------------------------------------------------------
 
 
-class ReconnectScreen(ModalScreen):
+class ReconnectScreen(_Dialog):
     """Shown when a 401 occurs and a Master Key is saved in config.
 
     User presses [R] to reconnect (token from config) or [Q] to quit.
@@ -1616,7 +1753,7 @@ class ReconnectScreen(ModalScreen):
 # ---------------------------------------------------------------------------
 
 
-class ShowcaseModal(ModalScreen):
+class ShowcaseModal(_Dialog):
     """Public-Showcase Opt-in/Opt-out toggle screen.
 
     Displays the canonical consent text and lets the user flip the switch.
@@ -1745,7 +1882,10 @@ def _shop_price(product: dict[str, Any]) -> str:
     cents = price.get("eur_cents")
     if not isinstance(cents, int) or isinstance(cents, bool):
         return "price at checkout"
-    text = f"€{cents / 100:,.2f}"
+    try:
+        text = f"€{cents / 100:,.2f}"
+    except OverflowError:  # an int too large for a float (cos20 #631, K-AO)
+        return "price at checkout"
     interval = price.get("interval")
     # Any word the server sends, not only month/year: the field is free text there, and a
     # subscription shown without its interval would read as a one-off price.
@@ -1761,7 +1901,10 @@ def _shop_energy(product: dict[str, Any]) -> str:
     energy = product.get("energy")
     if isinstance(energy, bool) or not isinstance(energy, (int, float)):
         return ""
-    if not math.isfinite(energy) or not energy > 0:  # int(inf) raised OverflowError (cos20 #610)
+    # int(inf) raised OverflowError (cos20 #610), and isfinite() itself on a huge int (#631, K-AO)
+    if isinstance(energy, float) and not math.isfinite(energy):
+        return ""
+    if not energy > 0:
         return ""
     return f"{int(energy):,} energy"
 
@@ -1779,7 +1922,7 @@ def _shop_why_not(product: dict[str, Any]) -> str:
     return f"{text} — {step['text']}" if step.get("text") else text
 
 
-class ShopModal(ModalScreen):
+class ShopModal(_Dialog):
     """The catalog [S]: your vouchers on top, then the products by group (cos20 #603).
 
     Dismisses with ``("product", index)``, ``("vouchers", None)`` or ``None`` (Esc).
@@ -1870,7 +2013,7 @@ class ShopModal(ModalScreen):
         self.dismiss(None)
 
 
-class ShopDetailModal(ModalScreen):
+class ShopDetailModal(_Dialog):
     """One product in full: what it is, what for, the price, how it is paid (cos20 #603).
 
     B — never Enter — goes on to the confirmation; Esc back to the list. Dismisses with
@@ -1927,7 +2070,8 @@ class ShopDetailModal(ModalScreen):
             way = shop.way_for(p, "link")
             if way:
                 yield Static(f"\n[bold]Payment[/bold]\n{_SHOP_WAYS.get(way, way)}", markup=True)
-            for need in p.get("requires") or []:
+            needs = p.get("requires")
+            for need in needs if isinstance(needs, list) else []:
                 if isinstance(need, dict) and need.get("channel") in (None, way):
                     yield Static(f"[dim]Needs: {_roh(need.get('text'))}[/dim]", markup=True)
             if p.get("details_url"):
@@ -1947,7 +2091,7 @@ class ShopDetailModal(ModalScreen):
         self.dismiss(None)
 
 
-class ShopConfirmModal(ModalScreen):
+class ShopConfirmModal(_Dialog):
     """The last page before the checkout: product, price, for whom, how paid (cos20 #603).
 
     One-off purchases show the consent sentence: Y agrees to it and opens the checkout, where
@@ -2024,7 +2168,7 @@ class ShopConfirmModal(ModalScreen):
         self.dismiss(None)
 
 
-class VoucherModal(ModalScreen):
+class VoucherModal(_Dialog):
     """Your energy vouchers; A credits the chosen one to this agent — only on the key (S276).
 
     Dismisses with the id of the voucher to activate, or ``None`` (Esc).
@@ -2106,10 +2250,10 @@ class _LogPanel(Static):
     def on_resize(self) -> None:
         app = self.app
         if isinstance(app, CosmergonDashboard) and app.is_running:
-            app._draw_log_panel(app.agent.state)
+            _on_time(lambda: app._draw_log_panel(app.agent.state))()  # cos20 #631, K-AM
 
 
-class CosmergonDashboard(App):
+class CosmergonDashboard(_PrivateApp):
     """btop-inspired Textual dashboard for Cosmergon agents."""
 
     ENABLE_COMMAND_PALETTE = False
@@ -2284,6 +2428,7 @@ class CosmergonDashboard(App):
         self._panel_cache: dict[str, str] = {}  # widget-id → last rendered content
         self._auth_error: str = ""  # set on AuthenticationError — shown in hint-bar
         self._pending_action: _PendingAction | None = None  # queued on 429, fires next tick
+        self._shown_agent: str | None = None  # whose state the panels and the slot above hold
         self._messages: list[dict] = []  # the server chat, read when [M] opens
         self._focus: str | None = None  # None | "agent" | "fields" | "log"
         self._log_scroll: int = 0  # lines scrolled back from the newest (log focus, ↑/↓)
@@ -2546,12 +2691,21 @@ class CosmergonDashboard(App):
             return
         self._set_feedback(_c(self._theme.pos, f"✓ {erfolg}"), at_tick=False, duration=10.0)
 
+    def _refused(self, answer: Any) -> bool:
+        """The server said no: the hint bar says why, and the caller claims nothing."""
+        why = _server_refusal(answer)
+        if why:
+            self._set_feedback(_c(self._theme.warn, f"✗ {_roh(why)}"))
+        return bool(why)
+
     async def _mar_bus_departures(self) -> None:
         cube = self._first_cube_id()
         if not cube:
             self._set_feedback("No cube known yet")
             return
         deps = await self.agent.bus_departures(cube)
+        if self._refused(deps):
+            return
         for d in deps:
             dest = d.get("dest_cube_name", "?")
             self._add_log(f"🚌 → {_roh(dest)} · ETA {_roh(d.get('eta_ticks', '?'))} ticks")
@@ -2560,6 +2714,8 @@ class CosmergonDashboard(App):
     async def _mar_buy_ticket(self) -> None:
         cube = self._first_cube_id()
         deps = await self.agent.bus_departures(cube) if cube else []
+        if self._refused(deps):
+            return
         if not deps:
             self._set_feedback("No bus lines from here")
             return
@@ -2568,11 +2724,15 @@ class CosmergonDashboard(App):
         if i is None:
             return
         r = await self.agent.buy_bus_ticket(deps[i].get("dest_cube_id"))
+        if self._refused(r):
+            return
         ziel = _roh(r.get("to_cube_name", names[i]))
-        self._set_feedback(_c(self._theme.pos, f"✓ Ticket → {ziel}"))
+        self._set_feedback(_c(self._theme.pos, f"✓ Ticket → {ziel}"), at_tick=False)
 
     async def _mar_market_listings(self) -> None:
         listings = await self.agent.market_listings()
+        if self._refused(listings):
+            return
         for ml in listings[:8]:  # kuerzen-ok: list length
             ware, preis = _roh(ml.get("item_type", "?")), _roh(ml.get("price_energy", "?"))
             self._add_log(f"🏪 {ware} · {preis} E")
@@ -2585,19 +2745,20 @@ class CosmergonDashboard(App):
             return
         item = items[i]
         r = await self.agent.list_item(item, self._MARAUDER_SELL_PRICE[item])
-        if r.get("error") or r.get("detail"):
-            reason = r.get("detail", "Sale failed")
-            self._set_feedback(_c(self._theme.warn, f"✗ {_roh(reason)}"))
-        else:
-            self._set_feedback(_c(self._theme.pos, f"✓ {item} listed"))
+        if not self._refused(r):
+            self._set_feedback(_c(self._theme.pos, f"✓ {item} listed"), at_tick=False)
 
     async def _mar_hp_status(self) -> None:
         hp = await self.agent.hp_status()
+        if self._refused(hp):
+            return
         alive = "dead" if hp.get("dead") else "alive"
         self._set_feedback(f"HP {_roh(hp.get('marauder_hp', '?'))} · {alive}")
 
     async def _mar_passenger_status(self) -> None:
         st = await self.agent.bus_passenger_status()
+        if self._refused(st):
+            return
         if st:
             self._set_feedback("On the bus → " + _roh(str(st.get("to_cube_id", "?"))[:8]))
         else:
@@ -2606,6 +2767,7 @@ class CosmergonDashboard(App):
     def _register_agent_handlers(self) -> None:
         @self.agent.on_tick
         async def _tick(state: GameState) -> None:
+            await self._notice_new_agent()
             now = time.monotonic()
             # Calibrate tick interval from observed gap (sanity-bound: 10-300s)
             if self._tick_received_at > 0:
@@ -2662,7 +2824,7 @@ class CosmergonDashboard(App):
         try:
             await self.agent.start()
         except AuthenticationError as exc:
-            if load_token():
+            if load_token(base_url=self.agent.base_url):
                 # FIFO-kick: key replaced on another device.
                 # AuthenticationError raised by _poll_loop AFTER the loop exits,
                 # propagated through start() → finally(close) → here.
@@ -2694,7 +2856,7 @@ class CosmergonDashboard(App):
         Returns True on success (agent restarted), False on failure
         (caller shows ReconnectScreen again).
         """
-        token = load_token()
+        token = load_token(base_url=self.agent.base_url)
         if not token:
             self._set_feedback("No Master Key found. Use --token to connect.")
             return False
@@ -2973,14 +3135,13 @@ class CosmergonDashboard(App):
         if nachrichten is None:
             return
         welt = [r for r in nachrichten.rooms if r.room == "world"]
-        neu = [(m, " (world)") for r in welt for m in r.recent]
-        neu += [(m, " → you") for m in nachrichten.inbox]
-        for nachricht, an_mich in sorted(neu, key=lambda paar: paar[0].at):
+        neu = [(m, " (world)", self._theme.data) for r in welt for m in r.recent]
+        neu += [(m, " → you", self._theme.pos) for m in nachrichten.inbox]
+        for nachricht, an_wen, farbe in sorted(neu, key=lambda eintrag: eintrag[0].at):
             if not nachricht.id or nachricht.id in self._talk_seen:
                 continue
             self._talk_seen.append(nachricht.id)
-            wer = f"{nachricht.from_name or 'an agent'}{an_mich}"
-            farbe = self._theme.pos if an_mich else self._theme.data
+            wer = f"{nachricht.from_name or 'an agent'}{an_wen}"
             self._add_entry("arena", _Eintrag(wer, nachricht.text, farbe))
 
     def _log_arena_voices(self, stimmen: list[dict]) -> None:
@@ -3068,9 +3229,11 @@ class CosmergonDashboard(App):
 
     async def _fire_pending(self) -> None:
         """Fire a queued action on the next tick. Clears the slot before firing."""
+        await self._notice_new_agent()  # the timer can come before the new agent's first tick
         if not self._pending_action:
             return
         pending = self._pending_action
+        owner = self.agent.agent_id
         self._pending_action = None  # clear before firing — prevents re-queue on error
         self._add_log(_c(self._theme.data, f"⠋ trying again: {_roh(pending.display)}…"))
         try:
@@ -3079,6 +3242,8 @@ class CosmergonDashboard(App):
             else:
                 await self._fire_move(pending)
         except RateLimitError as exc:
+            if self.agent.agent_id != owner:  # the key changed while this was under way
+                return
             # Re-queue with another timer — tick boundary not yet reached
             self._schedule_pending(pending, retry_after=exc.retry_after)
             wait = int(exc.retry_after)
@@ -3127,6 +3292,8 @@ class CosmergonDashboard(App):
             return
         error = event.worker.error
         logger.debug("worker %s failed", event.worker.name, exc_info=error)
+        if error is not None:
+            _note_crash(error)
         said = f"✗ that did not work ({type(error).__name__}), the dashboard goes on"
         self._add_log(_c(self._theme.warn, said))
         self._set_feedback(_c(self._theme.warn, said))
@@ -3378,7 +3545,7 @@ class CosmergonDashboard(App):
             k(key, label, c_color if key == "C" else None)
             for key, label in _fix_bar_keys(
                 state,
-                agents=bool(load_token()),
+                agents=bool(load_token(base_url=self.agent.base_url)),
                 advisor=bool(self._advisor),
             )
         ]
@@ -3462,7 +3629,7 @@ class CosmergonDashboard(App):
         t = self._theme
 
         # 0. Fatal error (e.g. auth failure) — shown permanently until restart
-        if self._auth_error and not state:
+        if self._auth_error:  # with a state too: the last one stays while nothing comes (#631)
             return _c(t.warn, self._auth_error)
 
         # 1. Active feedback — show confirmation + countdown so user knows *when* it fires.
@@ -3519,9 +3686,7 @@ class CosmergonDashboard(App):
             )
 
         # 5. No fields yet — only if the server offers a field (the main world can be full)
-        if not state.fields and (state.available_actions.get("create_field") or {}).get(
-            "available"
-        ):
+        if not state.fields and _offers(state.available_actions, "create_field"):
             return (
                 f"{_c(t.guide, '→')} {_c(t.cmd, _hk('F'))} "
                 f"{_c(t.guide, 'Create a field')} — choose a cube for your agent"
@@ -3594,7 +3759,7 @@ class CosmergonDashboard(App):
         else:
             return
         event.prevent_default()
-        self._redraw()
+        _on_time(self._redraw)()  # a key has no worker's boundary either (cos20 #631, K-AM)
 
     @work
     async def _open_field(self, idx: int) -> None:
@@ -3895,11 +4060,15 @@ class CosmergonDashboard(App):
         }
         url = _upgrade_urls.get(tier)
         if url is None:
-            self._set_feedback(_c(self._theme.data, "✓ You are on the top tier (Enterprise)"))
+            self._set_feedback(
+                _c(self._theme.data, "✓ You are on the top tier (Enterprise)"), at_tick=False
+            )
             return
         _open_https(url)
         self._add_log(_c(self._theme.pos, f"✓ Upgrade page opened ({tier} → next tier)"))
-        self._set_feedback(_c(self._theme.pos, "✓ Browser opened — complete upgrade there"))
+        self._set_feedback(
+            _c(self._theme.pos, "✓ Browser opened — complete upgrade there"), at_tick=False
+        )
 
     async def _keep_or_upgrade(self, *, keep: bool, plans: bool) -> None:
         """Choose: keep this agent (key persistence) and/or a plan (#468, Paket 2.7a).
@@ -3956,10 +4125,11 @@ class CosmergonDashboard(App):
                 return
             self._add_log(_c(self._theme.pos, f"✓ Key persistence checkout opened ({interval})"))
             self._set_feedback(
-                _c(self._theme.pos, "✓ Checkout opened in your browser — pay there to keep it")
+                _c(self._theme.pos, "✓ Checkout opened in your browser — pay there to keep it"),
+                at_tick=False,
             )
             return
-        message = (body.get("error") or {}).get("message") or f"HTTP {resp.status_code}"
+        message = _server_refusal(body) or f"HTTP {resp.status_code}"
         self._set_feedback(_c(warn, f"✗ Keep this agent: {_roh(message)}"), duration=10.0)
 
     async def _upgrade_anonymous_via_api(self, tier: str) -> None:
@@ -3979,7 +4149,8 @@ class CosmergonDashboard(App):
                 checkout_url = resp.json().get("checkout_url", "")
                 if _open_https(checkout_url):
                     self._set_feedback(
-                        _c(self._theme.pos, "✓ Stripe checkout opened — complete payment there")
+                        _c(self._theme.pos, "✓ Stripe checkout opened — complete payment there"),
+                        at_tick=False,
                     )
                     return
         except Exception:
@@ -3988,7 +4159,9 @@ class CosmergonDashboard(App):
 
         # Fallback: open website (Panel: Engineering — robust degradation)
         _open_https("https://cosmergon.com/solo.html")
-        self._set_feedback(_c(self._theme.pos, "✓ Upgrade page opened — complete upgrade there"))
+        self._set_feedback(
+            _c(self._theme.pos, "✓ Upgrade page opened — complete upgrade there"), at_tick=False
+        )
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         """An open dialog owns its keys: the App's own keys do not fire under it (cos20 #628).
@@ -4074,7 +4247,7 @@ class CosmergonDashboard(App):
             return
         self._add_log(_c(self._theme.pos, f"✓ Checkout opened: {_roh(product.get('name'))}"))
         done = "✓ Checkout opened — delivery after payment; energy shows up as a voucher under S"
-        self._set_feedback(_c(self._theme.pos, done), duration=10.0)
+        self._set_feedback(_c(self._theme.pos, done), at_tick=False, duration=10.0)
 
     async def _shop_vouchers(self) -> list[dict[str, Any]]:
         """This agent's energy vouchers for the shop's top line; ``[]`` if they cannot be read."""
@@ -4102,7 +4275,9 @@ class CosmergonDashboard(App):
             self._set_feedback(_c(self._theme.warn, f"✗ Voucher: {_roh(why)}"), duration=10.0)
             return
         self._add_log(_c(self._theme.pos, f"✓ Voucher activated: +{_roh(credited)} energy"))
-        self._set_feedback(_c(self._theme.pos, f"✓ +{_roh(credited)} energy for {_roh(name)}"))
+        self._set_feedback(
+            _c(self._theme.pos, f"✓ +{_roh(credited)} energy for {_roh(name)}"), at_tick=False
+        )
 
     @work
     async def action_toggle_showcase(self) -> None:
@@ -4141,11 +4316,15 @@ class CosmergonDashboard(App):
         consent = consent_resp.json()
         me = me_resp.json()
         current_state = bool(me.get("public_showcase", False))
+        text, text_hash = consent.get("text"), consent.get("text_hash")
+        if not isinstance(text, str) or not isinstance(text_hash, str):  # #631, K-AO
+            self._set_feedback(_c(self._theme.warn, "✗ Showcase: the server sent no consent text"))
+            return
 
         result = await self.push_screen_wait(
             ShowcaseModal(
-                consent_text=consent["text"],
-                consent_text_hash=consent["text_hash"],
+                consent_text=text,
+                consent_text_hash=text_hash,
                 current_state=current_state,
             )
         )
@@ -4168,7 +4347,7 @@ class CosmergonDashboard(App):
                 msg = "✓ Showcase enabled (slug pending)"
             else:
                 msg = "✓ Showcase disabled — you are private again"
-            self._set_feedback(_c(self._theme.pos, msg))
+            self._set_feedback(_c(self._theme.pos, msg), at_tick=False)
         elif r.status_code == 409:
             self._set_feedback(
                 _c(self._theme.warn, "✗ Showcase: consent text changed — re-open and confirm")
@@ -4176,7 +4355,7 @@ class CosmergonDashboard(App):
         else:
             detail = ""
             try:
-                detail = (r.json() or {}).get("detail", "")
+                detail = _server_refusal(r.json())
             except Exception:
                 logger.debug("action_toggle_showcase: failed, falling back", exc_info=True)
             self._set_feedback(_c(self._theme.warn, f"✗ Showcase {r.status_code}: {_roh(detail)}"))
@@ -4439,7 +4618,7 @@ class CosmergonDashboard(App):
         tier = (state.subscription_tier if state else None) or "free"
         has_stripe = state.has_stripe_customer if state else False
         downgrade = state.subscription_downgrade_at if state else None
-        token = load_token()
+        token = load_token(base_url=self.agent.base_url)
         result = await self.push_screen_wait(
             KeyModal(
                 self._get_plain_key(),
@@ -4565,12 +4744,12 @@ class CosmergonDashboard(App):
     @work
     async def action_agent_selector(self) -> None:
         """Open agent selector [A] — only if a token is in config."""
-        token = load_token()
+        token = load_token(base_url=self.agent.base_url)
         if not token:
             return  # no token = Free user, no selector
 
         # Load agents from config (cached from last token resolution)
-        agents_dict = load_all_agents()
+        agents_dict = load_all_agents(base_url=self.agent.base_url)
         if not agents_dict:
             self._set_feedback("No agents in config. Use --token to connect.")
             return
@@ -4583,7 +4762,7 @@ class CosmergonDashboard(App):
             {
                 "agent_name": name,
                 "agent_id": entry.agent_id or "",
-                "energy": 0,  # not cached in config
+                "energy": None,  # not cached in config
                 "persona": "",
             }
             for name, entry in agents_dict.items()
@@ -4612,7 +4791,7 @@ class CosmergonDashboard(App):
         if not entry or not entry.api_key:
             return
         self.agent.reconnect(entry.api_key, entry.agent_id or "")
-        set_active_agent(name)
+        set_active_agent(name, base_url=self.agent.base_url)
         await self._now_another_agent()
         # Immediate refresh (Panel decision: no 3s delay)
         self._redraw()
@@ -4652,10 +4831,22 @@ class CosmergonDashboard(App):
         if new_key:
             save_agent(new_name, new_key, new_id, base_url=self.agent.base_url)
             self.agent.reconnect(new_key, new_id)
-            set_active_agent(new_name)
+            set_active_agent(new_name, base_url=self.agent.base_url)
             await self._now_another_agent()
             self._redraw()
             self._set_feedback(f"Agent created: {_roh(new_name)}")
+
+    async def _notice_new_agent(self) -> None:
+        """The SDK itself registers a new agent when an anonymous key expires; nothing told us.
+
+        So a move queued for the old agent went out with the new key, and the old agent's
+        pause and mission stood beside the new name (cos20 #631, K-CU)."""
+        current = self.agent.agent_id
+        if self._shown_agent is None:
+            self._shown_agent = current
+        elif current != self._shown_agent:
+            self._add_log(_c(self._theme.warn, "⚠ The old key expired: this is a new agent now"))
+            await self._now_another_agent()
 
     async def _now_another_agent(self) -> None:
         """What the dashboard knows of the agent it showed stays with that agent (cos20 #628).
@@ -4665,6 +4856,8 @@ class CosmergonDashboard(App):
         tick brings the rest. The world log stays: it tells what the player saw, also of the old
         agent; the tournament and arena tabs are a body's, and go.
         """
+        self._shown_agent = self.agent.agent_id
+        self._auth_error = ""
         self._pending_action = None
         self._paused = False
         self._mission = None
@@ -4757,7 +4950,7 @@ class CosmergonDashboard(App):
 # ---------------------------------------------------------------------------
 
 
-class LogScreen(ModalScreen):
+class LogScreen(_Dialog):
     """Full-screen LOG view — all activity entries, scrollable. Esc to close."""
 
     DEFAULT_CSS = """
@@ -4824,10 +5017,11 @@ class LogScreen(ModalScreen):
         # (it calls next_tab). Any other key closes and returns the tab, so the panel shows
         # what the player last looked at.
         if event.key not in self._SCROLL_KEYS and event.key not in ("l", "L"):
+            event.stop()
             self.dismiss(self._tab)
 
 
-class ChatScreen(ModalScreen):
+class ChatScreen(_Dialog):
     """Full-screen CHAT — scrollable history + input field. Enter sends, Esc closes."""
 
     DEFAULT_CSS = """
@@ -4966,6 +5160,7 @@ class ChatScreen(ModalScreen):
 
     def on_key(self, event: Any) -> None:
         if event.key == "escape":
+            event.stop()
             self.dismiss(None)
             event.prevent_default()
         elif event.key in ("up", "down", "pageup", "pagedown"):
@@ -5044,7 +5239,7 @@ _FV_MAP_H = 8
 _FV_MINIMAP_THRESHOLD = 60  # only show minimap when content_w >= this
 
 
-class FieldScreen(ModalScreen):
+class FieldScreen(_Dialog):
     """Full-screen Conway field visualiser.  [V] to open, Esc/Q to close.
 
     Zoom 1 (detail): 1 cell = 1 character, scrollable viewport + minimap.
@@ -5128,7 +5323,7 @@ class FieldScreen(ModalScreen):
         # Approximate usable content width from terminal size (92% - borders)
         self._content_w = max(40, int(self.app.size.width * 0.92) - 4)
         self.set_interval(0.25, _on_time(self._redraw))
-        self._redraw()  # immediate first render — shows "Loading…" without 0.25s flash
+        _on_time(self._redraw)()  # immediate first render — "Loading…" without 0.25s flash
         self._fetch_cells()
 
     @work(exclusive=True, group="cells")
@@ -5287,6 +5482,7 @@ class FieldScreen(ModalScreen):
     def on_key(self, event: Any) -> None:
         k = event.key
         if k == "escape":
+            event.stop()
             self.dismiss(None)
             event.prevent_default()
         elif k == "z":
@@ -5341,7 +5537,7 @@ class FieldScreen(ModalScreen):
 # ---------------------------------------------------------------------------
 
 
-class IdentitySetupScreen(ModalScreen):
+class IdentitySetupScreen(_Dialog):
     """Modal shown once when the agent's name matches the auto-generated pattern.
 
     The user can set a permanent agent name and choose a persona.
@@ -5416,9 +5612,13 @@ class IdentitySetupScreen(ModalScreen):
                 id="name-input",
             )
             yield Label("Persona (Tab to select):", id="persona-label")
+            # A persona the server has and this client does not know yet (cos20 #631, K-BY).
+            persona = str(self._current_persona)
+            bekannt = any(value == persona for _, value in _PERSONA_OPTIONS)
+            neu = [] if bekannt else [(Text(persona), persona)]
             yield Select(
-                options=_PERSONA_OPTIONS,
-                value=self._current_persona,
+                options=[*_PERSONA_OPTIONS, *neu],
+                value=persona,
                 allow_blank=False,
                 id="persona-select",
             )
@@ -5431,6 +5631,7 @@ class IdentitySetupScreen(ModalScreen):
 
     def on_key(self, event: Any) -> None:
         if event.key == "escape":
+            event.stop()
             self.dismiss(None)
             event.prevent_default()
 
@@ -5507,7 +5708,7 @@ def _fix_bar_keys(
     keys = [("C", "Compass")]
     if has_fields:
         keys.append(("P", "Place"))
-    if (actions.get("create_field") or {}).get("available"):
+    if _offers(actions, "create_field"):
         keys.append(("F", "Field"))
     if has_fields:
         # [E] stays with every field owner: since 0.27.2 the dialog says what each field still
@@ -6236,7 +6437,7 @@ def _quit_warning(when: str) -> str:
     )
 
 
-class PauseConfirmModal(ModalScreen):
+class PauseConfirmModal(_Dialog):
     """Pausing is explicit and asked twice — never on a single key (#468).
 
     Step 1 names the consequence and the server's waiting time ([Y] continue, [N] cancel).
@@ -6318,7 +6519,7 @@ class PauseConfirmModal(ModalScreen):
         self.dismiss(False)
 
 
-class OnboardingModal(ModalScreen):
+class OnboardingModal(_Dialog):
     """One-time hint modal shown on the first tick when the agent has no game fields.
 
     Dismissed by pressing Enter or Escape — never shown again on this machine. Not Space:
@@ -6394,7 +6595,7 @@ class OnboardingModal(ModalScreen):
 # ---------------------------------------------------------------------------
 
 
-class FirstStartApp(App):
+class FirstStartApp(_PrivateApp):
     """Mini-app: [Enter] New agent / [K] Enter existing key."""
 
     DEFAULT_CSS = """
@@ -6547,13 +6748,13 @@ def _key_from_fd(fd: int) -> str:
     return key
 
 
-def _needs_first_start(api_key: str | None) -> bool:
+def _needs_first_start(api_key: str | None, base_url: str) -> bool:
     """Return True when the first-start screen should be shown."""
     if api_key or os.environ.get("COSMERGON_API_KEY", ""):
         return False
     from cosmergon_agent.config import load_credentials
 
-    saved_key, _, _ = load_credentials()
+    saved_key, _, _ = load_credentials(base_url=base_url)
     return not saved_key
 
 
@@ -6673,7 +6874,7 @@ def main() -> None:
     resolved_key = args.api_key
 
     # First-start screen: shown when no credentials exist
-    if _needs_first_start(resolved_key):
+    if _needs_first_start(resolved_key, args.base_url):
         chosen = _ask_first_start(args.base_url)
         if chosen is None:  # Q or Esc: nobody is registered (cos20 #628 F20)
             return

@@ -125,25 +125,35 @@ def _parse_agents_response(
             status_code=resp.status_code,
         )
 
-    data = resp.json()
-    raw_agents = data.get("agents", [])
-    if not raw_agents:
-        raise TokenResolutionError(
-            "No agents found for this account. Create one at cosmergon.com or via the API.",
-            status_code=200,
-        )
+    # An answer in no form we can read is a failure like any other, with a sentence. It used to
+    # leave this module as ValueError or AttributeError, past every ``except
+    # TokenResolutionError``, and ended the first-start screen with the key on the screen
+    # (cos20 #631, K-BT).
+    try:
+        data = resp.json()
+        raw_agents = data.get("agents", [])
+        if not raw_agents:
+            raise TokenResolutionError(
+                "No agents found for this account. Create one at cosmergon.com or via the API.",
+                status_code=200,
+            )
 
-    agents = [
-        ResolvedAgent(
-            agent_name=a.get("agent_name", "?"),
-            agent_id=a.get("agent_id", ""),
-            api_key=_SensitiveStr(a.get("api_key", "")),
-            persona=a.get("persona", ""),
-            energy=float(a.get("energy", 0)),
-            tier=a.get("tier", ""),
-        )
-        for a in raw_agents
-    ]
+        agents = [
+            ResolvedAgent(
+                agent_name=a.get("agent_name", "?"),
+                agent_id=a.get("agent_id", ""),
+                api_key=_SensitiveStr(a.get("api_key", "")),
+                persona=a.get("persona", ""),
+                energy=float(a.get("energy", 0)),
+                tier=a.get("tier", ""),
+            )
+            for a in raw_agents
+        ]
+    except (ValueError, TypeError, AttributeError, OverflowError) as exc:
+        raise TokenResolutionError(
+            f"{base_url} answered in a form this client cannot read ({type(exc).__name__}).",
+            status_code=resp.status_code,
+        ) from None
 
     # Select agent: named → match, unnamed → oldest (Panel decision S110 #7+#9)
     if agent_name:
@@ -174,6 +184,11 @@ def _parse_agents_response(
         selected=selected,
         agents=agents,
     )
+
+
+def _connection_failed(base_url: str, exc: httpx.HTTPError) -> TokenResolutionError:
+    """Any other failure of the connection (it broke off, the answer did not parse as HTTP)."""
+    return TokenResolutionError(f"The connection to {base_url} failed ({type(exc).__name__}).")
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +237,8 @@ def resolve_token_sync(
             f"Cannot reach {base_url} — check your connection. "
             f"Your Master Key is valid, try again later.",
         ) from exc
+    except httpx.HTTPError as exc:
+        raise _connection_failed(base_url, exc) from None
 
     return _parse_agents_response(resp, base_url, agent_name)
 
@@ -254,5 +271,7 @@ async def resolve_token_async(
             f"Cannot reach {base_url} — check your connection. "
             f"Your Master Key is valid, try again later.",
         ) from exc
+    except httpx.HTTPError as exc:
+        raise _connection_failed(base_url, exc) from None
 
     return _parse_agents_response(resp, base_url, agent_name)

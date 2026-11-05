@@ -106,6 +106,30 @@ def _instance_name(url: str) -> str:
     return netloc.replace(".", "-").replace(":", "-").rstrip("-")
 
 
+def _instance_of(data: dict, base_url: str) -> str:
+    """The instance that holds this address, else the name a new one for it gets.
+
+    A key belongs to the world that gave it. Until cos20 #631 (K-AU) a run with another
+    ``base_url`` read the keys of the default instance, or of the first there was, and sent them
+    to that address, and its own writes went into the default instance under the new address.
+    """
+    wanted = base_url.rstrip("/").lower()
+    for name, cfg in data.get("instances", {}).items():
+        if str(cfg.get("base_url", _DEFAULT_BASE_URL)).rstrip("/").lower() == wanted:
+            return str(name)
+    return _instance_name(base_url)
+
+
+def _instance_cfg(data: dict, instance: str | None, base_url: str | None) -> dict:
+    """What a reader gets: by address only that address, with no fallback; else as it always was
+    (the named or default instance, then the first)."""
+    instances: dict = data.get("instances", {})
+    if instance is None and base_url is not None:
+        return instances.get(_instance_of(data, base_url), {})  # type: ignore[no-any-return]
+    cfg = instances.get(instance or data.get("default_instance", ""), {})
+    return cfg or next(iter(instances.values()), {})  # type: ignore[no-any-return]
+
+
 def _read_raw() -> dict:
     """Read config.toml as a dict.  Returns {} if the file is missing or broken."""
     if not CONFIG_PATH.exists():
@@ -204,25 +228,22 @@ def _load_config() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def load_credentials(instance: str | None = None) -> tuple[str, str | None, bool]:
+def load_credentials(
+    instance: str | None = None, *, base_url: str | None = None
+) -> tuple[str, str | None, bool]:
     """Load ``(api_key, agent_id, activated)`` for an instance.
 
     Reads the nested multi-agent format first (active_agent → agents subtable),
     then falls back to flat format (api_key directly on instance).
 
-    Uses *default_instance* when *instance* is ``None``.
-    Returns ``("", None, False)`` when nothing is saved.
+    Uses *default_instance* when *instance* is ``None``; with *base_url*, only that address's
+    instance. Returns ``("", None, False)`` when nothing is saved.
     """
     data = _load_config()
-    instances = data.get("instances", {})
-    if not instances:
+    if not data.get("instances", {}):
         return "", None, False
 
-    name = instance or data.get("default_instance", "")
-    cfg = instances.get(name, {})
-    if not cfg:
-        # Fall back to the first available instance
-        cfg = next(iter(instances.values()), {})
+    cfg = _instance_cfg(data, instance, base_url)
 
     # Try nested multi-agent format first
     agents_table = cfg.get("agents", {})
@@ -263,7 +284,7 @@ def save_credentials(
     """
     data = _load_config()
 
-    name = instance or data.get("default_instance") or _instance_name(base_url)
+    name = instance or _instance_of(data, base_url)
 
     if "instances" not in data:
         data["instances"] = {}
@@ -305,20 +326,15 @@ def _put_active_agent(inst: dict, api_key: str, agent_id: str | None) -> None:
 # ---------------------------------------------------------------------------
 
 
-def load_token(instance: str | None = None) -> str:
-    """Load the player token (Master Key) for an instance.
+def load_token(instance: str | None = None, *, base_url: str | None = None) -> str:
+    """Load the player token (Master Key) for an instance; with *base_url*, only that address's.
 
     Returns ``""`` if no token is saved.
     """
     data = _load_config()
-    instances = data.get("instances", {})
-    if not instances:
+    if not data.get("instances", {}):
         return ""
-    name = instance or data.get("default_instance", "")
-    cfg = instances.get(name, {})
-    if not cfg:
-        cfg = next(iter(instances.values()), {})
-    return str(cfg.get("player_token", ""))
+    return str(_instance_cfg(data, instance, base_url).get("player_token", ""))
 
 
 def save_token(
@@ -329,7 +345,7 @@ def save_token(
 ) -> None:
     """Persist a player token (Master Key) for an instance."""
     data = _load_config()
-    name = instance or data.get("default_instance") or _instance_name(base_url)
+    name = instance or _instance_of(data, base_url)
 
     if "instances" not in data:
         data["instances"] = {}
@@ -345,23 +361,19 @@ def save_token(
         logger.warning("Failed to save token to %s: %s", CONFIG_PATH, exc)
 
 
-def load_all_agents(instance: str | None = None) -> dict[str, AgentEntry]:
-    """Load all agents from the nested multi-agent format.
+def load_all_agents(
+    instance: str | None = None, *, base_url: str | None = None
+) -> dict[str, AgentEntry]:
+    """Load all agents from the nested multi-agent format; with *base_url*, only that address's.
 
     Returns a dict mapping agent name → AgentEntry.
     Returns empty dict if no agents subtable exists.
     """
     data = _load_config()
-    instances = data.get("instances", {})
-    if not instances:
+    if not data.get("instances", {}):
         return {}
 
-    name = instance or data.get("default_instance", "")
-    cfg = instances.get(name, {})
-    if not cfg:
-        cfg = next(iter(instances.values()), {})
-
-    agents_table = cfg.get("agents", {})
+    agents_table = _instance_cfg(data, instance, base_url).get("agents", {})
     result: dict[str, AgentEntry] = {}
     for agent_name, agent_data in agents_table.items():
         result[agent_name] = AgentEntry(
@@ -386,7 +398,7 @@ def save_agent(
     is stored under its agent_id as key with a warning.
     """
     data = _load_config()
-    inst_name = instance or data.get("default_instance") or _instance_name(base_url)
+    inst_name = instance or _instance_of(data, base_url)
 
     if "instances" not in data:
         data["instances"] = {}
@@ -440,7 +452,7 @@ def save_all_agents_and_token(
         instance: Instance name override.
     """
     data = _load_config()
-    inst_name = instance or data.get("default_instance") or _instance_name(base_url)
+    inst_name = instance or _instance_of(data, base_url)
 
     if "instances" not in data:
         data["instances"] = {}
@@ -475,11 +487,14 @@ def set_active_agent(
     name: str,
     *,
     instance: str | None = None,
+    base_url: str | None = None,
 ) -> None:
     """Set which agent is active (used by Dashboard agent-selector)."""
     data = _load_config()
     instances = data.get("instances", {})
-    inst_name = instance or data.get("default_instance", "")
+    inst_name = instance or (
+        _instance_of(data, base_url) if base_url else data.get("default_instance", "")
+    )
     if inst_name not in instances:
         return
 
@@ -495,6 +510,7 @@ def maybe_migrate(
     agent_name: str,
     *,
     instance: str | None = None,
+    base_url: str | None = None,
 ) -> None:
     """Migrate flat api_key+agent_id into an agents.{name} subtable.
 
@@ -510,7 +526,9 @@ def maybe_migrate(
     if not instances:
         return
 
-    inst_name = instance or data.get("default_instance", "")
+    inst_name = instance or (
+        _instance_of(data, base_url) if base_url else data.get("default_instance", "")
+    )
     cfg = instances.get(inst_name, {})
     if not cfg:
         return

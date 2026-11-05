@@ -150,9 +150,9 @@ def _export(base_url: str) -> None:
             "ensure file permissions are restricted (chmod 600).\n"
         )
 
-    token = load_token()
-    agents = load_all_agents()
-    key, agent_id, _ = load_credentials()
+    token = load_token(base_url=base_url)
+    agents = load_all_agents(base_url=base_url)
+    key, agent_id, _ = load_credentials(base_url=base_url)
     inst_name = _instance_name(base_url)
 
     if token and agents:

@@ -42,6 +42,7 @@ cosmergon-mcp = "cosmergon_agent.mcp:run"
 [project.optional-dependencies]
 dashboard = [
     "textual>=2.0.0",  # text-wrap/text-overflow (cos20 #508)
+    "rich>=13.0.0",  # the crash picture without values (cos20 #631); textual brings it anyway
 ]
 # U5 (#232 K4, 2026-09-05): every product beyond the client is an extra.
 # `pip install cosmergon-agent` imports client + MCP server with httpx alone.

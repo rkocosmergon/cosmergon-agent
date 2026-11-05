@@ -54,8 +54,9 @@ def _fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def _entry(name: str) -> Any:
-    agents = {n: e for n, e in load_all_agents().items() if e.api_key and e.agent_id}
+def _entry(name: str, base_url: str) -> Any:
+    known = load_all_agents(base_url=base_url)
+    agents = {n: e for n, e in known.items() if e.api_key and e.agent_id}
     entry = agents.get(name)
     if entry is None:
         _fail(_unknown(name, list(agents)))
@@ -123,7 +124,7 @@ def new(name: str, persona: str | None, base_url: str, ref: str | None = None) -
     and ``COSMERGON_REFERRAL_CHANNEL``. It only counts here; ``referral_accepted`` in the output
     says whether the server recognised it (cos20 #603).
     """
-    if name in load_all_agents():
+    if name in load_all_agents(base_url=base_url):
         _fail(f"an agent named {name!r} exists here already; play it with --agent {name}")
     try:
         referral = shop.parse_ref(ref) if ref else shop.referral_from_env()
@@ -143,7 +144,7 @@ def new(name: str, persona: str | None, base_url: str, ref: str | None = None) -
 
 def state(name: str, base_url: str) -> None:
     """Its state as the server sends it (``contracts``, ``world_briefing.messages`` included)."""
-    entry = _entry(name)
+    entry = _entry(name, base_url)
     url = f"{base_url.rstrip('/')}/api/v1/agents/{entry.agent_id}/state"
     headers = {"Authorization": f"api-key {entry.api_key}"}
     print(json.dumps(_answer(_http.get(url, headers=headers, timeout=TIMEOUT_S))))
@@ -276,7 +277,7 @@ def act(name: str, action: str, params: dict[str, Any], base_url: str) -> None:
     run = os.environ.get("COSMERGON_PLAY_RUN", "")
     if run and _remember(name).get("played_in") == run:
         _fail(PLAYED)
-    entry = _entry(name)
+    entry = _entry(name, base_url)
     url = f"{base_url.rstrip('/')}/api/v1/agents/{entry.agent_id}/action"
     headers = {"Authorization": f"api-key {entry.api_key}", "X-Idempotency-Key": uuid.uuid4().hex}
     # A model writes these moves and may guess a field name: with ``strict`` the server refuses a
@@ -297,7 +298,7 @@ def act(name: str, action: str, params: dict[str, Any], base_url: str) -> None:
 
 def turn(name: str, base_url: str) -> None:
     """The agent's interface: situation, memory with its mistakes, moves, what to do now."""
-    entry = _entry(name)
+    entry = _entry(name, base_url)
     data = _get(entry, base_url, "/state")
     memory = str((_get(entry, base_url, "/memory/prompt") or {}).get("prompt") or "")
     rules = _quietly(f"{base_url.rstrip('/')}/api/v1/game/info")
@@ -337,7 +338,7 @@ def _booked_block(entry: Any, base_url: str) -> str:
 
 def reflect(name: str, texts: dict[str, str | None], base_url: str) -> None:
     """Look back: without texts, show what to look at; with all three, keep them as lessons."""
-    entry = _entry(name)
+    entry = _entry(name, base_url)
     signals = _get(entry, base_url, "/reflection/signals")
     if not all(texts.values()):
         memory = str((_get(entry, base_url, "/memory/prompt") or {}).get("prompt") or "")
@@ -367,7 +368,7 @@ def reflect(name: str, texts: dict[str, str | None], base_url: str) -> None:
 
 def join(name: str, tournament_id: str, base_url: str) -> None:
     """Take a free slot in a tournament (the server's advice names it)."""
-    entry = _entry(name)
+    entry = _entry(name, base_url)
     url = f"{base_url.rstrip('/')}/api/v1/tournaments/{tournament_id}/register"
     headers = {"Authorization": f"api-key {entry.api_key}"}
     print(
@@ -379,7 +380,7 @@ def join(name: str, tournament_id: str, base_url: str) -> None:
 
 def help_action(name: str, action: str, base_url: str) -> None:
     """What an action needs: the rules (``/game/info``) and what the agent's state says now."""
-    entry = _entry(name)
+    entry = _entry(name, base_url)
     rules = _answer(_http.get(f"{base_url.rstrip('/')}/api/v1/game/info", timeout=TIMEOUT_S))
     now = (_get(entry, base_url, "/state").get("available_actions") or {}).get(action)
     _say(

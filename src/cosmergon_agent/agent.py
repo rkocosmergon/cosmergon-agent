@@ -281,12 +281,12 @@ class CosmergonAgent:
 
         # Level 5: config.toml
         if not resolved_key:
-            saved_key, saved_agent_id, saved_activated = load_credentials()
+            saved_key, saved_agent_id, saved_activated = load_credentials(base_url=base_url)
             if saved_key:
                 resolved_key = saved_key
                 if not agent_id:
                     agent_id = saved_agent_id
-                if saved_activated or load_token():
+                if saved_activated or load_token(base_url=base_url):
                     # Activated credentials or token in config → user-provided
                     _user_provided = True
                 logger.info("Loaded credentials from %s", CONFIG_PATH)
@@ -1507,7 +1507,8 @@ class CosmergonAgent:
                 params={"limit": min(limit, 100)},
             )
             if resp.status_code == 200:
-                return resp.json()  # type: ignore[no-any-return]
+                body = resp.json()
+                return [m for m in body if isinstance(m, dict)] if isinstance(body, list) else []
         except Exception:
             logger.debug("get_messages: failed, falling back", exc_info=True)
         return []
@@ -2120,7 +2121,8 @@ class CosmergonAgent:
             except httpx.TransportError as exc:
                 last_exc = exc
                 if attempt < retries:
-                    await _backoff(attempt, f"Transport error ({exc})")
+                    # The kind only: h11 quotes a header it refuses, the key (cos20 #631).
+                    await _backoff(attempt, f"Transport error ({type(exc).__name__})")
             except httpx.RequestError as exc:
                 # The answer came but cannot be read (e.g. a broken content-encoding).
                 raise CsgConnectionError(f"Unreadable answer: {exc}") from exc
@@ -2148,7 +2150,7 @@ class CosmergonAgent:
         - Auto-managed (no token, no explicit key) → re-register as new agent.
         - Explicitly provided key → stop with error.
         """
-        has_token = bool(load_token())
+        has_token = bool(load_token(base_url=self.base_url))
 
         if has_token:
             # Paid user with token — FIFO-kick or revoked key.
@@ -2242,7 +2244,7 @@ class CosmergonAgent:
                 if last_tick == -1 and self._state.agent_name:
                     from cosmergon_agent.config import maybe_migrate
 
-                    maybe_migrate(self._state.agent_name)
+                    maybe_migrate(self._state.agent_name, base_url=self.base_url)
 
                 if self._state.tick != last_tick and self._tick_handler:
                     last_tick = self._state.tick
