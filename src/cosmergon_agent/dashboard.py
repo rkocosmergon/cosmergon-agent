@@ -1571,6 +1571,73 @@ class KeyModal(_Dialog):
         # Free users: R does nothing (no hint shown either)
 
 
+class UnsavedKeyModal(_Dialog):
+    """The new Master Key, when it could not be written (cos20 #631, K-DY).
+
+    The server has rotated it: the old key works on no device any more, and the new one is
+    shown this once. Written nowhere, it would be gone with this window, and the account with
+    it. So no Esc, and Q does not close it either (``action_leave``): [R] tries the file again,
+    [Y] closes once it is written down. Dismisses with ``True`` when the file took it.
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
+        Binding("r", "save_again", "Save again", show=False),
+        Binding("y", "written_down", "Written down", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    UnsavedKeyModal {
+        align: center middle;
+    }
+    UnsavedKeyModal > #unsaved-wrap {
+        width: 70;
+        height: auto;
+        border: solid $error;
+        background: $surface;
+        padding: 1 2;
+    }
+    UnsavedKeyModal > #unsaved-wrap > Label {
+        margin-bottom: 1;
+    }
+    """
+
+    def __init__(self, theme: Theme, key: str, path: str, save: Callable[[], bool]) -> None:
+        super().__init__()
+        self._theme = theme
+        self._key = key
+        self._path = path
+        self._save = save
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="unsaved-wrap"):
+            yield Label(_c(self._theme.warn, "Master Key rotated, but NOT saved"))
+            yield Label(
+                f"It could not be written to {_roh(self._path)}.\n"
+                "The old key no longer works on any device.\n"
+                "This is the only copy of the new one. Write it down now:"
+            )
+            yield Label(_c("bold", _roh(self._key)), id="unsaved-key")
+            yield Label(
+                _c("dim", "\\[R] try saving again · \\[Y] I wrote it down"), id="unsaved-foot"
+            )
+
+    def on_mount(self) -> None:
+        self.query_one("#unsaved-wrap").focus()
+
+    def action_save_again(self) -> None:
+        """[R] — the file once more, say a disk that was full has room again."""
+        if self._save():
+            self.dismiss(True)
+            return
+        self.query_one("#unsaved-foot", Label).update(
+            _c("dim", "Still not saved. \\[R] again · \\[Y] I wrote it down")
+        )
+
+    def action_written_down(self) -> None:
+        """[Y] — the player has the copy."""
+        self.dismiss(False)
+
+
 # ---------------------------------------------------------------------------
 # Agent Selector Modal [A] — Paket 3.3
 # ---------------------------------------------------------------------------
@@ -4009,6 +4076,8 @@ class CosmergonDashboard(_PrivateApp):
         close"): Q is an App key with priority and fires before the window — until 0.24.0 it
         quit the whole dashboard from the log, the help or the field view (found on the device).
         """
+        if isinstance(self.screen, UnsavedKeyModal):
+            return  # its key is nowhere else: only its own [R] or [Y] closes it (K-DY)
         if isinstance(self.screen, ModalScreen) and not self._quit_warning_open:
             self.screen.dismiss(None)
             return
@@ -4675,10 +4744,24 @@ class CosmergonDashboard(_PrivateApp):
             return
 
         # Save BEFORE showing success (Konzept: crash between save and display = recoverable)
-        from cosmergon_agent.config import save_token
+        from cosmergon_agent.config import CONFIG_PATH, save_token
 
-        save_token(new_token, base_url=self.agent.base_url)
-        self._set_feedback(f"Master Key rotated. New: {new_token[:15]}...")  # kuerzen-ok: masked
+        def save() -> bool:
+            return save_token(new_token, base_url=self.agent.base_url)
+
+        if save():
+            shown = new_token[:15]  # kuerzen-ok: masked
+            self._set_feedback(f"Master Key rotated. New: {shown}...")
+            return
+        # Not written: the old key works nowhere now, and this is its one copy (cos20 #631, K-DY).
+        saved = await self.push_screen_wait(
+            UnsavedKeyModal(self._theme, new_token, str(CONFIG_PATH), save)
+        )
+        self._set_feedback(
+            "Master Key rotated and saved."
+            if saved
+            else "Master Key rotated, NOT saved: keep the copy you wrote down."
+        )
 
     async def _revoke_agent_key(self, agent_data: dict, active_name: str, token: str) -> None:
         """Paket 4.2: Revoke all active API keys for an agent.

@@ -19,6 +19,11 @@
 
 ### Fixed
 
+- **A Master Key that could not be saved after a rotation is shown, not lost** (cos20 #631): the
+  old key works on no device after a rotation, and the server shows the new one once. When
+  `config.toml` could not be written, the dashboard still said "Master Key rotated" and the new key
+  was gone. It now stays on the screen with the path until you press [Y] (written down) or [R]
+  saves it; Esc and Q do not close it. `save_token` returns whether it wrote the key.
 - **A crash of the dashboard shows no values** (cos20 #631): Textual's crash picture listed local
   variables, among them a Master Key on the first start. It no longer does.
 - **`TEXTUAL_LOG` holds failures only** (cos20 #631): with it set, Textual wrote every event to the

@@ -342,8 +342,12 @@ def save_token(
     *,
     base_url: str = _DEFAULT_BASE_URL,
     instance: str | None = None,
-) -> None:
-    """Persist a player token (Master Key) for an instance."""
+) -> bool:
+    """Persist a player token (Master Key) for an instance. True once it is written.
+
+    A caller that just had the key rotated must look: the old key works nowhere then, and
+    the server shows the new one once (cos20 #631, K-DY).
+    """
     data = _load_config()
     name = instance or _instance_of(data, base_url)
 
@@ -359,6 +363,8 @@ def save_token(
         _write_raw(data)
     except Exception as exc:
         logger.warning("Failed to save token to %s: %s", CONFIG_PATH, exc)
+        return False
+    return True
 
 
 def load_all_agents(
