@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.31.0] — 2026-11-05
+
 ### Added
 
 - **`CosmergonAgent.field_cells(field_id)`** (cos20 #630): the live cells of a field with its size,
