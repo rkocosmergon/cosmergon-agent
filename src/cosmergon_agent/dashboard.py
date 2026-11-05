@@ -6565,6 +6565,21 @@ def _ask_first_start(base_url: str) -> str | None:
     return None if first_start.left else ""
 
 
+class _PrintableLog(logging.Formatter):
+    """A log line as a terminal may read it. The handler holds the real stderr even while the
+    dashboard runs, and a line can carry the world's words: a header in an error, a traceback
+    (cos20 #492, betreuer pass 3eccea1, B1). The one handler, so no line goes around it."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return printable(super().format(record), keep="\n")
+
+
+def _log_to_terminal() -> None:
+    handler = logging.StreamHandler()
+    handler.setFormatter(_PrintableLog(logging.BASIC_FORMAT))
+    logging.basicConfig(level=logging.WARNING, handlers=[handler])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Cosmergon Agent Dashboard",
@@ -6583,7 +6598,7 @@ def main() -> None:
     parser.add_argument("--base-url", default="https://cosmergon.com")
     parser.add_argument("--theme", choices=[*THEMES, "omarchy"], default=None)
     args = parser.parse_args()
-    logging.basicConfig(level=logging.WARNING)
+    _log_to_terminal()
     if args.api_key_fd is not None:  # never in argv or environ (cos20 #492 B7)
         args.api_key = _key_from_fd(args.api_key_fd)
 

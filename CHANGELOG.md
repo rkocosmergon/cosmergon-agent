@@ -12,6 +12,10 @@
 
 ### Fixed
 
+- **No control character from the world reaches your terminal through the dashboard's log** (cos20
+  #492): every log line goes through one filter, and the refusal of an encoded answer no longer
+  quotes the header as it came. A world could otherwise reset your terminal or leave its alternate
+  screen while the dashboard ran.
 - **An open dialog owns its keys** (cos20 #628): the dashboard's own keys no longer fire under a
   dialog. `R` now rotates the Master Key in the key dialog and reconnects on the reconnect screen,
   `Tab` reaches the persona list, and no dialog opens over the shop's confirmation, where `A` could

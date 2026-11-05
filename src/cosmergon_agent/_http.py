@@ -43,6 +43,7 @@ from typing import Any, cast
 
 import httpx
 
+from cosmergon_agent.action import printable
 from cosmergon_agent.exceptions import SendRefusedError
 from cosmergon_agent.state import _texts
 
@@ -98,7 +99,7 @@ def _refuse_encoded(response: httpx.Response) -> None:
     coding = response.headers.get("content-encoding", "").strip().lower()
     if coding not in ("", "identity"):
         raise AnswerRefused(
-            f"the answer came encoded ({coding[:40]}), though asked for as it is",
+            f"the answer came encoded ({printable(coding)[:40]}), though asked for as it is",
             request=response.request,
         )
 
