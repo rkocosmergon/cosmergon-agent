@@ -58,6 +58,7 @@ try:
     from textual.binding import Binding
     from textual.containers import Horizontal, Vertical, VerticalScroll
     from textual.events import Key
+    from textual.markup import MarkupError
     from textual.screen import ModalScreen
     from textual.widgets import Input, Label, Select, Static
     from textual.worker import Worker, WorkerState
@@ -2802,10 +2803,12 @@ class CosmergonDashboard(_PrivateApp):
             anzeigen = await self.agent.market_listings(item_type="mega_bomb")
         except (CosmergonError, RuntimeError, ValueError):
             return None
+        # _price, not float(): "nan" and "-5" were offered and sent
+        # (cos20 #492, Fehlersuche Stück 23, K23)
         preise = [
-            float(a["price_energy"])
+            p
             for a in anzeigen
-            if isinstance(a, dict) and a.get("price_energy") is not None
+            if isinstance(a, dict) and (p := _price(a.get("price_energy"))) is not None
         ]
         return min(preise, default=None)
 
@@ -2847,7 +2850,7 @@ class CosmergonDashboard(_PrivateApp):
         if not r.success:
             self._set_feedback(_c(warn, f"✗ Not bought: {_roh(r.error_message)}"), duration=10.0)
             return
-        bezahlt = float(((r.data or {}).get("result") or {}).get("price") or preis)
+        bezahlt = _price(((r.data or {}).get("result") or {}).get("price")) or preis
         self._add_log(_c(self._theme.pos, f"✓ bought a mega bomb (-{bezahlt:,.0f} E)"))
         fertig = f"✓ Mega bomb bought — {_hk('W')} shows it after the next tick"
         self._set_feedback(_c(self._theme.pos, fertig), at_tick=False, duration=10.0)
@@ -3576,9 +3579,17 @@ class CosmergonDashboard(_PrivateApp):
 
     def _update_panel(self, widget_id: str, content: str) -> None:
         """Call Static.update() only when content changed — prevents unnecessary repaints."""
-        if self._panel_cache.get(widget_id) != content:
-            self._panel_cache[widget_id] = content
-            self.query_one(f"#{widget_id}", Static).update(content)
+        if self._panel_cache.get(widget_id) == content:
+            return
+        widget = self.query_one(f"#{widget_id}", Static)
+        # Cache only after update(): a markup error left the panel empty, and the cache already
+        # equalled the content, so it was never drawn again
+        # (cos20 #492, Fehlersuche Stück 23, K24: a value read as markup left the bar empty).
+        try:
+            widget.update(content)
+        except MarkupError:
+            widget.update(Text(content))
+        self._panel_cache[widget_id] = content
 
     _FOCUS_TO_PANEL: ClassVar[dict[str, str]] = {
         "agent": "agent-panel",
@@ -3784,7 +3795,9 @@ class CosmergonDashboard(_PrivateApp):
             fields = (state.fields if state else None) or []
             if fields:
                 zeigen = fields[:5]  # kuerzen-ok: keys 1-5
-                parts = [f"{_c(t.cmd, _hk(str(i + 1)))}{f.id[:8]}" for i, f in enumerate(zeigen)]
+                parts = [
+                    f"{_c(t.cmd, _hk(str(i + 1)))}{_roh(f.id[:8])}" for i, f in enumerate(zeigen)
+                ]
                 self._update_panel("context-bar", _c("dim", "  ".join(parts)) + esc)
             else:
                 self._update_panel("context-bar", _c("dim", "No fields yet") + esc)
@@ -4948,7 +4961,7 @@ class CosmergonDashboard(_PrivateApp):
 
         if save():
             shown = new_token[:15]  # kuerzen-ok: masked
-            self._set_feedback(f"Master Key rotated. New: {shown}...")
+            self._set_feedback(f"Master Key rotated. New: {_roh(shown)}...")
             return
         # Not written: the old key works nowhere now, and this is its one copy (cos20 #631, K-DY).
         saved = await self.push_screen_wait(
