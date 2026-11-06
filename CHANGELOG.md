@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.31.2] — 2026-11-06
+
+### Fixed
+
+- **A market price that is no price is not offered.** Buying a mega bomb in the dashboard took
+  the cheapest offer's price as it came: `"nan"` offered "Buy for nan E" and sent it as the
+  highest price, `"-5"` a negative one, and a word broke the purchase off with an error. The
+  price is now read like every other price of the dashboard, a finite number above 0; an offer
+  without one is skipped. The same holds for the price shown after a purchase.
+- **A server value with a bracket no longer leaves a panel empty.** The FIELDS context bar put
+  the field id into markup as it came, and a panel whose text failed to draw was never drawn
+  again. The id and the Master Key feedback are now plain text, and a panel that cannot be read
+  as markup shows its text as it is.
+
 ## [0.31.1] — 2026-11-06
 
 ### Fixed
