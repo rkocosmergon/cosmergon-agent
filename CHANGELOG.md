@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.31.1] — 2026-11-06
+
 ### Fixed
 
 - **Foreign text loses its direction marks too.** `printable` (every string of a state, the
