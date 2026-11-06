@@ -34,19 +34,27 @@ def printable(text: object, keep: str = "") -> str:
 
     A terminal reads ESC (C0) and the 8-bit CSI and OSC (C1, U+0080 to U+009F) as commands, and
     neither Rich nor Textual removes them. Foreign text (other players, the server, a model)
-    therefore loses all of C0, DEL and C1 — the range Shikigon's bar drops (cos20 #492).
+    therefore loses all of C0, DEL and C1 — the range Shikigon's bar drops (cos20 #492). With
+    them go the direction marks and isolates (``BIDI``): one in another player's name turned the
+    text around it on the player's screen (cos20 #492, Betreuer-Durchgang b1637b0, A1).
     """
     return str(text).translate(_control_table(keep))
 
 
+# U+061C, U+200E, U+200F, U+202A-202E, U+2066-2069: the characters that change the direction of
+# the text around them (Unicode bidi controls, "Trojan Source", CVE-2021-42574). Not every format
+# character: the joiner U+200D holds an emoji together.
+BIDI = (0x061C, 0x200E, 0x200F, *range(0x202A, 0x202F), *range(0x2066, 0x206A))
+
+
 @cache
 def _control_table(keep: str) -> dict[int, None]:
-    """``str.translate`` table that deletes C0, DEL and C1 but the characters in ``keep``.
+    """``str.translate`` table that deletes C0, DEL, C1 and ``BIDI``, but those in ``keep``.
 
     A table, not a loop over characters: every string of a state goes through ``printable``
     since the state is read typed (cos20 #492), and a long one must not hold the loop.
     """
-    return {z: None for z in (*range(0x20), *range(0x7F, 0xA0)) if chr(z) not in keep}
+    return {z: None for z in (*range(0x20), *range(0x7F, 0xA0), *BIDI) if chr(z) not in keep}
 
 
 # Mission kinds and outcomes in a player's words (cos20 #468, #475). The terminal and

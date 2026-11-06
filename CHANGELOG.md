@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Foreign text loses its direction marks too.** `printable` (every string of a state, the
+  terminal, the CLI) drops U+061C, U+200E, U+200F, U+202A–U+202E and U+2066–U+2069 besides C0,
+  DEL and C1: a right-to-left override in another player's name turned the text around it on
+  your screen. The joiner inside an emoji stays.
+
 ## [0.31.0] — 2026-11-06
 
 ### Added
