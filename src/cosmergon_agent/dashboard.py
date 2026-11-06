@@ -169,6 +169,69 @@ def _offers(actions: Any, name: str) -> bool:
     return isinstance(entry, dict) and bool(entry.get("available"))
 
 
+def _price(value: object) -> float | None:
+    """A price: a finite number above 0, else ``None`` (cos20 #631, K-CQ; K-DS: NaN as a price).
+
+    The server takes a price only above 0 (``Field(gt=0)``). Text, a truth value, infinity and
+    a number too large for a float are no price.
+    """
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        return None
+    try:
+        zahl = float(value)
+    except (ValueError, OverflowError):
+        return None
+    return zahl if math.isfinite(zahl) and zahl > 0 else None
+
+
+def _for_sale(state: Any) -> dict[str, Any]:
+    """What the server says about selling now (``available_actions.market_list``, cos20 #631).
+
+    ``items``: the agent's own items with their count; ``refs``: the cheapest offer of another
+    agent per type; ``seen_below``: the price per type below which an offer is seen;
+    ``share``: the part of a sale the seller gets. Each is the server's; what it does not send
+    stays out, and nothing here stands in for it.
+    """
+    actions = getattr(state, "available_actions", None) if state is not None else None
+    entry = actions.get("market_list") if isinstance(actions, dict) else None
+    entry = entry if isinstance(entry, dict) else {}
+
+    def prices(key: str) -> dict[str, float]:
+        raw = entry.get(key)
+        if not isinstance(raw, dict):
+            return {}
+        return {str(k): p for k, v in raw.items() if (p := _price(v)) is not None}
+
+    raw_items = entry.get("sellable_items")
+    items = [
+        (str(k), int(v))
+        for k, v in (raw_items.items() if isinstance(raw_items, dict) else [])
+        if isinstance(v, int) and not isinstance(v, bool) and v > 0
+    ]
+    share = _price(entry.get("seller_share"))
+    return {
+        "items": items,
+        "refs": prices("reference_prices"),
+        "seen_below": prices("sichtbarkeits_schwelle"),
+        "share": share if share is not None and share <= 1 else None,
+    }
+
+
+def _sale_text(item: str, lage: dict[str, Any]) -> str:
+    """What the price dialog says about ``item``: the server's numbers, or that there are none."""
+    ref, seen = lage["refs"].get(item), lage["seen_below"].get(item)
+    zeilen = [
+        f"The cheapest offer of another agent: {_num(ref)} E. Enter takes it."
+        if ref is not None
+        else "No other agent offers this now, so there is no price to suggest. Name yours."
+    ]
+    if seen is not None:
+        zeilen.append(f"Buyers see offers below {_num(seen)} E.")
+    if lage["share"] is not None:
+        zeilen.append(f"You get {_num(lage['share'] * 100)} % of the price when it sells.")
+    return "\n".join(zeilen)
+
+
 def _kept(handler: Callable[..., Any]) -> Callable[..., Any]:
     """A dialog's handler: an odd value of the server costs that key, not the dashboard."""
 
@@ -1274,6 +1337,60 @@ class SelectModal(_Dialog):
                 self.dismiss(idx)
 
 
+class PriceModal(_Dialog):
+    """A price the player names: Enter takes it, Esc names none (cos20 #631, K-CQ).
+
+    The field starts with the server's suggestion, if there is one; without one it is empty and
+    a price is needed. Dismisses with the price (a finite number above 0) or ``None``.
+    """
+
+    DEFAULT_CSS = """
+    PriceModal {
+        align: center middle;
+    }
+    PriceModal > #dialog {
+        width: 60;
+        max-width: 95%;
+        height: auto;
+    }
+    """
+
+    def __init__(self, title: str, body: str, suggestion: float | None) -> None:
+        super().__init__()
+        self._title = title
+        self._body = body
+        self._suggestion = suggestion
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="dialog"):
+            yield Static(f"[bold]{_roh(self._title)}[/bold]", markup=True)
+            yield Static("")
+            yield Static(self._body, markup=False)
+            yield Label("")
+            vorschlag = "" if self._suggestion is None else _num(self._suggestion).replace(",", "")
+            yield Input(value=vorschlag, placeholder="price in E", id="price-input")
+            yield Label("", id="price-error")
+            yield Label("[dim]\\[Enter] take this price  \\[Esc] cancel[/dim]")
+
+    def on_mount(self) -> None:
+        self.query_one("#price-input", Input).focus()
+
+    def on_key(self, event: Any) -> None:
+        if event.key == "escape":
+            event.stop()
+            self.dismiss(None)
+
+    def on_input_submitted(self, event: Any) -> None:
+        event.stop()
+        preis = _price(str(getattr(event, "value", "")).strip().replace(",", ""))
+        if preis is None:
+            self.query_one("#price-error", Label).update(
+                "[yellow]A price is a number above 0.[/yellow]"
+            )
+            return
+        self.dismiss(preis)
+
+
 class HelpModal(_Dialog):
     """Scrollable guide: what is Cosmergon, hotkeys, and FAQ."""
 
@@ -1362,10 +1479,14 @@ class HelpModal(_Dialog):
             "stored in ~/.cosmergon/config.toml and reused.",
             "",
             "[bold]Auth failed / 401 error?[/bold]",
-            "Your API key ended (see 'When does my agent's key end?').",
-            "Run:  rm ~/.cosmergon/config.toml",
-            "Then: cosmergon-dashboard   (re-registers automatically)",
-            "Your old agent lives on as a Vagant — see below.",
+            "The server refused your agent's key: it ended (see",
+            "'When does my agent's key end?'), or it was replaced.",
+            "The dashboard handles it: with a Master Key it offers",
+            "\\[R] reconnect; an agent of its own signs up again by",
+            "itself; a key you gave it yourself needs your Master Key.",
+            "Do not delete ~/.cosmergon/config.toml: it holds every",
+            "key, your Master Key too, and nothing brings it back.",
+            "An agent whose key ended lives on as a Vagant — see below.",
             "",
             "[bold]What is a Vagant?[/bold]",
             "When an agent's key ends, the agent stays on the server",
@@ -1797,7 +1918,10 @@ class ReconnectScreen(_Dialog):
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="rc-wrap"):
             yield Label("")
-            yield Label("  Your agent is active on another device.")
+            # Both causes (cos20 #631, K-CW): a revoked key was told "another device" too.
+            yield Label("  The server refused your agent's key.")
+            yield Label("  It is active on another device,")
+            yield Label("  or its key was revoked.")
             yield Label("")
             yield Label("  [cyan]\\[R][/cyan]  Reconnect")
             yield Label("  [cyan]\\[Q][/cyan]  Quit")
@@ -2575,17 +2699,8 @@ class CosmergonDashboard(_PrivateApp):
         self.set_interval(0.5, _on_time(self._redraw))
 
     # ── Marauder action sub-menu (S212 action parity) ──────────────────────
-    _MARAUDER_SELL_PRICE: ClassVar[dict[str, float]] = {
-        "health": 2000,
-        "shield": 5000,
-        "tempo": 3000,
-        "glider_fuel": 8000,
-        "weapon": 50000,
-        "spore_pack": 4000,
-        "bomb": 20000,
-        "mine": 15000,
-        "mega_bomb": 100000,
-    }
+    # The table of sell prices that stood here (a copy of the house's prices) is gone: the sale
+    # reads the server's numbers (cos20 #631, K-CQ).
 
     def _first_cube_id(self) -> str | None:
         state = getattr(self.agent, "_state", None)
@@ -2610,6 +2725,7 @@ class CosmergonDashboard(_PrivateApp):
             "Market: sell item",
             "Combat: HP status",
             "Bus: passenger status",
+            "Market: take an offer back",  # last: the numbers above keep their keys
         ]
         idx = await self.push_screen_wait(SelectModal("Marauder", options))
         if idx is None:
@@ -2622,6 +2738,7 @@ class CosmergonDashboard(_PrivateApp):
             self._mar_sell_item,
             self._mar_hp_status,
             self._mar_passenger_status,
+            self._mar_take_back,
         ]
         try:
             await handlers[idx]()
@@ -2806,14 +2923,94 @@ class CosmergonDashboard(_PrivateApp):
         self._set_feedback(f"{len(listings)} listing(s) — see log")
 
     async def _mar_sell_item(self) -> None:
-        items = list(self._MARAUDER_SELL_PRICE.keys())
-        i = await self.push_screen_wait(SelectModal("Sell — item", items))
+        """Sell one of the agent's items at a price the player has seen and named (cos20 #631).
+
+        Items, the suggestion, what buyers see and the seller's share are the server's
+        (``available_actions.market_list``). The suggestion is the cheapest offer of another
+        agent; without one there is no honest number, and the player names the price.
+        """
+        lage = _for_sale(self.agent.state)
+        if not lage["items"]:
+            self._set_feedback(_c("dim", "Nothing to sell: your agent holds no item to list"))
+            return
+        namen = [f"{typ}: {anzahl} held" for typ, anzahl in lage["items"]]
+        i = await self.push_screen_wait(SelectModal("Sell — item", namen))
         if i is None:
             return
-        item = items[i]
-        r = await self.agent.list_item(item, self._MARAUDER_SELL_PRICE[item])
+        item = lage["items"][i][0]
+        preis = await self.push_screen_wait(
+            PriceModal(f"Sell {item}", _sale_text(item, lage), lage["refs"].get(item))
+        )
+        if preis is None:
+            self._set_feedback(_c("dim", "Nothing listed"))
+            return
+        if not await self._sale_confirmed(item, preis, lage["share"]):
+            self._set_feedback(_c("dim", "Nothing listed"))
+            return
+        r = await self.agent.list_item(item, preis)
         if not self._refused(r):
-            self._set_feedback(_c(self._theme.pos, f"✓ {item} listed"), at_tick=False)
+            gesagt = f"✓ {item} listed for {_num(preis)} E"
+            self._set_feedback(_c(self._theme.pos, _roh(gesagt)), at_tick=False)
+
+    async def _sale_confirmed(self, item: str, preis: float, share: float | None) -> bool:
+        """The last look before an item leaves the inventory: what, for how much, what is left."""
+        erloes = f", {_num(preis * share)} E of it to you" if share is not None else ""
+        body = (
+            f"{item} for {_num(preis)} E{erloes}.\n"
+            "The item leaves your inventory now. Until it is sold, "
+            "[W] → Market: take an offer back returns it.\nEsc lists nothing."
+        )
+        wahl = await self.push_screen_wait(
+            SelectModal(f"List {item}?", [f"List for {_num(preis)} E", "Do not list"], body=body)
+        )
+        return bool(wahl == 0)
+
+    async def _mar_take_back(self) -> None:
+        """Take one of the agent's own offers back (cos20 #631, K-CQ), after a last look.
+
+        The server names them in ``world_briefing.market.my_listings`` (up to five, oldest
+        first) and returns what was offered. Sent as ``market_cancel``, the same move an agent
+        makes; a taken tick queues it like every move of the dashboard.
+        """
+        state = self.agent.state
+        markt = state.world_briefing.market if state and state.world_briefing else None
+        eigene = [m for m in (markt.my_listings if markt else ()) if m.listing_id]
+        if not eigene:
+            self._set_feedback(_c("dim", "Your agent has no offer on the market"))
+            return
+        namen = [f"{m.item_type} · {_num(m.price_energy)} E" for m in eigene]
+        body = "Up to five of your offers, oldest first. What you take back returns to you."
+        i = await self.push_screen_wait(SelectModal("Take an offer back", namen, body=body))
+        if i is None:
+            return
+        wahl = await self.push_screen_wait(
+            SelectModal("Take it back?", [f"Take back {namen[i]}", "Keep it on the market"])
+        )
+        if wahl != 0:
+            self._set_feedback(_c("dim", "The offer stays"))
+            return
+        await self._act_or_queue("market_cancel", {"listing_id": eigene[i].listing_id},
+                                 "take an offer back", "✓ Offer taken back")  # fmt: skip
+
+    async def _act_or_queue(self, action: str, params: dict, display: str, done: str) -> None:
+        """One move of the dashboard: sent now, or at the next tick if this one is taken."""
+        warn = self._theme.warn
+        try:
+            r = await self.agent.act(action, **params)
+        except RateLimitError as exc:  # one action per tick and agent — queue it
+            self._schedule_pending(
+                _PendingAction(kind="act", action=action, params=params, display=display),
+                retry_after=exc.retry_after,
+            )
+            self._set_feedback(_c("dim", f"⏳ {display} — at the next tick"), duration=10.0)
+            return
+        except CosmergonError as exc:
+            self._set_feedback(_c(warn, f"✗ {_roh(exc)}"), duration=10.0)
+            return
+        if not r.success:
+            self._set_feedback(_c(warn, f"✗ {_roh(r.error_message)}"), duration=10.0)
+            return
+        self._set_feedback(_c(self._theme.pos, done), at_tick=False, duration=10.0)
 
     async def _mar_hp_status(self) -> None:
         hp = await self.agent.hp_status()

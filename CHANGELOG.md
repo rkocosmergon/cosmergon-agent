@@ -2,14 +2,27 @@
 
 ## [Unreleased]
 
-## [0.31.0] — 2026-11-05
+## [0.31.0] — 2026-11-06
 
 ### Added
 
 - **`CosmergonAgent.field_cells(field_id)`** (cos20 #630): the live cells of a field with its size,
   and a `CosmergonError` if it could not be read. `get_field_cells` stays as it is, `{}` on error.
+- **The dashboard takes an offer back** (cos20 #631): [W] → "Market: take an offer back" lists
+  your own offers as the server names them, asks once, and sends `market_cancel`. What you
+  offered returns to you.
 
 ### Changed
+
+- **Selling in the dashboard shows the price first** (cos20 #631): [W] → "Market: sell item"
+  offers only the items your agent holds, with their count, and asks for a price. The field
+  starts with the cheapest offer of another agent; without one there is no suggestion and you
+  name the price. It says below which price buyers see an offer and, from a server that sends it,
+  what of the price you get. Nothing is listed before you confirm. Until now a key listed one of
+  nine fixed items at a fixed price, owned or not, without showing the price.
+- **The help no longer says to delete `config.toml` after a 401** (cos20 #631): the file holds
+  every key, your Master Key too, and nothing brings it back. The help says what the dashboard
+  does itself, and the reconnect screen names both causes: another device, or a revoked key.
 
 - **The dashboard holds no empty line free** (cos20 #603): the key bar is as high as its keys need
   right now and takes the rows from the log when they wrap; the context line takes a row only while
