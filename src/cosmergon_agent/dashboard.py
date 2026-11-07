@@ -2592,6 +2592,7 @@ class CosmergonDashboard(_PrivateApp):
         self._quit_warning_open = False  # #468: a second Q under the warning quits
         self._compass_preset = "autonomous"
         self._compass_ever_set = False
+        self._compass_set_tick = -1  # the tick of its own last set (_follow_compass)
         self._last_energy: float | None = None
         self._feedback: str = ""
         self._feedback_until: float = 0.0
@@ -3043,12 +3044,9 @@ class CosmergonDashboard(_PrivateApp):
                     self._tick_interval = observed
             self._tick_received_at = now
             self._last_tick = state.tick
+            self._follow_compass(state)
             if self._last_energy is None:
                 self._last_energy = state.energy
-                # Restore compass from server state (persisted in persona_config)
-                if state.compass_preset and state.compass_preset in _COMPASS_PRESETS:
-                    self._compass_preset = state.compass_preset
-                    self._compass_ever_set = True
                 self._add_log(_c(self._theme.pos, f"● Connected  {state.energy:,.0f} E"))
                 self._moves_from_tick = state.tick
                 # In a running tournament the tournament's log is the interesting one.
@@ -3526,14 +3524,34 @@ class CosmergonDashboard(_PrivateApp):
             self._add_log(_c(self._theme.warn, said))
             self._set_feedback(_c(self._theme.warn, said))
 
+    def _follow_compass(self, state: GameState) -> None:
+        """The world's compass, from every state (persisted in persona_config).
+
+        Until 0.31.2 only the first state after a start set it, then only this dashboard's own
+        sets: a compass changed elsewhere (the Shikigon panel, another client) never reached the
+        agent panel, which showed the old one (cos20 #492, 07.11.2026). A state in the tick of
+        its own last set may be from before that set and is left out; a change elsewhere in that
+        same tick shows one tick later.
+        """
+        preset = state.compass_preset
+        if not preset or preset not in _COMPASS_PRESETS or state.tick <= self._compass_set_tick:
+            return
+        self._compass_preset = preset
+        self._compass_ever_set = True
+
+    def _compass_taken(self, preset: str) -> None:
+        """The world took a compass from this dashboard."""
+        self._compass_preset = preset
+        self._compass_ever_set = True
+        self._compass_set_tick = self._last_tick
+
     async def _fire_compass(self, pending: _PendingAction) -> None:
         result = await self.agent.set_compass(pending.action)
         if result.get("error"):
             self._add_log(_c(self._theme.warn, f"✗ {_roh(pending.display)}: failed"))
             self._set_feedback(_c(self._theme.warn, f"✗ {_roh(pending.display)} failed"))
             return
-        self._compass_preset = pending.action
-        self._compass_ever_set = True
+        self._compass_taken(pending.action)
         self._add_log(_c(self._theme.pos, f"✓ {_roh(pending.display)}"))
         self._set_feedback(_c(self._theme.pos, f"✓ Compass → {_roh(pending.display)}"))
 
@@ -4070,8 +4088,7 @@ class CosmergonDashboard(_PrivateApp):
                 self._add_log(_c(self._theme.warn, f"✗ compass failed: {_roh(result['error'])}"))
                 self._set_feedback(_c(self._theme.warn, "✗ Compass failed"))
             else:
-                self._compass_preset = preset
-                self._compass_ever_set = True
+                self._compass_taken(preset)
                 self._add_log(_c(self._theme.pos, f"✓ compass: {compass_label}"))
                 explanation = (result.get("explanation") or "").strip()
                 if explanation:
@@ -5162,6 +5179,7 @@ class CosmergonDashboard(_PrivateApp):
         self._last_tick = -1
         self._compass_preset = "autonomous"
         self._compass_ever_set = False
+        self._compass_set_tick = -1
         self._log_tournament = []
         self._log_arena = []
         self._log_new.clear()

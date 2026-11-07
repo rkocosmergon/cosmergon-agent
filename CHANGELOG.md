@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **The agent panel shows the compass the world holds.** The dashboard took the compass from
+  the first state after its start only, then only from its own changes: a compass set
+  elsewhere (another client, the Shikigon panel) never reached it, and it showed the old one.
+  It now follows every state; a state from the tick of its own change does not undo that
+  change.
+
 ## [0.31.2] — 2026-11-06
 
 ### Fixed
