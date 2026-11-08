@@ -136,6 +136,11 @@ def _read_raw() -> dict:
         return {}
     try:
         CONFIG_PATH.chmod(0o600)
+    except OSError:
+        # cos20 #652: hardening only — a read-only mount must not make the stored keys vanish
+        # (that silently registered a new anonymous agent on every start).
+        logger.debug("Could not tighten %s to 0600", CONFIG_PATH, exc_info=True)
+    try:
         return tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
     except Exception:
         return {}
@@ -228,6 +233,16 @@ def _load_config() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _aktiviert(cfg: dict) -> bool:
+    """Was the key in this instance set by the user (activated, or a Master Key is present)?
+
+    cos20 #651: ``maybe_migrate`` keeps the instance-level ``activated`` flag; the nested
+    format used to report ``True`` regardless, so an expired free key never re-registered.
+    A Master-Key setup (``player_token``) stays user-provided, as before.
+    """
+    return bool(cfg.get("activated", False) or cfg.get("player_token"))
+
+
 def load_credentials(
     instance: str | None = None, *, base_url: str | None = None
 ) -> tuple[str, str | None, bool]:
@@ -252,13 +267,13 @@ def load_credentials(
         agent_cfg = agents_table[active]
         key = agent_cfg.get("api_key", "")
         key = key.replace("\r", "").replace("\n", "")
-        return key, agent_cfg.get("agent_id") or None, True
+        return key, agent_cfg.get("agent_id") or None, _aktiviert(cfg)
     if agents_table:
         # active_agent not set or not found — use first agent
         first_agent: dict = next(iter(agents_table.values()), {})
         if first_agent.get("api_key"):
             key = first_agent["api_key"].replace("\r", "").replace("\n", "")
-            return key, first_agent.get("agent_id") or None, True
+            return key, first_agent.get("agent_id") or None, _aktiviert(cfg)
 
     # Fall back to flat format (v0.5.x single-agent)
     key = cfg.get("api_key", "")

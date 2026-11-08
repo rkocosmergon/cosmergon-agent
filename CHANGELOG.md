@@ -4,6 +4,18 @@
 
 ### Fixed
 
+- **A read-only `config.toml` keeps its keys.** The SDK tightened the file to 0600 while
+  reading it; on a read-only mount (a container secret, for example) that failed, the whole
+  file was treated as empty, and every start registered a new anonymous agent. The file is now
+  read even when it cannot be tightened.
+- **An expired free key re-registers again after the config moved to the multi-agent format.**
+  The nested format reported every stored key as activated, so an expired anonymous key ended
+  in a 401 stop ("reconnect with your Master Key") instead of the promised re-registration. A
+  key counts as yours when you activated it or a Master Key is stored.
+- **MCP keeps a key you set.** With `COSMERGON_API_KEY` set, a 401 used to register a new
+  anonymous agent and store it. It now reports the rejected key and changes nothing.
+- **The SSE reconnect log no longer quotes the key.** A header that the HTTP layer refuses is
+  quoted in its error text; the reconnect warning now names only the kind of error.
 - **The agent panel shows the compass the world holds.** The dashboard took the compass from
   the first state after its start only, then only from its own changes: a compass set
   elsewhere (another client, the Shikigon panel) never reached it, and it showed the old one.

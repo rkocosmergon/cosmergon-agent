@@ -202,6 +202,15 @@ async def _force_reregister() -> tuple[str, str]:
         _credentials = None
         return "", base_url
 
+    # cos20 #653 (concept C3): a key the user set explicitly is not replaced behind their back.
+    if os.environ.get("COSMERGON_API_KEY", ""):
+        _error(
+            "API key rejected (401). Set a valid COSMERGON_API_KEY, "
+            "or remove it to play as a new anonymous agent."
+        )
+        _credentials = None
+        return "", base_url
+
     # Free user — auto-re-register
     _error(
         "API key expired — registering as NEW anonymous agent. "

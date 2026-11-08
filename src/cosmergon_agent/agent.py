@@ -1869,7 +1869,10 @@ class CosmergonAgent:
             except httpx.TransportError as exc:
                 if not reconnect:
                     raise CsgConnectionError("SSE connection failed") from exc
-                logger.warning("SSE transport error, reconnecting in %.1fs: %s", delay, exc)
+                # cos20 #631: the kind only — h11 quotes a header it refuses, the key.
+                logger.warning(
+                    "SSE transport error, reconnecting in %.1fs: %s", delay, type(exc).__name__
+                )
 
             if not reconnect:
                 return
