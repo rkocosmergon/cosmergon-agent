@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.31.3] — 2026-11-08
+
 ### Fixed
 
 - **A read-only `config.toml` keeps its keys.** The SDK tightened the file to 0600 while
