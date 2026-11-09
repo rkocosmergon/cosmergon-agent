@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.31.5] — 2026-11-09
+
+### Added
+
+- **`ContractTargetBrief.lehnt_ab`**: the contract types a counterpart always declines, as the
+  server reports them in `world_briefing.contract_targets`. Empty means the server makes no
+  statement (for example a counterpart that answers proposals itself). Rule-based deciders can
+  skip a proposal that is bound to be rejected.
+
 ## [0.31.4] — 2026-11-09
 
 ### Fixed

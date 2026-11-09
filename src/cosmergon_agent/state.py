@@ -395,6 +395,8 @@ class ContractTargetBrief:
     username: str
     persona: str | None = None
     coop_score: float = 0.0  # S229: aggregate cooperation_score [-1, +1]
+    # Contract types this counterpart always declines (server, cos20 #673). Empty = no statement.
+    lehnt_ab: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -500,6 +502,7 @@ class WorldBriefing:
                     username=t.get("username", ""),
                     persona=t.get("persona"),
                     coop_score=t.get("coop_score") or 0.0,
+                    lehnt_ab=tuple(str(x) for x in (t.get("lehnt_ab") or []) if isinstance(x, str)),
                 )
                 for t in raw_targets
             ),
