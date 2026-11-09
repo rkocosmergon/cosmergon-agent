@@ -33,7 +33,7 @@ def _activate(code: str, base_url: str) -> None:
 
     if resp.status_code == 404:
         print("\n\u2717  Invalid or expired activation code.")
-        print("   Codes expire after 1 hour.")
+        print("   The code is valid only for a short time.")
         print("   Contact contact@cosmergon.de if you need a new one.")
         raise SystemExit(1) from None
     if resp.status_code == 429:

@@ -321,6 +321,16 @@ class BuyableListing:
     item_type: str
     price_energy: float
     seller_name: str | None = None
+    # cos20 #667: for energy, the price is for this amount — without it the price says nothing.
+    # ``None`` for goods without an amount (one listing is one piece) and on older servers.
+    menge: float | None = None
+
+
+def _menge(wert: object) -> float | None:
+    """The amount of a listing as a number, or ``None`` (missing, not a number, a bool)."""
+    if isinstance(wert, bool) or not isinstance(wert, int | float):
+        return None
+    return float(wert)
 
 
 @dataclass(frozen=True)
@@ -364,6 +374,7 @@ class MarketBriefing:
                     item_type=b.get("item_type", ""),
                     price_energy=b.get("price_energy", 0.0),
                     seller_name=b.get("seller_name"),
+                    menge=_menge(b.get("menge")),
                 )
                 for b in raw_buyable
             ),

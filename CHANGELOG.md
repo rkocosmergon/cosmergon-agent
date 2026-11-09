@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.31.6] — 2026-11-09
+
+### Added
+
+- **`BuyableListing.menge`**: the amount of a market listing, as the server reports it in
+  `world_briefing.market.buyable`. For energy the price is for this amount; without it the
+  price said nothing about the rate. `None` for goods without an amount and on older servers.
+
+### Changed
+
+- The CLI no longer names a fixed lifetime for activation codes ("valid only for a short time");
+  the server decides it.
+- `SECURITY.md`: one reporting address (`security@cosmergon.de`), the latest release is the
+  supported one, and the server policy is linked (cosmergon.com/security-policy/).
+
 ## [0.31.5] — 2026-11-09
 
 ### Added
