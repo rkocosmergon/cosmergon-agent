@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.31.4] — 2026-11-09
+
+### Fixed
+
+- **Referral rewards are no longer copied into the README.** The section promised "500 energy
+  when they create their first cube", a reward that no longer exists. It now points to the live
+  source: `GET /api/v1/game/info` → `affiliate.rewards`, and `GET /api/v1/agents/me/partner`
+  for your own standing.
+- **SKILL.md: registration alone qualifies for a free tournament seat.** The skill asked for one
+  main-world action first; the server does not require it.
+
 ## [0.31.3] — 2026-11-08
 
 ### Fixed
