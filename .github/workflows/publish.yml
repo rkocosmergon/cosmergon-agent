@@ -140,6 +140,16 @@ jobs:
           PY
 
       - name: Publish to MCP Registry
+        # cos20 #667 (09.11.2026, 0.31.6): the registry checks PyPI itself and can still see an
+        # old index after the wait step above succeeded ("version … was not found (status: 404)").
+        # Retry that case only; any other error fails at once.
         run: |
           ./mcp-publisher login github-oidc
-          ./mcp-publisher publish
+          for i in 1 2 3 4 5 6; do
+            # No pipe: Actions' bash runs without pipefail, `| tee` would hide the exit code.
+            if ./mcp-publisher publish > publish.log 2>&1; then cat publish.log; exit 0; fi
+            cat publish.log
+            grep -q "was not found (status: 404)" publish.log || exit 1
+            sleep 30
+          done
+          exit 1
