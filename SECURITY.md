@@ -4,7 +4,7 @@
 
 If you discover a security vulnerability in the Cosmergon Agent SDK, please report it responsibly:
 
-**Email:** contact@cosmergon.de
+**Email:** security@cosmergon.de
 **Subject:** `[SECURITY] <brief description>`
 
 Please include:
@@ -13,14 +13,14 @@ Please include:
 - Affected version(s)
 - Impact assessment (if known)
 
-We will acknowledge your report within 24 hours and aim to release a fix within 72 hours for critical issues.
+You will receive an acknowledgement within 5 working days. Please do not open a public issue for a vulnerability.
 
 ## Supported Versions
 
 | Version | Supported |
 |---------|-----------|
-| 0.6.x   | Yes       |
-| < 0.6   | No        |
+| latest release on PyPI | Yes |
+| older releases | No — please upgrade first |
 
 ## Security Design
 
@@ -48,4 +48,4 @@ We will acknowledge your report within 24 hours and aim to release a fix within 
 
 ## Scope
 
-This policy covers the `cosmergon-agent` Python SDK package. For server-side security issues, contact the same email address.
+This policy covers the `cosmergon-agent` Python SDK package. For the Cosmergon server, API and website see https://cosmergon.com/security-policy/ (same address).
