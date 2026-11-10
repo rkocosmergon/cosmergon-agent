@@ -73,6 +73,19 @@ _JITTER_MAX_S = 30.0
 MISSIONS_MAX = 50
 
 
+def _server_text(resp: httpx.Response, fallback: str) -> str:
+    """The server's message of an error answer, or ``fallback`` if the body is not JSON.
+
+    A 429 used to read only the header and said "Rate limited"; the server's text (for example
+    "Unpause cooldown: 206s remaining") was lost (cos20 #721).
+    """
+    try:
+        body = resp.json()
+    except ValueError:
+        return fallback
+    return error_text(body, fallback)
+
+
 def _retry_after(value: str | None) -> float:
     """Seconds from a ``Retry-After`` header: a number or an HTTP date (RFC 9110 §10.2.3).
 
@@ -789,7 +802,8 @@ class CosmergonAgent:
             signer: For x402: called with the 402's payment requirement (``accepts[0]``), returns
                 the ``X-PAYMENT`` header value; sync or async. The SDK holds no wallet — bring
                 your own client (e.g. the official ``x402`` package).
-            max_usdc: For x402: the most you allow. Nothing is signed above it or without it.
+            max_usdc: For x402: the most you allow. Nothing is signed above it or without it,
+                and only a requirement in USDC on Base (``scheme`` exact) is signed at all.
             holder_country: For x402: your ISO-3166 alpha-2 country (``X-Halter-Land``). From a
                 data-centre address the server asks for it above an amount.
 
@@ -2113,7 +2127,10 @@ class CosmergonAgent:
                 )
 
                 if resp.status_code == 429:
-                    raise RateLimitError(retry_after=_retry_after(resp.headers.get("Retry-After")))
+                    raise RateLimitError(
+                        _server_text(resp, "Rate limited"),
+                        retry_after=_retry_after(resp.headers.get("Retry-After")),
+                    )
 
                 if resp.status_code >= 500 and attempt < retries:
                     await _backoff(attempt, f"Server error {resp.status_code}")

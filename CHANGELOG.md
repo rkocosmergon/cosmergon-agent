@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.31.7] — 2026-11-10
+
+### Fixed
+
+- **x402 signs only USDC on Base.** `buy(pay="x402")` took the first payment requirement of a
+  402 unseen; `max_usdc` counts USDC with six decimals, so a requirement in another token, on
+  another network or with another scheme slipped past the limit, and a negative amount passed it
+  every time. Now only a requirement with `scheme` `exact`, network `base` or `base-sepolia`, that
+  network's USDC contract and an amount above zero is signed; anything else is reported as not
+  signed with the reason.
+- **A 429 carries the server's text.** `RateLimitError` said "Rate limited" for every 429; it now
+  carries the server's message (for example how long a paused agent must wait before `resume`),
+  and `retry_after` comes from the `Retry-After` header the server sends.
+
 ## [0.31.6] — 2026-11-09
 
 ### Added

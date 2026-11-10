@@ -35,6 +35,12 @@ _PATH = re.compile(r"/api/v1/[A-Za-z0-9_./-]+")
 _PLACEHOLDER = "{voucher_id}"
 # USDC has six decimals; the 402 names the amount in these atomic units.
 _USDC_ATOMIC = 1_000_000
+# The USDC contracts this SDK signs for (Circle, Base). The SDK's own knowledge on purpose: a
+# requirement is checked against it, not against what the server says it is (cos20 #738).
+_USDC = {
+    "base": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    "base-sepolia": "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+}
 
 
 def api_path(path: object) -> str:
@@ -150,20 +156,37 @@ def checkout_url(answer: Any) -> str | None:
     return url
 
 
+def _usdc_on_base(requirement: dict[str, Any]) -> bool:
+    """``scheme`` exact, a known Base network and that network's USDC contract (cos20 #738)."""
+    asset = _USDC.get(str(requirement.get("network")))
+    return (
+        requirement.get("scheme") == "exact"
+        and asset is not None
+        and str(requirement.get("asset", "")).lower() == asset
+    )
+
+
 def offer(answer_402: Any) -> dict[str, Any] | None:
-    """The first payment requirement of a 402 (``accepts[0]``), or ``None``."""
+    """The first payment requirement of a 402 in USDC on Base, or ``None``.
+
+    Only such a requirement is checked against ``max_usdc``: the limit counts USDC with six
+    decimals. Until 0.31.7 the first entry (``accepts[0]``) was taken unseen, so another token,
+    another network or another scheme passed the limit check (cos20 #738).
+    """
     accepts = answer_402.get("accepts") if isinstance(answer_402, dict) else None
-    if isinstance(accepts, list) and accepts and isinstance(accepts[0], dict):
-        return accepts[0]
-    return None
+    if not isinstance(accepts, list):
+        return None
+    return next((a for a in accepts if isinstance(a, dict) and _usdc_on_base(a)), None)
 
 
 def offer_usdc(requirement: dict[str, Any]) -> float | None:
-    """The amount of a payment requirement in USDC, or ``None`` if it is not a whole number."""
+    """The amount in USDC, or ``None`` unless it is a whole number of atomic units above zero."""
     try:
-        return int(str(requirement.get("maxAmountRequired"))) / _USDC_ATOMIC
+        atomic = int(str(requirement.get("maxAmountRequired")))
     except ValueError:
         return None
+    # A negative amount passed ``usdc > max_usdc`` every time (cos20 #738).
+    return atomic / _USDC_ATOMIC if atomic > 0 else None
 
 
 def not_signed(
@@ -177,7 +200,10 @@ def not_signed(
     if answer_402.get("reason"):
         return f"the server refused: {answer_402['reason']}"
     if requirement is None or usdc is None:
-        return "the 402 names no readable payment requirement"
+        return (
+            "the 402 names no payment this SDK can check: USDC on Base (scheme exact), "
+            "an amount above zero"
+        )
     if not has_signer:
         return "no signer given"
     if max_usdc is None:
