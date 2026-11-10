@@ -74,7 +74,10 @@ class NotConnectedError(CosmergonError, RuntimeError):
 class SendRefusedError(CosmergonError):
     """The caller's ``send_check`` refused a request before it left (cos20 #492).
 
-    Not a network failure: nothing was sent, and nothing is retried.
+    Not a network failure: nothing of this request left, and nothing is retried. A write
+    whose earlier try already left before a retry was refused raises ``ConnectionError``
+    instead: whether the server took that try is not known (cos20 #492, Shikigon
+    Betreuer-Durchgang 5d315a0). A refused retry of a read stays this error.
     """
 
 

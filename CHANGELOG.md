@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.31.8] — 2026-11-10
+
+### Fixed
+
+- **A refused retry of a write says that its first try may have arrived.** When `send_check` or
+  `peer_check` refused the retry of a write (after a timeout or a 5xx on the first try), the SDK
+  raised `SendRefusedError`, whose contract is "nothing was sent", although the first try had left
+  and the server may have taken it. Such a refusal now raises `ConnectionError` (outcome unknown),
+  with the refusal as its cause and in its message. A refusal before the first try, and of any
+  read, stays `SendRefusedError` (cos20 #492).
+
 ## [0.31.7] — 2026-11-10
 
 ### Fixed

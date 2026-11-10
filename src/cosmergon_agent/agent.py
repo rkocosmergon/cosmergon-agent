@@ -34,6 +34,7 @@ from cosmergon_agent.exceptions import (
     CosmergonError,
     NotConnectedError,
     RateLimitError,
+    SendRefusedError,
     WebhookSignatureError,
     WebhookTimestampError,
 )
@@ -234,7 +235,8 @@ class CosmergonAgent:
                 If omitted with multiple agents, the oldest is used.
             send_check: Asked with the URL right before every request this agent sends,
                 retries and credential resolution included; a non-empty answer refuses the
-                request with ``SendRefusedError``, and nothing leaves (cos20 #492).
+                request with ``SendRefusedError``, and nothing leaves (cos20 #492). A refused
+                retry of a write raises ``ConnectionError``: its earlier try went out.
             peer_check: Asked with the address (host, port) each new connection of this agent
                 actually reached, before a byte of a request goes over it; a non-empty answer
                 closes it with ``SendRefusedError``. Catches a name that resolves elsewhere
@@ -2103,7 +2105,10 @@ class CosmergonAgent:
         Transport errors (network) retry with exponential backoff.
         ``retry=False`` sends once: a paid request must not go out a second time
         (cos20 #606 R1). An answer that cannot be read raises ConnectionError, not
-        retried — the server has answered (R2).
+        retried — the server has answered (R2). A ``send_check`` or ``peer_check`` that
+        refuses a retry of a write raises ConnectionError too: an earlier try went out, and
+        whether the server took it is not known (cos20 #492). Before the first try, and for a
+        read, the refusal stays ``SendRefusedError``.
         """
         if self._client is None:
             raise NotConnectedError("Agent not connected. Call run() or use async with.")
@@ -2138,6 +2143,18 @@ class CosmergonAgent:
 
                 return resp
 
+            except SendRefusedError as exc:
+                # Nothing of this try left. A write whose earlier try did leave (a timeout after
+                # sending, a 5xx) may have been taken by the server: its outcome is not known, so
+                # it is a ConnectionError like any write whose answer got lost. Until 0.31.7 it
+                # stayed SendRefusedError ("nothing was sent"), and Shikigon said "not sent" of a
+                # compass word the world had set (cos20 #492, Betreuer-Durchgang 5d315a0, B1, B2).
+                if attempt == 0 or method.upper() not in _WRITE_METHODS:
+                    raise
+                raise CsgConnectionError(
+                    f"{exc.message} (refused before a retry; an earlier try may have reached "
+                    "the server)"
+                ) from exc
             except httpx.TransportError as exc:
                 last_exc = exc
                 if attempt < retries:
