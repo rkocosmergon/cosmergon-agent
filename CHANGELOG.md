@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.31.9] — 2026-11-10
+
+### Fixed
+
+- **A 429 to the retry of a write says that its first try may have arrived.** The server checks
+  its tick limit before the idempotency key, so when the first try of a move was taken and its
+  answer got lost, the retry got a 429, and the SDK raised `RateLimitError`, as if the move had not
+  been made. Such a 429 now raises `ConnectionError` (outcome unknown), with the `RateLimitError`
+  as its cause and the server's text in its message, like a refused retry since 0.31.8. A 429 on
+  the first try, and to any read, stays `RateLimitError`. The terminal no longer queues such a
+  move to send it again; a compass word is queued again as on any answer that got lost
+  (cos20 #492).
+
 ## [0.31.8] — 2026-11-10
 
 ### Fixed

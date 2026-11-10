@@ -39,7 +39,11 @@ class InsufficientEnergyError(CosmergonError):
 
 
 class RateLimitError(CosmergonError):
-    """429 — too many requests. Check retry_after attribute."""
+    """429 — too many requests. Check retry_after attribute.
+
+    Only where nothing of the call may have been taken: a 429 to the retry of a write, whose
+    earlier try went out, raises ``ConnectionError`` with this error as its cause (cos20 #492).
+    """
 
     def __init__(
         self,
