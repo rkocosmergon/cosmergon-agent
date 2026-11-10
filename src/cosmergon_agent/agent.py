@@ -135,6 +135,32 @@ async def _backoff(attempt: int, what: str) -> None:
     await asyncio.sleep(delay)
 
 
+def _unknown_outcome(
+    refusal: SendRefusedError | RateLimitError, attempt: int, method: str
+) -> CsgConnectionError | None:
+    """The ``ConnectionError`` a refused try of ``_request`` becomes, or ``None`` to keep it.
+
+    A try refused before it left (``send_check``, ``peer_check``) or by the server with a 429.
+    A write whose earlier try did leave (a timeout after sending, a 5xx) may have been taken by
+    the server: its outcome is not known, so it is a ConnectionError like any write whose answer
+    got lost. Until 0.31.7 the first stayed SendRefusedError ("nothing was sent", Shikigon
+    Betreuer-Durchgang 5d315a0), until 0.31.8 the second RateLimitError: the server checks its
+    tick limit before the idempotency key, so the retry of a move it had taken got a 429, and
+    Shikigon counted that move as not made (cos20 #492, Betreuer-Durchgang d99a3af, B1, B2).
+    The first try, and any read, keep their refusal.
+    """
+    if attempt == 0 or method.upper() not in _WRITE_METHODS:
+        return None
+    why = (
+        "refused before a retry"
+        if isinstance(refusal, SendRefusedError)
+        else "the retry was answered with 429"
+    )
+    return CsgConnectionError(
+        f"{refusal.message} ({why}; an earlier try may have reached the server)"
+    )
+
+
 def _json_body(resp: httpx.Response) -> dict[str, Any]:
     """The response body as a dict; ``{}`` if it is not a JSON object."""
     try:
@@ -2147,24 +2173,10 @@ class CosmergonAgent:
                 return resp
 
             except (SendRefusedError, RateLimitError) as exc:
-                # This try was refused: before it left (``send_check``, ``peer_check``), or by the
-                # server with a 429. A write whose earlier try did leave (a timeout after sending,
-                # a 5xx) may have been taken by the server: its outcome is not known, so it is a
-                # ConnectionError like any write whose answer got lost. Until 0.31.7 the first
-                # stayed SendRefusedError ("nothing was sent", Betreuer-Durchgang 5d315a0), until
-                # 0.31.8 the second RateLimitError: the server checks its tick limit before the
-                # idempotency key, so the retry of a move it had taken got a 429, and Shikigon
-                # counted that move as not made (cos20 #492, Betreuer-Durchgang d99a3af, B1, B2).
-                if attempt == 0 or method.upper() not in _WRITE_METHODS:
+                unknown = _unknown_outcome(exc, attempt, method)  # an earlier try of a write left
+                if unknown is None:
                     raise
-                why = (
-                    "refused before a retry"
-                    if isinstance(exc, SendRefusedError)
-                    else "the retry was answered with 429"
-                )
-                raise CsgConnectionError(
-                    f"{exc.message} ({why}; an earlier try may have reached the server)"
-                ) from exc
+                raise unknown from exc
             except httpx.TransportError as exc:
                 last_exc = exc
                 if attempt < retries:
