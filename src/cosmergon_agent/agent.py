@@ -161,6 +161,24 @@ def _unknown_outcome(
     )
 
 
+def _unknown_answer(resp: httpx.Response, attempt: int, method: str) -> CsgConnectionError | None:
+    """The ``ConnectionError`` an answer of 400 or more to the retry of a write becomes.
+
+    Its earlier try went out (a timeout after sending, a 5xx), and the server may have taken it;
+    what the retry was answered says nothing about that. Until 0.31.9 the last such answer came
+    back as the answer: ``set_compass`` turned any of them, an empty 502 of a proxy too, into
+    "not taken", and ``act`` turned a JSON 5xx into a refused move (cos20 #492,
+    Betreuer-Durchgang 369fc78, B1). The first try, and any read, keep their answer. A 429 is
+    raised before this (``_unknown_outcome``).
+    """
+    if attempt == 0 or resp.status_code < 400 or method.upper() not in _WRITE_METHODS:
+        return None
+    return CsgConnectionError(
+        f"The retry was answered with {resp.status_code} "
+        f"({printable(resp.text)[:200]}); an earlier try may have reached the server"
+    )
+
+
 def _json_body(resp: httpx.Response) -> dict[str, Any]:
     """The response body as a dict; ``{}`` if it is not a JSON object."""
     try:
@@ -2127,9 +2145,9 @@ class CosmergonAgent:
         """HTTP request with retry and backoff (C2).
 
         429 responses raise RateLimitError immediately — retrying within the
-        same game tick is pointless. Callers decide whether to queue or abort. A 429 to the
-        retry of a write raises ConnectionError instead: its earlier try went out, and the
-        server may have taken it (cos20 #492).
+        same game tick is pointless. Callers decide whether to queue or abort. A 429, and any
+        other answer of 400 or more, to the retry of a write raises ConnectionError instead:
+        its earlier try went out, and the server may have taken it (cos20 #492).
         5xx responses retry with exponential backoff up to max_retries.
         Transport errors (network) retry with exponential backoff.
         ``retry=False`` sends once: a paid request must not go out a second time
@@ -2169,7 +2187,9 @@ class CosmergonAgent:
                 if resp.status_code >= 500 and attempt < retries:
                     await _backoff(attempt, f"Server error {resp.status_code}")
                     continue
-
+                unknown_answer = _unknown_answer(resp, attempt, method)
+                if unknown_answer is not None:
+                    raise unknown_answer
                 return resp
 
             except (SendRefusedError, RateLimitError) as exc:

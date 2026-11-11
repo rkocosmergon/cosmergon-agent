@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.31.10] — 2026-11-11
+
+### Fixed
+
+- **Any error answer to the retry of a write says that its first try may have arrived.** When
+  the first try of a move or a compass word went out and its answer got lost, and every retry
+  was answered with an error (an empty 502 or 504 of a proxy while the server restarts, a 5xx of
+  the server itself, or a 4xx), the SDK returned that last answer: `set_compass` reported the
+  word as not set, and `act` a move as refused, although the server may have taken it. Such an
+  answer now raises `ConnectionError` (outcome unknown), with the status and the start of the
+  answer in its message, as a 429 to the retry has since 0.31.9. The first try, and any read,
+  keep their answer (cos20 #492).
+
 ## [0.31.9] — 2026-11-10
 
 ### Fixed
