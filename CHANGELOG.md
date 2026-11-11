@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.31.11] — 2026-11-11
+
+### Fixed
+
+- **The talk with the advisor reads its record a page at a time.** Opening it (`M`, when a
+  starter names `COSMERGON_ADVISOR_HISTORY`) read the whole record and parsed every line, on the
+  dashboard's loop, although it shows the last ten exchanges; the record keeps every exchange and
+  grows. Now each page — the last ten on opening, ten older per PgUp at the top — reads at most
+  256 KiB from the file's end backwards, off the loop. A line longer than that, or one that is not
+  an exchange, is skipped. The open talk holds at most 200 exchanges of the record; older ones
+  stay in the file. The hint above them no longer counts them, since that took reading them all
+  (cos20 #492, Omarchy marketplace review).
+
 ## [0.31.10] — 2026-11-11
 
 ### Fixed

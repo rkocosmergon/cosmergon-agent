@@ -670,6 +670,10 @@ _ADVISOR_KEPT_FROM_CHILD = (*_SECRETS_IN_ENVIRONMENT, _ADVISOR_ENV)
 # in the form the command prints plus ``q`` (the question). The dashboard only reads it.
 _ADVISOR_HISTORY_ENV = "COSMERGON_ADVISOR_HISTORY"
 _ADVISOR_PAGE = 10  # exchanges shown when the talk opens, and fetched per PgUp at its top
+# Read from the record per page at most. An exchange of Shikigon's brain is at most 500 + 2000
+# characters, written as JSON escapes about 15 KiB: a window holds a page many times over.
+_ADVISOR_PAGE_BYTES = 256 * 1024
+_ADVISOR_SHOWN = 200  # exchanges the open talk holds at most; older ones stay in the record
 
 
 def _advisor_argv() -> list[str] | None:
@@ -701,30 +705,56 @@ def _advisor_answer(ausgabe: str) -> tuple[str, str, bool]:
     return wer, f"No answer: {daten.get('why') or 'the advisor answered nothing'}", False
 
 
-def _advisor_history() -> list[tuple[str, str, str, bool]]:
-    """The talk so far as (question, who, answer, ok), oldest first.
+def _advisor_exchange(zeile: str) -> tuple[str, str, str, bool] | None:
+    """One line of the record as (question, who, answer, ok); ``None`` if it holds no question."""
+    try:
+        daten = json.loads(zeile)
+    except ValueError:
+        return None
+    frage = str(daten.get("q") or "").strip() if isinstance(daten, dict) else ""
+    return (frage, *_advisor_answer(zeile)) if frage else None
 
-    Read from the file the starter names in ``COSMERGON_ADVISOR_HISTORY``; empty without one.
-    A line that is not a JSON object with a question ``q`` is skipped.
+
+def _advisor_page(ende: int | None = None) -> tuple[list[tuple[str, str, str, bool]], int]:
+    """Up to ``_ADVISOR_PAGE`` exchanges that end before byte ``ende``, oldest first, and the
+    byte where the older ones end (0: there are none).
+
+    Read from the file the starter names in ``COSMERGON_ADVISOR_HISTORY`` (empty without one)
+    from ``ende`` (the file's end when ``None``) backwards, at most ``_ADVISOR_PAGE_BYTES``. The
+    record keeps every exchange, so it grows; until 0.31.10 the talk read it whole and parsed
+    every line on opening (Omarchy marketplace review of Shikigon, cos20 #492). A line that is
+    not a JSON object with a question ``q`` is skipped; so is a line longer than the window.
     """
     pfad = os.environ.get(_ADVISOR_HISTORY_ENV, "")
     if not pfad:
-        return []
+        return [], 0
     try:
-        with open(pfad, encoding="utf-8", errors="replace") as datei:
-            zeilen = datei.read().splitlines()
+        with open(pfad, "rb") as datei:
+            if ende is None:
+                ende = datei.seek(0, os.SEEK_END)
+            anfang = max(0, ende - _ADVISOR_PAGE_BYTES)
+            datei.seek(anfang)
+            block = datei.read(ende - anfang)
     except OSError:
-        return []
-    verlauf: list[tuple[str, str, str, bool]] = []
-    for zeile in zeilen:
-        try:
-            daten = json.loads(zeile)
-        except ValueError:
-            continue
-        frage = str(daten.get("q") or "").strip() if isinstance(daten, dict) else ""
-        if frage:
-            verlauf.append((frage, *_advisor_answer(zeile)))
-    return verlauf
+        return [], 0
+    zeilen: list[tuple[int, bytes]] = []  # (byte where the line starts, the line)
+    pos = anfang
+    for i, roh in enumerate(block.split(b"\n")):
+        if i or not anfang:  # the window's first line may be cut
+            zeilen.append((pos, roh))
+        pos += len(roh) + 1
+    seite: list[tuple[str, str, str, bool]] = []
+    aelter = zeilen[0][0] if zeilen else anfang
+    for start, roh in reversed(zeilen):
+        if len(seite) == _ADVISOR_PAGE:
+            aelter = start + len(roh) + 1
+            break
+        wechsel = _advisor_exchange(roh.decode("utf-8", "replace"))
+        if wechsel:
+            seite.append(wechsel)
+    if aelter >= ende:  # one line longer than the window: skipped, not read in parts
+        aelter = anfang
+    return seite[::-1], aelter
 
 
 async def _ask_advisor(argv: list[str], question: str) -> tuple[str, str, bool]:
@@ -5388,8 +5418,13 @@ class ChatScreen(_Dialog):
         self._agent_name = agent_name
         self._agent_mode = agent_mode
         self._advisor = advisor  # a command that answers a question (see _ask_advisor)
-        # Exchanges of the advisor's own record that are older than what is shown (PgUp).
-        self._earlier: list[tuple[str, str, str, bool]] = []
+        # The advisor's own record, read a page at a time (PgUp): the byte where the exchanges
+        # older than those shown end (0: none to fetch), how many are shown, whether the talk
+        # holds as many as it keeps, and whether a page is being read.
+        self._aelter = 0
+        self._gezeigt = 0
+        self._voll = False
+        self._liest = False
 
     def _header(self) -> str:
         """Who is on the other side, in one line — also when nobody is."""
@@ -5420,31 +5455,55 @@ class ChatScreen(_Dialog):
         ]
 
     def _earlier_hint(self) -> str:
-        return f"[dim]↑ {len(self._earlier)} earlier · arrow up or PgUp[/dim]"
+        if self._voll:
+            return f"[dim]The last {_ADVISOR_SHOWN} exchanges; older ones stay in the record.[/dim]"
+        return "[dim]↑ earlier · arrow up or PgUp[/dim]"
 
-    def _advisor_lines(self) -> list[Static]:
-        """What the talk with the advisor opens with: its last exchanges, or the invitation."""
-        verlauf = _advisor_history()
-        if not verlauf:
-            return [Label("[dim]Ask a question about your agent or the world.[/dim]")]
-        self._earlier = verlauf[:-_ADVISOR_PAGE]
-        zeilen: list[Static] = []
-        if self._earlier:
-            zeilen.append(Label(self._earlier_hint(), id="chat-earlier"))
-        for wechsel in verlauf[-_ADVISOR_PAGE:]:
-            zeilen += self._exchange(wechsel)
-        return zeilen
+    def _took(self, seite: list[tuple[str, str, str, bool]], aelter: int) -> list[Static]:
+        """Count a page read from the record; its lines, and where the next older page ends."""
+        self._gezeigt += len(seite)
+        self._voll = bool(aelter) and self._gezeigt >= _ADVISOR_SHOWN
+        self._aelter = 0 if self._voll else aelter
+        return [z for wechsel in seite for z in self._exchange(wechsel)]
 
-    def _show_earlier(self, scroll: VerticalScroll) -> None:
+    @work
+    async def _first_page(self) -> None:
+        """The talk opens with the last exchanges of the advisor's record, read off the loop."""
+        seite, aelter = await asyncio.to_thread(_advisor_page)
+        if not self.is_attached:
+            return  # closed while reading
+        platzhalter = self.query_one("#chat-loading", Label)
+        if not seite and not aelter:
+            platzhalter.update("[dim]Ask a question about your agent or the world.[/dim]")
+            return
+        zeilen = self._took(seite, aelter)
+        if self._aelter or self._voll:
+            zeilen.insert(0, Label(self._earlier_hint(), id="chat-earlier"))
+        scroll = self.query_one("#history-scroll", VerticalScroll)
+        await scroll.mount(*zeilen, before=platzhalter)
+        await platzhalter.remove()
+        scroll.scroll_end(animate=False)
+
+    @work
+    async def _show_earlier(self, scroll: VerticalScroll) -> None:
         """Put the next older exchanges above the ones shown; the view stays where it was."""
-        seite, self._earlier = self._earlier[-_ADVISOR_PAGE:], self._earlier[:-_ADVISOR_PAGE]
+        if self._liest:
+            return
+        self._liest = True
+        try:
+            seite, aelter = await asyncio.to_thread(_advisor_page, self._aelter)
+        finally:
+            self._liest = False
+        if not self.is_attached:
+            return
+        zeilen = self._took(seite, aelter)
         hinweis = self.query_one("#chat-earlier", Label)
         bisher_oben = scroll.query(".chat-line").first()
-        scroll.mount(*[z for wechsel in seite for z in self._exchange(wechsel)], after=hinweis)
-        if self._earlier:
+        await scroll.mount(*zeilen, after=hinweis)
+        if self._aelter or self._voll:
             hinweis.update(self._earlier_hint())
         else:
-            hinweis.remove()
+            await hinweis.remove()
         self.call_after_refresh(scroll.scroll_to_widget, bisher_oben, animate=False, top=True)
 
     def compose(self) -> ComposeResult:
@@ -5452,7 +5511,7 @@ class ChatScreen(_Dialog):
             yield Label(self._header(), id="chat-header")
             with VerticalScroll(id="history-scroll"):
                 if self._advisor:
-                    yield from self._advisor_lines()
+                    yield Label("[dim]…[/dim]", id="chat-loading")
                 elif self._messages:
                     for msg in self._messages:
                         von_mir = msg.get("sender", "") == "player"
@@ -5468,6 +5527,8 @@ class ChatScreen(_Dialog):
     def on_mount(self) -> None:
         self.query_one(VerticalScroll).scroll_end(animate=False)
         self.query_one(Input).focus()
+        if self._advisor:
+            self._first_page()
 
     def on_key(self, event: Any) -> None:
         if event.key == "escape":
@@ -5479,7 +5540,7 @@ class ChatScreen(_Dialog):
             # a line, PgUp/PgDn by a page. Going up at the very top fetches the next older
             # exchanges from the advisor's record.
             scroll = self.query_one("#history-scroll", VerticalScroll)
-            if event.key in ("up", "pageup") and self._earlier and scroll.scroll_y <= 0:
+            if event.key in ("up", "pageup") and self._aelter and scroll.scroll_y <= 0:
                 self._show_earlier(scroll)
             elif event.key == "up":
                 scroll.scroll_up(animate=False)
