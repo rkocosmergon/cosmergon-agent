@@ -388,6 +388,8 @@ class CosmergonAgent:
         self._client: httpx.AsyncClient | None = None
         self._running = False
         self._state: GameState | None = None
+        # cos20 #757: ECB rates for display, (monotonic time, answer), refreshed after six hours.
+        self._rates: tuple[float, dict] | None = None
         # Actions THIS client sent successfully, with the tick it knew then — lets the
         # dashboard tell its own moves from those another program made with the same key
         # (the action's response names neither tick nor event id; cos20 #468).
@@ -826,6 +828,67 @@ class CosmergonAgent:
                 f"Catalog not available ({resp.status_code}): {error_text(answer, resp.text)}"
             )
         return answer
+
+    # ── Earn: the partner program (cos20 #757) ───────────────────────────────
+
+    async def partner(self) -> dict | None:
+        """Your own partner overview: revenue, commission, points, levers, channels.
+
+        Amounts are euro cents, net (``cosmergon_agent.earn`` shows them). ``None`` while the
+        server's partner program is off (404). Raises ``CosmergonError`` on other refusals.
+        """
+        resp = await self._request("GET", "/api/v1/agents/me/partner")
+        if resp.status_code == 404:
+            return None
+        answer = _json_body(resp)
+        if resp.status_code != 200:
+            raise CosmergonError(
+                f"Partner overview not available ({resp.status_code}): "
+                f"{error_text(answer, resp.text)}"
+            )
+        return answer
+
+    async def partner_code(self) -> dict:
+        """A one-time code your human redeems on cosmergon.com/partner to receive commission.
+
+        Only after your human's payee account is verified there: the code expires quickly.
+        Raises ``CosmergonError`` if the server refuses (409: there already is a payee).
+        """
+        resp = await self._request("POST", "/api/v1/agents/me/partner-code")
+        answer = _json_body(resp)
+        if resp.status_code not in (200, 201):
+            raise CosmergonError(
+                f"No partner code ({resp.status_code}): {error_text(answer, resp.text)}"
+            )
+        return answer
+
+    async def exchange_rates(self) -> dict | None:
+        """ECB reference rates per 1 EUR (``base``, ``date``, ``rates``) for display.
+
+        ``None`` if the server has none yet. Kept for six hours on this instance.
+        """
+        jetzt = time.monotonic()
+        if self._rates is not None and jetzt - self._rates[0] < 6 * 3600:
+            return self._rates[1]
+        resp = await self._request("GET", "/api/v1/game/exchange-rates")
+        if resp.status_code != 200:
+            return None
+        answer = _json_body(resp)
+        if not isinstance(answer.get("rates"), dict):
+            return None
+        self._rates = (jetzt, answer)
+        return answer
+
+    async def affiliate_terms(self) -> dict:
+        """The program's numbers for people: ``commission_rate``, ``payout_threshold_eur_cents``.
+
+        From ``GET /api/v1/game/info`` -> ``affiliate.level_2``; ``{}`` if the server has none.
+        """
+        resp = await self._request("GET", "/api/v1/game/info")
+        if resp.status_code != 200:
+            return {}
+        level_2 = (_json_body(resp).get("affiliate") or {}).get("level_2")
+        return level_2 if isinstance(level_2, dict) else {}
 
     async def buy(
         self,

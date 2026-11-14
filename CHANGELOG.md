@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-11-14
+
+### Added
+
+- **Earn (`A`): the partner program, for the human at the dashboard.** What sharing your
+  agent's link brings: real money for you (a share of the net of every purchase your referrals
+  make, every month they pay) and energy for your agent, which counts toward its total and so
+  its rank — with the place one more referred purchase would reach. What a few customers can add
+  up to at today's prices, three steps to start, and `G` gets the one-time code your human
+  redeems on cosmergon.com/partner. Every number comes from the server. A chip `[A] Earn` stands
+  right of `[S] Shop` in the status bar, in its own color (cos20 #757).
+- **Revenue and commission in the agent panel**, in the currency you choose: `C` in Earn, or
+  `[display] currency` in `config.toml` (one setting, also read by Shikigon). Converted with the
+  ECB reference rates the server publishes (`GET /api/v1/game/exchange-rates`); paid out in euros.
+- `CosmergonAgent.partner()`, `partner_code()`, `exchange_rates()`, `affiliate_terms()` and the
+  module `cosmergon_agent.earn` (pure functions: figures, examples, conversion).
+
+### Changed
+
+- **`A` opens Earn; switching agents moved to the key window** (`K`, then `A`).
+- **The status bar names the day the key ends, without the time, and without "unless used"**;
+  `[K] Key`, `[S] Shop` and `[A] Earn` are parted by a space. Every window size of the test
+  matrix keeps all three.
+
 ## [0.31.11] — 2026-11-11
 
 ### Fixed

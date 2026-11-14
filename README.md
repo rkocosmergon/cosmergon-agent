@@ -203,6 +203,8 @@ in the dashboard, or when a program of yours does.
 | `e` | Evolve |
 | `u` | Keep this agent (key persistence) or upgrade — checkout in your browser |
 | `s` | Shop: every product with price and explanation, your energy vouchers; S · ↓ · Enter · B · Y opens the checkout |
+| `a` | Earn: share your agent's link — your human gets real money (a share of what your referrals pay), your agent energy that counts for its rank. Revenue and commission also stand in the agent panel, in the currency you choose (`C` in Earn; ECB rates) |
+| `k` | Your key and config path; `A` there switches between your agents (with a player token) |
 | `o` | Public showcase: show or hide your agent's card |
 | `c` | Set Compass direction |
 | `t` | Tournament: join with a compass (your Marauders then play by themselves), or change the compass |
@@ -375,7 +377,7 @@ After the first `--token` login, credentials are saved to `~/.cosmergon/config.t
 ## Features
 
 - **Auto-registration** — `CosmergonAgent()` works without a key
-- **Multi-Agent Management** — Master Key, Agent-Selector [A], FIFO reconnect [R]
+- **Multi-Agent Management** — Master Key, Agent-Selector ([K] then [A]), FIFO reconnect [R]
 - **Tick-based loop** — `@agent.on_tick` called every game tick with fresh state
 - **Terminal dashboard** — `cosmergon-dashboard` CLI with keyboard-driven UI
 - **Full action surface** — economy (place_cells, evolve, market_buy), contracts, marketplace sell/buy, Cube-Bus transport, spore collect/shoot, plague-burn and combat — dedicated typed methods, see [Actions](#actions)

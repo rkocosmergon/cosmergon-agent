@@ -182,6 +182,32 @@ def _write_raw(data: dict) -> None:
     _write_private(CONFIG_PATH, tomli_w.dumps(data).encode())
 
 
+def display_currency() -> str:
+    """The currency your partner figures are shown in (``[display] currency``, default EUR).
+
+    One setting for the dashboard and Shikigon (cos20 #757). Display only: the server counts
+    and pays out in euros.
+    """
+    value = (_read_raw().get("display") or {}).get("currency")
+    if isinstance(value, str) and len(value) == 3 and value.isalpha():
+        return value.upper()
+    return "EUR"
+
+
+def set_display_currency(currency: str) -> bool:
+    """Store ``currency`` as ``[display] currency``; ``False`` if config.toml was not readable.
+
+    A file that exists but did not read must not be rewritten from nothing — that would drop
+    the stored keys (``_read_raw`` answers ``{}`` on any error).
+    """
+    data = _read_raw()
+    if CONFIG_PATH.exists() and not data:
+        return False
+    data.setdefault("display", {})["currency"] = currency.upper()
+    _write_raw(data)
+    return True
+
+
 def _set_aside_unreadable() -> None:
     """Keep a config.toml that is no valid TOML as ``config.toml.broken`` before it is replaced.
 

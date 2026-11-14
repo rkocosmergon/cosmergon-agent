@@ -77,6 +77,7 @@ from cosmergon_agent import (
     CosmergonError,
     __version__,
     _http,
+    earn,
     shop,
 )
 from cosmergon_agent.action import (
@@ -1579,9 +1580,9 @@ class HelpModal(_Dialog):
             "[cyan]\\[Shift+L][/cyan]  Log on the full screen",
             "[cyan]\\[X][/cyan]  Pause / Resume agent (asks twice; resume only after a wait)",
             "[cyan]\\[U][/cyan]  Keep this agent / upgrade (checkout in browser)",
-            "[cyan]\\[K][/cyan]  Show API key + config path",
-            "[cyan]\\[A][/cyan]  Switch agent (with a player token in the config)",
+            "[cyan]\\[K][/cyan]  Show API key + config path; A there switches agent",
             "[cyan]\\[S][/cyan]  Shop: what you can buy, the price, checkout in the browser",
+            "[cyan]\\[A][/cyan]  Earn: share your agent's link — real money and energy",
             "[cyan]\\[O][/cyan]  Public showcase: show or hide your agent's card",
             "[cyan]\\[R][/cyan]  Refresh data",
             "[cyan]\\[?][/cyan]  This help",
@@ -1618,6 +1619,7 @@ class KeyModal(_Dialog):
         Binding("enter", "close_key", "Close", show=False),
         Binding("space", "close_key", "Close", show=False),
         Binding("r", "rotate_key", "Rotate", show=False),
+        Binding("a", "agents", "Agents", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -1704,6 +1706,8 @@ class KeyModal(_Dialog):
         footer = "[dim]Enter · Space · Esc close"
         if can_rotate:
             footer += " · R rotate Master Key"
+        if self._has_token:
+            footer += " · A switch agent"
         footer += "[/dim]"
         lines += ["", footer]
         with VerticalScroll(id="key-wrap"):
@@ -1721,6 +1725,11 @@ class KeyModal(_Dialog):
         if self._has_token and self._tier not in ("free", ""):
             self.dismiss("rotate")
         # Free users: R does nothing (no hint shown either)
+
+    def action_agents(self) -> None:
+        """[A] here switches agent (cos20 #757: the main window's [A] is Earn now)."""
+        if self._has_token:
+            self.dismiss("agents")
 
 
 class UnsavedKeyModal(_Dialog):
@@ -2458,6 +2467,135 @@ class VoucherModal(_Dialog):
 
 
 # ---------------------------------------------------------------------------
+# Earn [A] — cos20 #757: the partner program for the human at the dashboard
+# ---------------------------------------------------------------------------
+
+
+def _earn_lines(
+    theme: Theme,
+    *,
+    code: str,
+    terms: dict[str, Any],
+    catalog: dict[str, Any],
+    partner: dict[str, Any] | None,
+    currency: str,
+    rates: dict[str, Any] | None,
+) -> list[str]:
+    """The Earn popup: what it brings (money and energy), what it can add up to, 3 steps.
+
+    Every number from the server (``earn`` says which answer); a missing one drops its part
+    rather than guess. Written for people (founder 14.11.2026: "das muss MENSCHEN überzeugen").
+    """
+    rate = float(terms.get("commission_rate") or 0)
+    cap, place = earn.boost(partner or {})
+    lines = [
+        "[bold]Earn[/bold] — real money, and energy for your agent",
+        "",
+        "Share your agent's link. Every customer who pays through it earns you two things:",
+    ]
+    if rate > 0:
+        floor = int(terms.get("payout_threshold_eur_cents") or 0) / 100
+        lines += [
+            f"  {_c(theme.pos, '€ Real money')}  {rate * 100:.0f} % of the net, every month the"
+            " customer pays, no ceiling.",
+            f"                Euros to your bank via Stripe, from {earn.money(floor, 'EUR')}.",
+        ]
+    if cap:
+        # "⚡" takes two cells: one space less keeps the column of "€ Real money".
+        lines += [
+            f"  {_c(theme.pos, '⚡ Energy')}     up to {cap:,.0f} energy per purchase for your"
+            " agent —",
+            "                it counts toward its total, and the total decides its rank.",
+        ]
+        if place:
+            lines.append(f"                One such purchase would lift it to #{place}.")
+    beispiele = earn.examples(catalog, rate)
+    if beispiele:
+        lines += ["", "What it can add up to, at our real prices:"]
+        for b in beispiele:
+            monat = "/month" if b["when"] == "every month" else ""
+            preis = earn.money(b["price_eur"], "EUR") + monat
+            lines.append(
+                f"  {b['count']} {b['label']} ({preis})".ljust(48)
+                + f"about {earn.money(b['share_eur'], 'EUR')} {b['when']}"
+            )
+        lines.append(
+            "[dim]Arithmetic, not a promise — no external partner has been paid yet."
+            " You could be the first.[/dim]"
+        )
+    lines += [
+        "",
+        "Start in 3 steps — taking part costs nothing:",
+        f"  1  Share your link   {_roh(earn.link(code))}" if code else "  1  Share your link",
+        "     [dim](or let an AI agent with web tools do the promoting for you)[/dim]",
+        "  2  Become the payee  free account at cosmergon.com/partner, Stripe checks you",
+        f"  3  {_hk('G')} get your code, redeem it there",
+    ]
+    if partner is not None:
+        z = earn.figures(partner, currency, rates)
+        cur = z["currency"]
+        lines += [
+            "",
+            f"Your numbers   Revenue {earn.money(z['revenue'], cur)} · Commission "
+            f"{earn.money(z['commission'], cur)} · Energy from referrals {z['energy']:,.0f}",
+        ]
+        if z["needs_payee"]:
+            lines.append("[dim]Your commission waits for a payee (step 2).[/dim]")
+        if z["rate_date"]:
+            kurs = _roh(z["rate_date"])
+            lines.append(f"[dim]{cur} at the ECB rate of {kurs}; paid in euros.[/dim]")
+    lines += ["", f"[dim]Terms: {earn.TERMS}[/dim]"]
+    return lines
+
+
+class EarnModal(_Dialog):
+    """[A] Earn (cos20 #757). Dismisses with ``"currency"`` ([C]), ``"code"`` ([G]) or None."""
+
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
+        Binding("escape", "cancel", "Close", show=False),
+        Binding("c", "currency", "Currency", show=False),
+        Binding("g", "code", "Code", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    EarnModal {
+        align: center middle;
+    }
+    EarnModal > #earn-wrap {
+        width: 96;
+        height: auto;
+        max-width: 100%;
+        max-height: 100%;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    """
+
+    def __init__(self, lines: list[str], currency: str) -> None:
+        super().__init__()
+        self._lines = lines
+        self._currency = currency
+
+    def compose(self) -> ComposeResult:
+        with _ScrollOhneFokus(id="earn-wrap"):
+            yield Static("\n".join(self._lines), markup=True)
+            yield Static(
+                f"[dim]C currency ({_roh(self._currency)}) · G code · Esc close[/dim]",
+                markup=True,
+            )
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_currency(self) -> None:
+        self.dismiss("currency")
+
+    def action_code(self) -> None:
+        self.dismiss("code")
+
+
+# ---------------------------------------------------------------------------
 # Dashboard App
 # ---------------------------------------------------------------------------
 
@@ -2601,7 +2739,7 @@ class CosmergonDashboard(_PrivateApp):
         Binding("v", "field_view", "Fields", show=False, priority=True),
         Binding("tab", "cycle_focus", "Focus", show=False, priority=True),
         Binding("k", "show_key", "Key", show=False, priority=True),
-        Binding("a", "agent_selector", "Agents", show=False, priority=True),
+        Binding("a", "earn", "Earn", show=False, priority=True),
         # cos20 #603: S is the shop; the showcase moved to O.
         Binding("s", "shop", "Shop", show=False, priority=True),
         Binding("o", "toggle_showcase", "Showcase", show=False, priority=True),
@@ -2633,6 +2771,10 @@ class CosmergonDashboard(_PrivateApp):
         self._moves_from_tick: int = -1  # tick at connect — older actions are not news (#468)
         self._moves_seen: deque[str] = deque(maxlen=200)  # event ids already in the log
         self._mission: dict | None = None  # the Marauder's running mission (agent panel)
+        # cos20 #757: the partner overview and ECB rates for the agent panel's figures.
+        self._partner: dict | None = None
+        self._partner_rates: dict | None = None
+        self._partner_at = 0.0  # monotonic time of the last good answer
         self._missions_known: dict[str, str] | None = None  # mission id → status last seen
         self._situation_seen: dict[str, str] = {}  # kind of system line → what was last said
         # The log has three tabs (cos20 #468): the world (``_log``), the tournament (what the
@@ -2729,6 +2871,9 @@ class CosmergonDashboard(_PrivateApp):
         self._register_agent_handlers()
         self._run_agent()
         self.set_interval(0.5, _on_time(self._redraw))
+        # cos20 #757: revenue and commission in the agent panel, every ten minutes (finance
+        # rate limit: ten a minute) — a refused or missing answer leaves the line out.
+        self.set_interval(60, self._partner_holen)
 
     # ── Marauder action sub-menu (S212 action parity) ──────────────────────
     # The table of sell prices that stood here (a copy of the house's prices) is gone: the sale
@@ -3711,6 +3856,8 @@ class CosmergonDashboard(_PrivateApp):
         compass_label = _COMPASS_DISPLAY.get(self._compass_preset, self._compass_preset)
         compass_val = compass_label if self._compass_ever_set else "—"
         lines.append(_c(t.data, f"Compass: {compass_val}"))
+        if self._partner is not None:
+            lines += [_c(t.data, z) for z in self._partner_zeilen()]
         # In a tournament the player has two compasses. The panel names both: the main-world
         # one alone was read as the tournament's ("compass grow — what happens?", #468), and
         # a narrow terminal drops the tournament compass from the top line. Its line takes the
@@ -3727,6 +3874,38 @@ class CosmergonDashboard(_PrivateApp):
             lines += self._feld_zeilen(state.fields, self._panel_hoehe("agent-panel") - len(lines))
 
         self._update_panel("agent-panel", "\n".join(lines))
+
+    def _partner_zeilen(self) -> list[str]:
+        """``Revenue 0 € · Commission 0 €`` in the chosen currency (cos20 #757, [A] for more).
+
+        One line where it fits, else two: a narrow panel cut "Commission" (seen at 54 columns).
+        """
+        from cosmergon_agent.config import display_currency
+
+        z = earn.figures(self._partner or {}, display_currency(), self._partner_rates)
+        cur = z["currency"]
+        umsatz = f"Revenue {earn.money(z['revenue'], cur)}"
+        provision = f"Commission {earn.money(z['commission'], cur)}"
+        eine = f"{umsatz} · {provision}"
+        if len(eine) <= self._panel_breite("agent-panel"):
+            return [eine]
+        return [umsatz, provision]
+
+    @work(exclusive=True, group="partner")
+    async def _partner_holen(self) -> None:
+        """The partner overview and the ECB rates for the agent panel; quiet on any refusal.
+
+        Asked every minute, fetched when there is nothing yet (the agent may not have been
+        connected at the start) or the last answer is ten minutes old.
+        """
+        if self._partner is not None and time.monotonic() - self._partner_at < 600:
+            return
+        try:
+            self._partner = await self.agent.partner()
+            self._partner_rates = await self.agent.exchange_rates()
+            self._partner_at = time.monotonic()
+        except Exception:
+            logger.debug("partner figures not available", exc_info=True)
 
     def _feld_zeilen(self, fields: list[Field], zeilen_frei: int) -> list[str]:
         """As many field lines as fit, then "+N more" — like htop's list at the frame (#508)."""
@@ -3902,10 +4081,14 @@ class CosmergonDashboard(_PrivateApp):
         # 31.10.2026: "s als letzter eintrag in die statuszeile"), set off by the bar's own
         # separator (founder on the device, 04.11.2026).
         surface, text = _chip_colors(self._theme)
+        # [A] Earn right of the shop, on a chip of its own color (founder 14.11.2026, cos20 #757).
+        earn_bg, earn_text = _chip_colors(self._theme, self._theme.pos)
         keys = (
             _c(self._theme.cmd, _hk("K"))
-            + f"[dim] Key{sep}[/dim]"
+            + "[dim] Key[/dim] "  # one space, no separator (founder 14.11.2026, cos20 #757)
             + f"[{text} on {surface}] {_hk('S')} Shop [/]"
+            + " "  # one space, no separator: the two colors part them (founder 14.11.2026)
+            + f"[{earn_text} on {earn_bg}] {_hk('A')} Earn [/]"
         )
         line = (f"[dim]{sep.join(teile)}{sep}[/dim]" if teile else "") + keys
         # #468: when the agent is lost comes FIRST; what to do about it stands right behind
@@ -4542,6 +4725,66 @@ class CosmergonDashboard(_PrivateApp):
             if await self._shop_product(catalog, products[back_to]):
                 return
 
+    @work
+    async def action_earn(self) -> None:
+        """[A] — Earn: the partner program for the human at the dashboard (cos20 #757).
+
+        C switches the currency of your numbers (stored in config.toml), G gets the one-time
+        code your human redeems on cosmergon.com/partner. Nothing else is sent.
+        """
+        from cosmergon_agent.config import display_currency, set_display_currency
+
+        while True:
+            currency = display_currency()
+            try:
+                lines = await self._earn_inhalt(currency)
+            except (CosmergonError, ValueError) as exc:
+                self._set_feedback(_c(self._theme.warn, f"✗ Earn: {_roh(exc)}"), duration=10.0)
+                return
+            choice = await self.push_screen_wait(EarnModal(lines, currency))
+            if choice == "currency":
+                if not set_display_currency(earn.next_currency(currency)):
+                    self._set_feedback(_c(self._theme.warn, "✗ config.toml not readable"))
+                    return
+                continue
+            if choice == "code":
+                await self._earn_code()
+            return
+
+    async def _earn_inhalt(self, currency: str) -> list[str]:
+        """What the Earn popup shows, from four answers of the server (``earn`` names them)."""
+        state = self.agent.state
+        partner = await self.agent.partner()
+        self._partner = partner
+        return _earn_lines(
+            self._theme,
+            code=(state.referral_code if state else "") or "",
+            terms=await self.agent.affiliate_terms(),
+            catalog=await self.agent.products(),
+            partner=partner,
+            currency=currency,
+            rates=await self.agent.exchange_rates(),
+        )
+
+    async def _earn_code(self) -> None:
+        """[G] in Earn: the one-time code for the human, shown once in a dialog."""
+        try:
+            answer = await self.agent.partner_code()
+        except CosmergonError as exc:
+            self._set_feedback(_c(self._theme.warn, f"✗ Code: {_roh(exc)}"), duration=10.0)
+            return
+        minutes = int(answer.get("expires_in_seconds") or 0) // 60
+        await self.push_screen_wait(
+            SelectModal(
+                f"Your code: {answer.get('code')}",
+                ["Close"],
+                body=(
+                    f"Redeem it on {earn.PARTNER_PAGE} within {minutes} minutes,"
+                    " once your payee account is verified there."
+                ),
+            )
+        )
+
     async def _shop_product(self, catalog: dict[str, Any], product: dict[str, Any]) -> bool:
         """Detail and confirmation of one product; ``True`` once the shop has done its part."""
         note = shop.key_expires(catalog, product) or {}
@@ -4937,7 +5180,9 @@ class CosmergonDashboard(_PrivateApp):
 
     @work
     async def action_show_key(self) -> None:
-        from cosmergon_agent.config import CONFIG_PATH, load_token
+        # ``load_token`` of this module, as the agent selector reads it: [K] offers [A] Agents
+        # exactly when the selector has a token to work with (cos20 #757).
+        from cosmergon_agent.config import CONFIG_PATH
 
         state = self.agent.state
         name = (state.agent_name if state else None) or (self.agent.agent_id or "?")[:8]
@@ -4959,6 +5204,8 @@ class CosmergonDashboard(_PrivateApp):
         )
         if result == "rotate":
             await self._rotate_master_key(token)
+        elif result == "agents":
+            await self._agent_selector_open()
 
     async def _rotate_master_key(self, token: str) -> None:
         """Paket 4.1: Rotate Master Key via POST /billing/regenerate-token.
@@ -5081,9 +5328,8 @@ class CosmergonDashboard(_PrivateApp):
         else:
             self._set_feedback(f"Revoke failed ({resp.status_code})")
 
-    @work
-    async def action_agent_selector(self) -> None:
-        """Open agent selector [A] — only if a token is in config."""
+    async def _agent_selector_open(self) -> None:
+        """The agent selector — from [K] then [A], only if a token is in config (cos20 #757)."""
         token = load_token(base_url=self.agent.base_url)
         if not token:
             return  # no token = Free user, no selector
@@ -6095,15 +6341,13 @@ def _fix_bar_keys(
     ends = _key_ends(state)
     if not (ends and ends[1]):  # else [U] stands behind the key warning in the status bar
         keys.append(("U", "Upgrade"))
-    if agents:  # agent selector — only with a player token in the config
-        keys.append(("A", "Agents"))
     keys += [("?", "Help"), ("Q", "Quit")]
     return keys
 
 
 # The end of every status bar as it reads: [K] Key, the separator, the [S] Shop chip
 # (``_draw_status_bar``).
-_STATUS_KEYS = "[K] Key" + " │ " + " [S] Shop "
+_STATUS_KEYS = "[K] Key" + " " + " [S] Shop " + " " + " [A] Earn "
 
 
 @dataclass(frozen=True)
@@ -6128,33 +6372,35 @@ def _status_stufen(name: str, tier: str, state: GameState | None) -> list[_Statu
 
     btop's way, seen on the Omarchy device (31.10.2026): its hints keep their place, and the
     least important go first as the window narrows ("per-core" and "reverse" at 80 columns,
-    "tree" stays). Founder 31.10.: [K] and [S] never in the bottom bar, [S] the line's last
-    entry (cos20 #610). What yields here, in this order: the tier, the name, the long [U]
-    word, the weekday, "unless used", "key", "ends". The warning itself (⚠, the time,
-    [U] Keep) stays.
+    "tree" stays). Founder 31.10.: [K] and [S] never in the bottom bar (cos20 #610); 14.11.:
+    [A] Earn right of [S], "unless used" gone (cos20 #757). What yields here, in this order:
+    the tier, the name, the long [U] word, the weekday, "key", "ends". The warning itself
+    (⚠, the time, [U] Keep) stays.
     """
     ends = _key_ends(state)
     if ends is None:
         return [_StatusStufe(name=name, tier=tier), _StatusStufe(name=name)]
-    kurz = _ortszeit((state.key_expiry or {}).get("at") if state else None, "%d %b %H:%M")
+    # The day only, no time (founder 14.11.2026, cos20 #757): the [A] Earn chip needs the room.
+    at = (state.key_expiry or {}).get("at") if state else None
+    tag, tag_kurz = _ortszeit(at, "%a %d %b"), _ortszeit(at, "%d %b")
     if not ends[1]:
-        lead = f"key kept until {ends[0]}"
+        lead = f"key kept until {tag}"
         return [
             _StatusStufe(lead=lead, name=name, tier=tier),
             _StatusStufe(lead=lead, name=name),
             _StatusStufe(lead=lead),
-            _StatusStufe(lead=f"key kept until {kurz}"),
+            _StatusStufe(lead=f"key kept until {tag_kurz}"),
+            _StatusStufe(lead=f"kept until {tag_kurz}"),  # like "⚠ ends" below
         ]
-    lead = f"⚠ key ends {ends[0]} unless used · "
+    lead = f"⚠ key ends {tag} · "
     return [
         _StatusStufe(lead=lead, keep="Keep agent", name=name, tier=tier),
         _StatusStufe(lead=lead, keep="Keep agent", name=name),
         _StatusStufe(lead=lead, keep="Keep agent"),
         _StatusStufe(lead=lead, keep="Keep"),
-        _StatusStufe(lead=f"⚠ key ends {kurz} unless used · ", keep="Keep"),
-        _StatusStufe(lead=f"⚠ key ends {kurz} · ", keep="Keep"),
-        _StatusStufe(lead=f"⚠ ends {kurz} · ", keep="Keep"),
-        _StatusStufe(lead=f"⚠ {kurz} · ", keep="Keep"),
+        _StatusStufe(lead=f"⚠ key ends {tag_kurz} · ", keep="Keep"),
+        _StatusStufe(lead=f"⚠ ends {tag_kurz} · ", keep="Keep"),
+        _StatusStufe(lead=f"⚠ {tag_kurz} · ", keep="Keep"),
     ]
 
 
@@ -6171,16 +6417,34 @@ def _status_stufe(name: str, tier: str, state: GameState | None, width: int) -> 
     return letzte
 
 
-def _chip_colors(theme: Theme) -> tuple[str, str]:
-    """Surface and text of the [S] Shop chip in the status bar (cos20 #609, UI panel 31.10.).
+def _als_hex(color: str, fallback: str) -> str:
+    """``#rrggbb`` for a theme color; names such as ``green`` (themes matrix, mono) via rich.
+
+    ``_mix`` reads hex only — a name ended the dashboard (cos20 #757, theme matrix). What rich
+    cannot read falls back to ``fallback``.
+    """
+    if _HEX_COLOR.match(color):
+        return color
+    try:
+        from rich.color import Color
+
+        return Color.parse(color).get_truecolor().hex
+    except Exception:
+        return fallback
+
+
+def _chip_colors(theme: Theme, base: str | None = None) -> tuple[str, str]:
+    """Surface and text of a chip in the status bar: [S] Shop (cos20 #609, UI panel 31.10.).
 
     No new theme color: the shop belongs to the economy, and every theme (Omarchy too) already
-    has that frame. Lifted towards white until it separates from the status bar's surface
-    (``bg``, ``_FRAME_CONTRAST``); the text is black or white, whichever reads better on it.
+    has that frame. [A] Earn takes ``theme.pos`` (gain), its own color next to the shop (founder
+    14.11.2026, cos20 #757). Lifted towards white until it separates from the status bar's
+    surface (``bg``, ``_FRAME_CONTRAST``); the text is black or white, whichever reads better.
     """
-    surface = theme.frame_economy
+    base = _als_hex(base or theme.frame_economy, theme.frame_economy)
+    surface = base
     for step in range(21):
-        surface = _mix("#ffffff", theme.frame_economy, step / 20)
+        surface = _mix("#ffffff", base, step / 20)
         if _contrast(surface, theme.bg) >= _FRAME_CONTRAST:
             break
     text = max(("#000000", "#ffffff"), key=lambda c: _contrast(c, surface))
@@ -7162,7 +7426,7 @@ def _resolve_token(token: str, base_url: str) -> str | None:
     print(f"\n  \u2713  Switching to your {result.subscription_tier} account")
     print(f"     Agent: {selected.agent_name}")
     if n > 1:
-        print(f"     ({n} agents total. Press [A] in the dashboard to switch.)")
+        print(f"     ({n} agents total. Press [K], then [A] in the dashboard to switch.)")
     print()
     return selected.api_key.raw
 
