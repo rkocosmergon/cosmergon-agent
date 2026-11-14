@@ -2635,7 +2635,7 @@ class EarnModal(_Dialog):
         align: center middle;
     }
     EarnModal > #earn-wrap {
-        width: 96;
+        width: 98;
         height: auto;
         max-width: 100%;
         max-height: 100%;
@@ -4829,9 +4829,9 @@ class CosmergonDashboard(_PrivateApp):
     async def _earn_inhalt(self, currency: str) -> list[str]:
         """What the Earn popup shows, from four answers of the server (``earn`` names them).
 
-        Wrapped to the popup's inner width: 96 columns less frame, padding and the two columns
-        a scrollbar takes when the text is taller than the screen (at 80x24 the sum of 73
-        characters wrapped at 72), or less on a narrower screen (cos20 #757, 0.32.1).
+        Wrapped to the popup's inner width: 98 columns less frame, padding and the two columns
+        a scrollbar takes when the text is taller than the screen (at 80 columns the sum of 73
+        characters wrapped at 72), so 90 at full size (cos20 #757, 0.32.1).
         """
         state = self.agent.state
         partner = await self.agent.partner()
@@ -4844,7 +4844,7 @@ class CosmergonDashboard(_PrivateApp):
             partner=partner,
             currency=currency,
             rates=await self.agent.exchange_rates(),
-            breite=min(96, self.size.width) - 8,
+            breite=min(98, self.size.width) - 8,
         )
 
     async def _earn_code(self) -> None:
