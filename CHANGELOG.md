@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.32.1] — 2026-11-14
+
+### Fixed
+
+- **Earn on a narrow screen.** At 80 columns the popup's lines wrapped to the left edge
+  ("ceiling.", "rank."), and the sum of an example lost its last word to a line of its own.
+  The text now wraps under its column, the sum moves to its own line when there is no room, and
+  the link stays whole (cos20 #757).
+- **Revenue and commission show up right after connecting**, not a minute later.
+
 ## [0.32.0] — 2026-11-14
 
 ### Added

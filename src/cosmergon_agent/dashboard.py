@@ -31,6 +31,7 @@ import os
 import re
 import shlex
 import sys
+import textwrap
 import time
 import traceback
 import webbrowser
@@ -2471,6 +2472,100 @@ class VoucherModal(_Dialog):
 # ---------------------------------------------------------------------------
 
 
+def _absatz(kopf: str, kopf_breite: int, text: str, breite: int, stil: str = "") -> list[str]:
+    """``text`` wrapped to ``breite``, continuation lines under the column after ``kopf``.
+
+    ``kopf`` may carry markup, ``kopf_breite`` is its visible width; ``text`` is plain. URLs
+    stay whole. cos20 #757: at 80 columns Textual wrapped the fixed lines to the left edge.
+    """
+    zeilen = textwrap.wrap(
+        text, max(20, breite - kopf_breite), break_long_words=False, break_on_hyphens=False
+    ) or [""]
+    auf, zu = (f"[{stil}]", f"[/{stil}]") if stil else ("", "")
+    return [(kopf if n == 0 else " " * kopf_breite) + auf + z + zu for n, z in enumerate(zeilen)]
+
+
+def _earn_vorteile(
+    theme: Theme, terms: dict[str, Any], partner: dict | None, breite: int
+) -> list[str]:
+    """The two things a paying customer brings: money and energy (text column 16)."""
+    rate = float(terms.get("commission_rate") or 0)
+    cap, place = earn.boost(partner or {})
+    lines: list[str] = []
+    if rate > 0:
+        floor = int(terms.get("payout_threshold_eur_cents") or 0) / 100
+        lines += _absatz(
+            f"  {_c(theme.pos, '€ Real money')}  ",
+            16,
+            f"{rate * 100:.0f} % of the net, every month the customer pays, no ceiling.",
+            breite,
+        )
+        lines += _absatz(
+            " " * 16, 16, f"Euros to your bank via Stripe, from {earn.money(floor, 'EUR')}.", breite
+        )
+    if cap:
+        # "⚡" takes two cells: one space less keeps the column of "€ Real money".
+        lines += _absatz(
+            f"  {_c(theme.pos, '⚡ Energy')}     ",
+            16,
+            f"up to {cap:,.0f} energy per purchase for your agent — it counts toward its total,"
+            " and the total decides its rank.",
+            breite,
+        )
+        if place:
+            lines += _absatz(" " * 16, 16, f"One such purchase would lift it to #{place}.", breite)
+    return lines
+
+
+def _earn_beispiele(catalog: dict[str, Any], rate: float, breite: int) -> list[str]:
+    """What it can add up to at our real prices; the sum moves to its own line when narrow."""
+    beispiele = earn.examples(catalog, rate)
+    if not beispiele:
+        return []
+    lines = ["", "What it can add up to, at our real prices:"]
+    for b in beispiele:
+        monat = "/month" if b["when"] == "every month" else ""
+        links = f"  {b['count']} {b['label']} ({earn.money(b['price_eur'], 'EUR')}{monat})"
+        rechts = f"about {earn.money(b['share_eur'], 'EUR')} {b['when']}"
+        if len(links.ljust(48)) + len(rechts) <= breite:
+            lines.append(links.ljust(48) + rechts)
+        else:
+            lines += [links, "      " + rechts]
+    lines += _absatz(
+        "",
+        0,
+        "Arithmetic, not a promise — no external partner has been paid yet."
+        " You could be the first.",
+        breite,
+        "dim",
+    )
+    return lines
+
+
+def _earn_zahlen(
+    partner: dict[str, Any], currency: str, rates: dict | None, breite: int
+) -> list[str]:
+    """Your numbers in the chosen currency, with the date of the rate."""
+    z = earn.figures(partner, currency, rates)
+    cur = z["currency"]
+    lines = [
+        "",
+        *_absatz(
+            "Your numbers   ",
+            15,
+            f"Revenue {earn.money(z['revenue'], cur)} · Commission"
+            f" {earn.money(z['commission'], cur)} · Energy from referrals {z['energy']:,.0f}",
+            breite,
+        ),
+    ]
+    if z["needs_payee"]:
+        lines.append("[dim]Your commission waits for a payee (step 2).[/dim]")
+    if z["rate_date"]:
+        kurs = _roh(z["rate_date"])
+        lines.append(f"[dim]{cur} at the ECB rate of {kurs}; paid in euros.[/dim]")
+    return lines
+
+
 def _earn_lines(
     theme: Theme,
     *,
@@ -2480,70 +2575,48 @@ def _earn_lines(
     partner: dict[str, Any] | None,
     currency: str,
     rates: dict[str, Any] | None,
+    breite: int = 90,
 ) -> list[str]:
     """The Earn popup: what it brings (money and energy), what it can add up to, 3 steps.
 
     Every number from the server (``earn`` says which answer); a missing one drops its part
     rather than guess. Written for people (founder 14.11.2026: "das muss MENSCHEN überzeugen").
+    ``breite`` is the inner width of the popup: 90 at full size; narrower windows get the text
+    wrapped under its column instead of at the left edge (cos20 #757, 0.32.1).
     """
-    rate = float(terms.get("commission_rate") or 0)
-    cap, place = earn.boost(partner or {})
-    lines = [
-        "[bold]Earn[/bold] — real money, and energy for your agent",
+    lines = ["[bold]Earn[/bold] — real money, and energy for your agent", ""]
+    lines += _absatz(
         "",
+        0,
         "Share your agent's link. Every customer who pays through it earns you two things:",
-    ]
-    if rate > 0:
-        floor = int(terms.get("payout_threshold_eur_cents") or 0) / 100
-        lines += [
-            f"  {_c(theme.pos, '€ Real money')}  {rate * 100:.0f} % of the net, every month the"
-            " customer pays, no ceiling.",
-            f"                Euros to your bank via Stripe, from {earn.money(floor, 'EUR')}.",
-        ]
-    if cap:
-        # "⚡" takes two cells: one space less keeps the column of "€ Real money".
-        lines += [
-            f"  {_c(theme.pos, '⚡ Energy')}     up to {cap:,.0f} energy per purchase for your"
-            " agent —",
-            "                it counts toward its total, and the total decides its rank.",
-        ]
-        if place:
-            lines.append(f"                One such purchase would lift it to #{place}.")
-    beispiele = earn.examples(catalog, rate)
-    if beispiele:
-        lines += ["", "What it can add up to, at our real prices:"]
-        for b in beispiele:
-            monat = "/month" if b["when"] == "every month" else ""
-            preis = earn.money(b["price_eur"], "EUR") + monat
-            lines.append(
-                f"  {b['count']} {b['label']} ({preis})".ljust(48)
-                + f"about {earn.money(b['share_eur'], 'EUR')} {b['when']}"
-            )
-        lines.append(
-            "[dim]Arithmetic, not a promise — no external partner has been paid yet."
-            " You could be the first.[/dim]"
-        )
+        breite,
+    )
+    lines += _earn_vorteile(theme, terms, partner, breite)
+    lines += _earn_beispiele(catalog, float(terms.get("commission_rate") or 0), breite)
+    link = f"  1  Share your link   {_roh(earn.link(code))}" if code else "  1  Share your link"
+    if code and len(link) > breite:
+        link = "  1  Share your link\n     " + _roh(earn.link(code))
     lines += [
         "",
         "Start in 3 steps — taking part costs nothing:",
-        f"  1  Share your link   {_roh(earn.link(code))}" if code else "  1  Share your link",
-        "     [dim](or let an AI agent with web tools do the promoting for you)[/dim]",
-        "  2  Become the payee  free account at cosmergon.com/partner, Stripe checks you",
+        *link.split("\n"),
+        *_absatz(
+            "     ",
+            5,
+            "(or let an AI agent with web tools do the promoting for you)",
+            breite,
+            "dim",
+        ),
+        *_absatz(
+            "  2  Become the payee  ",
+            23,
+            "free account at cosmergon.com/partner, Stripe checks you",
+            breite,
+        ),
         f"  3  {_hk('G')} get your code, redeem it there",
     ]
     if partner is not None:
-        z = earn.figures(partner, currency, rates)
-        cur = z["currency"]
-        lines += [
-            "",
-            f"Your numbers   Revenue {earn.money(z['revenue'], cur)} · Commission "
-            f"{earn.money(z['commission'], cur)} · Energy from referrals {z['energy']:,.0f}",
-        ]
-        if z["needs_payee"]:
-            lines.append("[dim]Your commission waits for a payee (step 2).[/dim]")
-        if z["rate_date"]:
-            kurs = _roh(z["rate_date"])
-            lines.append(f"[dim]{cur} at the ECB rate of {kurs}; paid in euros.[/dim]")
+        lines += _earn_zahlen(partner, currency, rates, breite)
     lines += ["", f"[dim]Terms: {earn.TERMS}[/dim]"]
     return lines
 
@@ -2874,6 +2947,8 @@ class CosmergonDashboard(_PrivateApp):
         # cos20 #757: revenue and commission in the agent panel, every ten minutes (finance
         # rate limit: ten a minute) — a refused or missing answer leaves the line out.
         self.set_interval(60, self._partner_holen)
+        # The first figures right after connecting, not a minute later (0.32.1).
+        self.set_timer(3, self._partner_holen)
 
     # ── Marauder action sub-menu (S212 action parity) ──────────────────────
     # The table of sell prices that stood here (a copy of the house's prices) is gone: the sale
@@ -4752,7 +4827,12 @@ class CosmergonDashboard(_PrivateApp):
             return
 
     async def _earn_inhalt(self, currency: str) -> list[str]:
-        """What the Earn popup shows, from four answers of the server (``earn`` names them)."""
+        """What the Earn popup shows, from four answers of the server (``earn`` names them).
+
+        Wrapped to the popup's inner width: 96 columns less frame, padding and the two columns
+        a scrollbar takes when the text is taller than the screen (at 80x24 the sum of 73
+        characters wrapped at 72), or less on a narrower screen (cos20 #757, 0.32.1).
+        """
         state = self.agent.state
         partner = await self.agent.partner()
         self._partner = partner
@@ -4764,6 +4844,7 @@ class CosmergonDashboard(_PrivateApp):
             partner=partner,
             currency=currency,
             rates=await self.agent.exchange_rates(),
+            breite=min(96, self.size.width) - 8,
         )
 
     async def _earn_code(self) -> None:
