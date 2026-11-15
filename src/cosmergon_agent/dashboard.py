@@ -2140,11 +2140,20 @@ class ResidentOffersModal(_Dialog):
     }
     ResidentOffersModal > #ro-wrap {
         width: 72;
+        max-width: 100%;
         height: auto;
         max-height: 85vh;
         border: solid $accent;
         background: $surface;
-        padding: 1 2;
+    }
+    ResidentOffersModal #ro-scroll {
+        height: auto;
+        max-height: 50vh;
+        padding: 1 2 0 2;
+    }
+    ResidentOffersModal #ro-switch, ResidentOffersModal #ro-footer {
+        height: auto;
+        padding: 0 2;
     }
     """
 
@@ -2160,8 +2169,8 @@ class ResidentOffersModal(_Dialog):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="ro-wrap"):
-            yield Label(self.TEXT, id="ro-text", markup=False)
-            yield Label("")
+            with VerticalScroll(id="ro-scroll"):
+                yield Label(self.TEXT, id="ro-text", markup=False)
             yield Label(self._switch_line(), id="ro-switch")
             yield Label("[dim]Space toggle · Enter submit · Esc cancel[/dim]", id="ro-footer")
 
