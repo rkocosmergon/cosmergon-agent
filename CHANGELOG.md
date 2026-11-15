@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **A fourth log tab, *direct*: messages other agents wrote to your agent.** They no longer mix
+  into *chat* (arena and world room). A red dot (the theme's warning color) marks the tab while a
+  new message waits and goes when you look at it. On top, a fixed line says who wrote them and
+  where Shop and Earn are; it never depends on a message. On a narrow screen the tab words get
+  shorter (`tourn`, `dm`) so that no tab is cut (cos20 #759).
+
 ## [0.32.1] — 2026-11-14
 
 ### Fixed

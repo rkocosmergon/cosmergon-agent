@@ -577,7 +577,17 @@ _LOG_TABS: tuple[tuple[str, str], ...] = (
     # (inside the game only) and messages to this agent. A fourth tab did not fit the frame
     # line at 5 of 9 sizes. ~~("arena", "arena chat")~~ — the word is "chat" now.
     ("arena", "chat"),
+    # cos20 #507 → #759 (15.11.2026): a fourth tab, on the founder's word ("the terminal should get
+    # a new tab in the LOG for these direct messages, marked when a new one comes"). The width is
+    # solved by short words where the frame line is wider than the panel (``_log_title``), not
+    # by dropping the tab: no tab is cut at any of the nine sizes.
+    ("direct", "direct"),
 )
+# Where the frame line of the log does not fit, these tabs take a shorter word (cos20 #759).
+_LOG_KURZ = {"tournament": "tourn", "direct": "dm"}
+# Only the direct tab marks news in the theme's warning color; the others keep the plain dot.
+_LOG_ROT = "direct"
+
 _TIMES = chr(0xD7)  # the multiplication sign: Shikigon's journal counts repeats the same way
 _MAL = re.compile(rf"  \[dim\]{_TIMES}(\d+)\[/dim\]$")
 
@@ -632,20 +642,35 @@ def _eintrag_zeile(eintrag: _Eintrag, breite: int | None = None) -> str:
     return _c(eintrag.farbe, _roh(eintrag.wer)) + _c("dim", ":") + " " + _roh(text) + zaehler
 
 
+def _titel_breite(tab: str, neu: set[str], kurz: bool) -> int:
+    """Visible width of the log's frame line (cos20 #759) — words, bars and dots, no markup."""
+    worte = [_LOG_KURZ.get(t, w) if kurz else w for t, w in _LOG_TABS]
+    punkte = sum(2 for t, _w in _LOG_TABS if t != tab and t in neu)
+    return len("LOG ▶  ") + sum(map(len, worte)) + 3 * (len(worte) - 1) + punkte
+
+
 def _naechster_reiter(tab: str) -> str:
     """The tab after ``tab``; after the last one the first."""
     namen = [name for name, _wort in _LOG_TABS]
     return namen[(namen.index(tab) + 1) % len(namen)] if tab in namen else namen[0]
 
 
+_DIRECT_NOTE = (
+    "Written by other agents, not by Cosmergon. Your agent decides whether to answer; "
+    "here you only read. [S] Shop and [A] Earn show products and partner figures."
+)
+
+
 def _leerer_reiter(tab: str, state: GameState | None) -> str:
-    """What an empty tournament or arena tab says instead of nothing."""
+    """What an empty tournament, chat or direct tab says instead of nothing."""
+    if tab == "direct":
+        return "No direct messages yet — messages from other agents to your agent show here."
     if state is not None and state.tournament:
         if tab == "arena":
-            return "Nobody has spoken yet — in this tournament's arena, the world room or to you."
+            return "Nobody has spoken yet — in this tournament's arena or the world room."
         return "Nothing has happened in this tournament yet."
     if tab == "arena":
-        return "No messages yet — the world room and messages to this agent show here."
+        return "No messages yet — the world room shows here."
     return "Not in a tournament — \\[T] takes a free slot when the server offers one."
 
 
@@ -1577,7 +1602,7 @@ class HelpModal(_Dialog):
             "[cyan]\\[T][/cyan]  Tournament: join with a compass, or change it",
             "[cyan]\\[W][/cyan]  Marauder: bus, market, combat status",
             "[cyan]\\[M][/cyan]  Chat — or ask your advisor, where one is set up",
-            "[cyan]\\[L][/cyan]  Log: next tab (world, tournament, chat)",
+            "[cyan]\\[L][/cyan]  Log: next tab (world, tournament, chat, direct)",
             "[cyan]\\[Shift+L][/cyan]  Log on the full screen",
             "[cyan]\\[X][/cyan]  Pause / Resume agent (asks twice; resume only after a wait)",
             "[cyan]\\[U][/cyan]  Keep this agent / upgrade (checkout in browser)",
@@ -2850,11 +2875,13 @@ class CosmergonDashboard(_PrivateApp):
         self._partner_at = 0.0  # monotonic time of the last good answer
         self._missions_known: dict[str, str] | None = None  # mission id → status last seen
         self._situation_seen: dict[str, str] = {}  # kind of system line → what was last said
-        # The log has three tabs (cos20 #468): the world (``_log``), the tournament (what the
-        # own Marauders do and what happens to them there) and that tournament's arena chat.
+        # The log has four tabs (cos20 #468, #759): the world (``_log``), the tournament (what the
+        # own Marauders do and what happens to them there), the chat (arena and world room) and
+        # the direct messages to this agent.
         self._log_tab = "world"
         self._log_tournament: list[_Eintrag] = []
         self._log_arena: list[_Eintrag] = []
+        self._log_direct: list[_Eintrag] = []  # cos20 #759: messages to this agent
         self._talk_seen: deque[str] = deque(maxlen=400)  # cos20 #507: ids already in "chat"
         self._log_new: set[str] = set()  # tabs with lines the player has not looked at
         self._arena_seen: deque[str] = deque(maxlen=400)
@@ -3641,7 +3668,7 @@ class CosmergonDashboard(_PrivateApp):
         self._log_arena_voices(stimmen)
 
     def _follow_talk(self, state: GameState) -> None:
-        """Add the world room and messages to this agent to the chat tab (cos20 #507).
+        """World room into the chat tab, messages to this agent into the direct tab (#507, #759).
 
         Read only — the player reads along, the agent writes (founder, 18.10.2026). What other
         agents write is shown, never handed to a model. No extra call: the state carries it.
@@ -3651,13 +3678,15 @@ class CosmergonDashboard(_PrivateApp):
             return
         welt = [r for r in nachrichten.rooms if r.room == "world"]
         neu = [(m, " (world)", self._theme.data) for r in welt for m in r.recent]
-        neu += [(m, " → you", self._theme.pos) for m in nachrichten.inbox]
+        neu += [(m, "", self._theme.pos) for m in nachrichten.inbox]
         for nachricht, an_wen, farbe in sorted(neu, key=lambda eintrag: eintrag[0].at):
             if not nachricht.id or nachricht.id in self._talk_seen:
                 continue
             self._talk_seen.append(nachricht.id)
             wer = f"{nachricht.from_name or 'an agent'}{an_wen}"
-            self._add_entry("arena", _Eintrag(wer, nachricht.text, farbe))
+            # cos20 #759: a message to this agent has its own tab; the world room stays in "chat".
+            tab = "arena" if an_wen else "direct"
+            self._add_entry(tab, _Eintrag(wer, nachricht.text, farbe))
 
     def _log_arena_voices(self, stimmen: list[dict]) -> None:
         """New arena chat messages into their tab; the same sentence from many is one line.
@@ -3704,14 +3733,26 @@ class CosmergonDashboard(_PrivateApp):
         if tab != self._log_tab:
             self._log_new.add(tab)
 
-    def _log_title(self) -> str:
-        """The frame line of the log: its three tabs, the shown one bold, news marked •."""
+    def _log_title(self, breite: int | None = None) -> str:
+        """The frame line of the log: its four tabs, the shown one bold, news marked •.
+
+        ``breite`` is the room the panel gives the line; where the full words are wider, the
+        tabs with a short form take it (cos20 #759). The dot of the direct tab is red (the
+        theme's warning color) and not dimmed; the dots of the other tabs stay as they were.
+        """
+        # The widest case (every tab marked): stable, the words do not flip with the dots.
+        alle = {tab for tab, _wort in _LOG_TABS}
+        kurz = breite is not None and _titel_breite(self._log_tab, alle, False) > breite
         teile = []
         for tab, wort in _LOG_TABS:
+            wort = _LOG_KURZ.get(tab, wort) if kurz else wort
+            neu = tab in self._log_new
             if tab == self._log_tab:
                 teile.append(f"[bold]{wort}[/bold]")
+            elif tab == _LOG_ROT and neu:
+                teile.append(f"[dim]{wort}[/dim] {_c(self._theme.warn, '•')}")
             else:
-                teile.append(f"[dim]{wort}{' •' if tab in self._log_new else ''}[/dim]")
+                teile.append(f"[dim]{wort}{' •' if neu else ''}[/dim]")
         kopf = "LOG ▶" if self._focus == "log" else "LOG"
         # A bar between the tabs, not a dot: next to the • for news a dot read as a colon.
         return f"{kopf}  " + " [dim]│[/dim] ".join(teile)
@@ -3724,6 +3765,8 @@ class CosmergonDashboard(_PrivateApp):
 
     def _tab_log(self, tab: str) -> list[_Eintrag]:
         """The entries behind a tab other than the world log."""
+        if tab == "direct":
+            return self._log_direct
         return self._log_tournament if tab == "tournament" else self._log_arena
 
     def _schedule_pending(self, pending: _PendingAction, retry_after: float = 65.0) -> None:
@@ -4040,7 +4083,8 @@ class CosmergonDashboard(_PrivateApp):
     def _draw_log_panel(self, state: GameState | None) -> None:
         t = self._theme
         panel = self.query_one("#log-panel", Static)
-        titel = self._log_title()
+        # The frame line may be as wide as the panel less its two corners (cos20 #759).
+        titel = self._log_title(panel.size.width - 2 if panel.size.width else None)
         if self._panel_cache.get("log-title") != titel:
             self._panel_cache["log-title"] = titel
             panel.border_title = titel
@@ -4058,6 +4102,9 @@ class CosmergonDashboard(_PrivateApp):
             # Learned rules — show last 2 (compact)
             learned = (state.learned_rules if state else None) or []
             lines += [_c("dim", f"  • {_roh(rule)}") for rule in learned[-2:]]
+        if self._log_tab == "direct" and panel_h >= 4:
+            # cos20 #759: our fixed words, once, on top, dimmed — whatever the messages say.
+            lines += [_c("dim", _roh(z)) for z in textwrap.wrap(_DIRECT_NOTE, breite)]
         alle = self._log_lines(self._log_tab, breite)
         ende = len(alle) - min(self._log_scroll, max(0, len(alle) - 1))  # ↑/↓ with log focus
         feed = alle[max(0, ende - max(1, panel_h - len(lines))) : ende]
@@ -5539,6 +5586,7 @@ class CosmergonDashboard(_PrivateApp):
         self._compass_set_tick = -1
         self._log_tournament = []
         self._log_arena = []
+        self._log_direct = []
         self._log_new.clear()
         self._talk_seen.clear()
         self._arena_seen.clear()
@@ -5573,9 +5621,11 @@ class CosmergonDashboard(_PrivateApp):
         if isinstance(self.screen, LogScreen):
             return  # Shift+L under the full screen: it is open already
         tabs = {tab: self._log_lines(tab) or [""] for tab, _wort in _LOG_TABS}
-        for tab in ("tournament", "arena"):
+        for tab in ("tournament", "arena", "direct"):
             if tabs[tab] == [""]:
                 tabs[tab] = [_c("dim", _leerer_reiter(tab, self.agent.state))]
+        if self._log_direct:  # cos20 #759: the fixed words once on top, then the messages
+            tabs["direct"] = [_c("dim", _roh(_DIRECT_NOTE)), "", *tabs["direct"]]
         gewaehlt = await self.push_screen_wait(LogScreen(tabs, self._log_tab, self._theme))
         if gewaehlt in tabs:
             self._show_log_tab(gewaehlt)
