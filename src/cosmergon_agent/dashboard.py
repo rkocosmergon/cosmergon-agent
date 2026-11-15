@@ -5059,8 +5059,11 @@ class CosmergonDashboard(_PrivateApp):
         wish = await self.push_screen_wait(ResidentOffersModal(current))
         if wish is None:
             return
-        result = await self.agent.set_resident_offers(wish)
-        if result.get("error"):
+        try:
+            result = await self.agent.set_resident_offers(wish)
+        except CosmergonError:
+            result = {"error": True}
+        if not isinstance(result, dict) or result.get("error"):
             self._set_feedback(_c(self._theme.warn, "✗ Resident offers: could not be changed"))
             return
         self._resident_offers = wish

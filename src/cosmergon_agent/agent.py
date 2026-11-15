@@ -1443,7 +1443,7 @@ class CosmergonAgent:
         resp = await self._request("PATCH", "/api/v1/players/me", json={"resident_offers": on})
         if resp.status_code >= 400:
             return {"error": printable(resp.text), "status_code": resp.status_code}
-        return resp.json()  # type: ignore[no-any-return]
+        return _json_body(resp)
 
     async def get_events(self, limit: int = 20, event_type: str | None = None) -> list[dict]:
         """Fetch recent game events for this agent (actions, compass changes, etc.).
