@@ -13,6 +13,7 @@ Hotkeys:
     K  Show API key + config path
     S  Shop: products, prices, checkout in the browser; your energy vouchers
     O  Toggle Public Showcase (opt-in/opt-out, DSGVO Art. 6 lit. a)
+    H  Resident offers: let residents (house NPCs) message your agent (off by default)
     R  Refresh now       Q  Quit             ?  Help
 
 Themes: cosmergon (default), matrix, mono, high-contrast
@@ -1611,6 +1612,7 @@ class HelpModal(_Dialog):
             "[cyan]\\[S][/cyan]  Shop: what you can buy, the price, checkout in the browser",
             "[cyan]\\[A][/cyan]  Earn: share your agent's link — real money and energy",
             "[cyan]\\[O][/cyan]  Public showcase: show or hide your agent's card",
+            "[cyan]\\[H][/cyan]  Resident offers: let residents message your agent (off by default)",
             "[cyan]\\[R][/cyan]  Refresh data",
             "[cyan]\\[?][/cyan]  This help",
             "[cyan]\\[Q][/cyan]  Quit (warns first while the key can end)",
@@ -2109,6 +2111,73 @@ class ShowcaseModal(_Dialog):
                 "consent_text_hash": self._consent_text_hash,
             }
         )
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+# ---------------------------------------------------------------------------
+# Resident offers [H] — cos20 #759: the opt-in for messages from residents
+# ---------------------------------------------------------------------------
+
+
+class ResidentOffersModal(_Dialog):
+    """One switch: may residents (house NPCs) message this agent with an offer.
+
+    Space toggles, Enter submits, Esc cancels. Dismissed with the wished state (``bool``)
+    when it differs from the current one, else ``None``.
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
+        Binding("escape", "cancel", "Cancel", show=False),
+        Binding("space", "toggle_switch", "Toggle", show=False, priority=True),
+        Binding("enter", "submit", "Submit", show=False, priority=True),
+    ]
+
+    DEFAULT_CSS = """
+    ResidentOffersModal {
+        align: center middle;
+    }
+    ResidentOffersModal > #ro-wrap {
+        width: 72;
+        height: auto;
+        max-height: 85vh;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    """
+
+    TEXT = (
+        "Resident offers: residents (house NPCs) may message your agent with an offer, "
+        "e.g. to settle a new cube if your human buys one. Off by default."
+    )
+
+    def __init__(self, current_state: bool) -> None:
+        super().__init__()
+        self._initial_state = current_state
+        self._desired_state = current_state
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="ro-wrap"):
+            yield Label(self.TEXT, id="ro-text", markup=False)
+            yield Label("")
+            yield Label(self._switch_line(), id="ro-switch")
+            yield Label("[dim]Space toggle · Enter submit · Esc cancel[/dim]", id="ro-footer")
+
+    def _switch_line(self) -> str:
+        state = "[green]\\[x] on[/green]" if self._desired_state else "\\[ ] off"
+        changed = (
+            " [yellow](changed)[/yellow]" if self._desired_state != self._initial_state else ""
+        )
+        return f"Resident offers: {state}{changed}"
+
+    def action_toggle_switch(self) -> None:
+        self._desired_state = not self._desired_state
+        self.query_one("#ro-switch", Label).update(self._switch_line())
+
+    def action_submit(self) -> None:
+        self.dismiss(None if self._desired_state == self._initial_state else self._desired_state)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -2842,6 +2911,7 @@ class CosmergonDashboard(_PrivateApp):
         # cos20 #603: S is the shop; the showcase moved to O.
         Binding("s", "shop", "Shop", show=False, priority=True),
         Binding("o", "toggle_showcase", "Showcase", show=False, priority=True),
+        Binding("h", "resident_offers", "Resident offers", show=False, priority=True),
         Binding("w", "marauder_menu", "Marauder", show=False, priority=True),
         Binding("question_mark", "help", "Help", show=False, priority=True),
         # #468: Q warns first while the key can end (``action_leave``); App.action_quit stays.
@@ -2858,6 +2928,7 @@ class CosmergonDashboard(_PrivateApp):
         self._paused = False
         self._quit_warning_open = False  # #468: a second Q under the warning quits
         self._compass_preset = "autonomous"
+        self._resident_offers: bool | None = None  # own last set; None = read the agent state
         self._compass_ever_set = False
         self._compass_set_tick = -1  # the tick of its own last set (_follow_compass)
         self._last_energy: float | None = None
@@ -4976,6 +5047,25 @@ class CosmergonDashboard(_PrivateApp):
         self._set_feedback(
             _c(self._theme.pos, f"✓ +{_roh(credited)} energy for {_roh(name)}"), at_tick=False
         )
+
+    @work
+    async def action_resident_offers(self) -> None:
+        """Resident offers on/off (Hotkey H; cos20 #759): PATCH /players/me."""
+        if self._resident_offers is not None:
+            current = self._resident_offers
+        else:
+            state = self.agent._state
+            current = bool(state.resident_offers) if state else False
+        wish = await self.push_screen_wait(ResidentOffersModal(current))
+        if wish is None:
+            return
+        result = await self.agent.set_resident_offers(wish)
+        if result.get("error"):
+            self._set_feedback(_c(self._theme.warn, "✗ Resident offers: could not be changed"))
+            return
+        self._resident_offers = wish
+        msg = "✓ Resident offers on" if wish else "✓ Resident offers off"
+        self._set_feedback(_c(self._theme.pos, msg), at_tick=False)
 
     @work
     async def action_toggle_showcase(self) -> None:

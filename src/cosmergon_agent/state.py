@@ -562,6 +562,8 @@ class GameState:
     learned_rules: list[str] = field(default_factory=list)
     next_tick_at: float | None = None  # Unix timestamp when next game tick fires (server truth)
     compass_preset: str | None = None  # Last explicitly set compass preset; None if never set
+    # Opt-in for messages from residents (house NPCs); off by default and on older servers.
+    resident_offers: bool = False
     # api-Agent-Reflexion (Cosmergon backend ≥ v1.60.862, S161 2026-05-04):
     # backend signals when the agent has accumulated enough decisions for the
     # external LLM-Decider to run a self-reflection round. Pet/SDK-bot reads
@@ -650,6 +652,7 @@ class GameState:
             learned_rules=[r for r in _liste(data.get("learned_rules")) if isinstance(r, str)],
             next_tick_at=data.get("next_tick_at"),
             compass_preset=data.get("compass_preset"),
+            resident_offers=data.get("resident_offers") is True,
             reflection_due=data.get("reflection_due", False),
             decisions_since_last_reflection=data.get("decisions_since_last_reflection", 0),
             available_actions=_dict_or_none(data, "available_actions") or {},

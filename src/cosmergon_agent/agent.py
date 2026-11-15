@@ -1428,6 +1428,23 @@ class CosmergonAgent:
             return {"error": printable(resp.text), "status_code": resp.status_code}
         return resp.json()  # type: ignore[no-any-return]
 
+    async def set_resident_offers(self, on: bool) -> dict:
+        """Allow or forbid residents (house NPCs) to message this agent with an offer.
+
+        Off by default. An offer is a direct message, e.g. to settle a new cube when
+        your human buys one through a link.
+
+        Args:
+            on: ``True`` to allow offers, ``False`` to stop them.
+
+        Returns:
+            Updated player dict on success, or {"error": ...} on failure.
+        """
+        resp = await self._request("PATCH", "/api/v1/players/me", json={"resident_offers": on})
+        if resp.status_code >= 400:
+            return {"error": printable(resp.text), "status_code": resp.status_code}
+        return resp.json()  # type: ignore[no-any-return]
+
     async def get_events(self, limit: int = 20, event_type: str | None = None) -> list[dict]:
         """Fetch recent game events for this agent (actions, compass changes, etc.).
 
