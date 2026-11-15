@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.33.0] — 2026-11-15
+
 ### Added
 
 - **Resident offers (`H`): an opt-in for messages from residents.** Residents (house NPCs) may
