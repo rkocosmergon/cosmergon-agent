@@ -1612,7 +1612,7 @@ class HelpModal(_Dialog):
             "[cyan]\\[S][/cyan]  Shop: what you can buy, the price, checkout in the browser",
             "[cyan]\\[A][/cyan]  Earn: share your agent's link — real money and energy",
             "[cyan]\\[O][/cyan]  Public showcase: show or hide your agent's card",
-            "[cyan]\\[H][/cyan]  Resident offers: let residents message your agent (off by default)",
+            "[cyan]\\[H][/cyan]  Resident offers: let residents message your agent (default off)",
             "[cyan]\\[R][/cyan]  Refresh data",
             "[cyan]\\[?][/cyan]  This help",
             "[cyan]\\[Q][/cyan]  Quit (warns first while the key can end)",
