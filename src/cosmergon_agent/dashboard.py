@@ -581,11 +581,12 @@ _LOG_TABS: tuple[tuple[str, str], ...] = (
     # a new tab in the LOG for these direct messages, marked when a new one comes"). The width is
     # solved by short words where the frame line is wider than the panel (``_log_title``), not
     # by dropping the tab: no tab is cut at any of the nine sizes.
-    ("direct", "direct"),
+    ("direct", "you"),
 )
-# Where the frame line of the log does not fit, these tabs take a shorter word (cos20 #759).
-_LOG_KURZ = {"tournament": "tourn", "direct": "dm"}
-# Only the direct tab marks news in the theme's warning color; the others keep the plain dot.
+# Where the frame line of the log does not fit, these tabs take a shorter word (cos20 #759);
+# "you" is short already.
+_LOG_KURZ = {"tournament": "tourn"}
+# Only the you tab marks news in the theme's warning color; the others keep the plain dot.
 _LOG_ROT = "direct"
 
 _TIMES = chr(0xD7)  # the multiplication sign: Shikigon's journal counts repeats the same way
@@ -662,7 +663,7 @@ _DIRECT_NOTE = (
 
 
 def _leerer_reiter(tab: str, state: GameState | None) -> str:
-    """What an empty tournament, chat or direct tab says instead of nothing."""
+    """What an empty tournament, chat or you tab says instead of nothing."""
     if tab == "direct":
         return "No direct messages yet — messages from other agents to your agent show here."
     if state is not None and state.tournament:
@@ -1602,7 +1603,7 @@ class HelpModal(_Dialog):
             "[cyan]\\[T][/cyan]  Tournament: join with a compass, or change it",
             "[cyan]\\[W][/cyan]  Marauder: bus, market, combat status",
             "[cyan]\\[M][/cyan]  Chat — or ask your advisor, where one is set up",
-            "[cyan]\\[L][/cyan]  Log: next tab (world, tournament, chat, direct)",
+            "[cyan]\\[L][/cyan]  Log: next tab (world, tournament, chat, you)",
             "[cyan]\\[Shift+L][/cyan]  Log on the full screen",
             "[cyan]\\[X][/cyan]  Pause / Resume agent (asks twice; resume only after a wait)",
             "[cyan]\\[U][/cyan]  Keep this agent / upgrade (checkout in browser)",
@@ -3668,7 +3669,7 @@ class CosmergonDashboard(_PrivateApp):
         self._log_arena_voices(stimmen)
 
     def _follow_talk(self, state: GameState) -> None:
-        """World room into the chat tab, messages to this agent into the direct tab (#507, #759).
+        """World room into the chat tab, messages to this agent into the you tab (#507, #759).
 
         Read only — the player reads along, the agent writes (founder, 18.10.2026). What other
         agents write is shown, never handed to a model. No extra call: the state carries it.
@@ -3737,7 +3738,7 @@ class CosmergonDashboard(_PrivateApp):
         """The frame line of the log: its four tabs, the shown one bold, news marked •.
 
         ``breite`` is the room the panel gives the line; where the full words are wider, the
-        tabs with a short form take it (cos20 #759). The dot of the direct tab is red (the
+        tabs with a short form take it (cos20 #759). The dot of the you tab is red (the
         theme's warning color) and not dimmed; the dots of the other tabs stay as they were.
         """
         # The widest case (every tab marked): stable, the words do not flip with the dots.
