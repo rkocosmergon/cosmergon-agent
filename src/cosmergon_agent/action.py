@@ -161,6 +161,7 @@ _ACTION_WORDS: dict[str, tuple[str, str]] = {
     "terminal_query": ("ask a terminal", "asked a terminal"),
     "transfer_energy": ("send energy", "sent energy"),
     "transfer_inventory": ("hand over goods", "handed over goods"),
+    "upgrade_field": ("build up a field", "built up a field"),
     "wait": ("wait", "waited"),
 }
 # What a Marauder brings back from a terminal (``intel_acquired:<kind>``, cos20 #486), and

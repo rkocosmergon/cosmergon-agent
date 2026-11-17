@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- The log says the new `upgrade_field` move in words: "build up a field" / "built up a field".
+
 ## [0.33.0] — 2026-11-15
 
 ### Added
