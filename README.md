@@ -212,6 +212,8 @@ in the dashboard, or when a program of yours does.
 | `w` | Marauder: bus, market, combat status |
 | `x` | Pause / Resume — asks twice; a paused agent can resume only after the server's waiting time |
 | `v` | Field view |
+| `y` | Eyes: the world through a marauder's eyes — in place of the agent panel, the economy panel or the log, on the full screen, off |
+| `n` | Eyes: the next cam — your marauders one by one, a random marauder that is out, a flight between the cubes |
 | `m` | Chat with your agent — or ask your advisor, where one is set up (see below) |
 | `l` | Log: next tab — world, tournament, chat, you |
 | `Shift+l` | Log on the full screen (long messages wrap there) |
@@ -220,6 +222,28 @@ in the dashboard, or when a program of yours does.
 | `a` | Agent selector (Paid) |
 | `?` | Help |
 | `q` | Quit — while the key can end, it first warns with the time and how to keep the agent |
+
+**Through a marauder's eyes (`y`).** A moving picture in characters: the camera sits at eye
+level in the head of a real marauder that walks right now. Living cells stand as blocks up to
+the ceiling, walls half as high, towers, other marauders and loot boxes between them; every
+surface is drawn in characters that change with the side the light falls on and with the
+distance. `n` chooses whose eyes: each of your own marauders (if it stands in its berth, the
+view says so, and you choose another), a random marauder somewhere in the world that is
+walking or in a fight, or a flight: the camera flies by itself through one of the liveliest
+levels of a cube and after a minute on to the next cube. The view stands still while it is hidden or the window has no focus, and
+draws fewer pictures a second on a large area. Following a marauder needs one more package
+(the flight works without it, and then shows no marauders):
+
+```bash
+pip install 'cosmergon-agent[dashboard,pov]'
+```
+
+It only reads, and only what is public: the entity stream of one cube
+(`/ws/entities/{cube}`), that cube's level (`/api/v1/render/iso/cube/{id}/level/{z}`), for
+the flight its list of levels (`/api/v1/render/iso/cube/{id}`) and, for the random cam and
+the flight, the list of cubes. No key and no name is sent on these four; which cube your
+own marauders stand in comes from your agent's state. The way of drawing follows
+[ascii-city-term](https://github.com/sumit-official/ascii-city-term) (MIT).
 
 **The log has four tabs.** *world*: what happens to your agent — your moves, a program's moves
 (the same move in a row counts up, `×3`), missions, and facts the server reports. *tournament*:

@@ -46,6 +46,11 @@ dashboard = [
 ]
 # U5 (#232 K4, 2026-09-05): every product beyond the client is an extra.
 # `pip install cosmergon-agent` imports client + MCP server with httpx alone.
+# The view through a marauder's eyes in the dashboard (cos20 #789) reads the world's public
+# entity stream, a WebSocket; neither the standard library nor httpx has a client for it.
+pov = [
+    "websockets>=13.0",
+]
 langchain = [
     "langchain-core>=0.1",
 ]

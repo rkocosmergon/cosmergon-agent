@@ -4,6 +4,14 @@
 
 ### Added
 
+- Dashboard: the world through a marauder's eyes. `[Y]` puts a moving picture in characters in
+  place of the agent panel, the economy panel or the log, or on the full screen; `[N]` chooses
+  whose eyes — each of your own marauders, a random one that is walking or in a fight, or a
+  flight that goes from cube to cube by itself. The camera follows the real marauder live. Needs the new extra `pov` (`websockets`):
+  `pip install 'cosmergon-agent[dashboard,pov]'`; without it the view says so. It reads four
+  public routes and sends neither key nor name on them.
+- `GameState.marauders`: every body of your agent with kind, slot, state, whether it is dead,
+  and the cube it stands in. Empty on an older backend.
 - The log says the new `upgrade_field` move in words: "build up a field" / "built up a field".
 
 ### Changed

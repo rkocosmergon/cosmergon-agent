@@ -50,7 +50,9 @@ if TYPE_CHECKING:
 
 try:
     import rich
-    from rich.segment import Segments
+    from rich.color import Color
+    from rich.segment import Segment, Segments
+    from rich.style import Style
     from rich.text import Text
     from rich.traceback import Traceback
     from textual import constants as _textual_constants
@@ -62,6 +64,8 @@ try:
     from textual.events import Key
     from textual.markup import MarkupError
     from textual.screen import ModalScreen
+    from textual.strip import Strip
+    from textual.widget import Widget
     from textual.widgets import Input, Label, Select, Static
     from textual.worker import Worker, WorkerState
 except ImportError as _exc:
@@ -82,6 +86,7 @@ from cosmergon_agent import (
     earn,
     shop,
 )
+from cosmergon_agent import scope as _scope
 from cosmergon_agent.action import (
     action_done_word,
     action_word,
@@ -93,12 +98,15 @@ from cosmergon_agent.action import (
     printable,
 )
 from cosmergon_agent.config import (
+    SCOPE_PLACES,
     AgentEntry,
+    display_scope,
     is_onboarding_dismissed,
     load_all_agents,
     load_token,
     save_agent,
     set_active_agent,
+    set_display_scope,
     set_onboarding_dismissed,
 )
 from cosmergon_agent.exceptions import ConnectionError as CsgConnectionError
@@ -1451,6 +1459,14 @@ class PriceModal(_Dialog):
         self.dismiss(preis)
 
 
+# The keys that show the world, as the help lists them (cos20 #789: Y and N).
+_HELP_VIEWS = (
+    "[cyan]\\[V][/cyan]  View Conway field (zoom, scroll, minimap)",
+    "[cyan]\\[Y][/cyan]  Eyes: the world through a marauder's eyes — panel, log, full, off",
+    "[cyan]\\[N][/cyan]  Eyes: next cam (your marauders, a random one out, a flight)",
+)
+
+
 class HelpModal(_Dialog):
     """Scrollable guide: what is Cosmergon, hotkeys, and FAQ."""
 
@@ -1600,7 +1616,7 @@ class HelpModal(_Dialog):
             "[cyan]\\[P][/cyan]  Place a pattern on a field (two steps)",
             "[cyan]\\[F][/cyan]  Create a new field (when the server offers one)",
             "[cyan]\\[E][/cyan]  Evolve a field — shows what each field lacks",
-            "[cyan]\\[V][/cyan]  View Conway field (zoom, scroll, minimap)",
+            *_HELP_VIEWS,
             "[cyan]\\[T][/cyan]  Tournament: join with a compass, or change it",
             "[cyan]\\[W][/cyan]  Marauder: bus, market, combat status",
             "[cyan]\\[M][/cyan]  Chat — or ask your advisor, where one is set up",
@@ -2777,6 +2793,116 @@ class EarnModal(_Dialog):
 # ---------------------------------------------------------------------------
 
 
+def _scope_styles(theme: Theme) -> dict[str, Style]:
+    """The view's styles in the theme's colours: every kind of thing in five steps of light."""
+
+    def hex_of(color: str) -> str:
+        return Color.parse(color).get_truecolor().hex
+
+    colors, _names = _scope.palette(
+        {
+            "cell": hex_of(theme.data),
+            "own": hex_of(theme.pos),
+            "wall": theme.frame_economy,
+            "tower": hex_of(theme.guide),
+            "ground": hex_of(theme.struct),
+            "ceiling": theme.frame_agent,
+            "marauder": hex_of(theme.warn),
+            "loot": hex_of(theme.guide),
+        },
+        theme.bg,
+    )
+    return {key: Style(color=fg, bgcolor=bg) for key, (fg, bg) in colors.items()}
+
+
+_ScopeOrNone = _scope.Scope | None
+_SCOPE_RUN = re.compile(r"(.)\1*", re.DOTALL)
+
+
+class ScopeView(Widget):
+    """Through the eyes of a marauder (cos20 #789): the picture of the chosen cam.
+
+    Drawn line by line, one segment per run of one style. It stands still while it is hidden,
+    while another screen lies over it, and while the window does not have the focus.
+    """
+
+    # Pictures a second, and from how many cells on the lower rate holds. Measured on the
+    # reference device (cos20 #789): the full screen at 8 a second took 28 % of a core with the
+    # terminal emulator, at 5 a second 15 %; the panels stay below 10 % at 8.
+    RATE: ClassVar[float] = 8.0
+    RATE_LARGE: ClassVar[float] = 5.0
+    LARGE: ClassVar[int] = 2400
+
+    def __init__(self, source: Callable[[], _scope.Scope | None], theme: Theme, **kw: Any) -> None:
+        super().__init__(**kw)
+        self._source = source
+        self._styles = _scope_styles(theme)
+        self._step = 0
+        self._rows: list[tuple[str, str]] = []
+        self._rows_for: tuple[int, int, int] | None = None
+        self._rate = 0.0
+        self._timer: Any = None
+
+    def on_resize(self) -> None:
+        """The rate follows the size; the timer is set anew only when the rate changes."""
+        large = self.size.width * self.size.height > self.LARGE
+        rate = self.RATE_LARGE if large else self.RATE
+        if rate != self._rate:
+            if self._timer is not None:
+                self._timer.stop()
+            self._rate, self._timer = rate, self.set_interval(1 / rate, _on_time(self._tick))
+
+    def _tick(self) -> None:
+        view = self._source()
+        seen = self.display and self.screen is self.app.screen and self.app.app_focus
+        if view is None or not seen:
+            return
+        view.step()
+        self._step += 1
+        self.border_title = f"EYES · {view.title()}"
+        if not self.border_subtitle:
+            self.border_subtitle = r"\[N] cam  \[Y] place"
+        self.refresh()
+
+    def render_line(self, y: int) -> Strip:
+        view = self._source()
+        want = (self.size.width, self.size.height, self._step)
+        if view is not None and want != self._rows_for:
+            self._rows, self._rows_for = view.frame(want[0], want[1]), want
+        if view is None or y >= len(self._rows):
+            return Strip.blank(self.size.width)
+        text, keys = self._rows[y]
+        runs = _SCOPE_RUN.finditer(keys)
+        parts = [Segment(text[m.start() : m.end()], self._styles[m[1]]) for m in runs]
+        return Strip(parts, len(text))
+
+
+class ScopeScreen(_Dialog):
+    """The view on the whole screen. Y, Esc or Q closes; N takes the next cam."""
+
+    DEFAULT_CSS = """
+    ScopeScreen > ScopeView {
+        display: block;
+        width: 100%;
+        height: 100%;
+    }
+    """
+
+    def __init__(self, source: Callable[[], _scope.Scope | None], theme: Theme) -> None:
+        super().__init__()
+        self._source, self._theme = source, theme
+
+    def compose(self) -> ComposeResult:
+        view = ScopeView(self._source, self._theme, id="scope-full")
+        view.border_subtitle = r"\[N] next cam  \[Y] close"
+        yield view
+
+    def on_key(self, event: Any) -> None:
+        if event.key in ("escape", "q"):
+            event.stop()
+            self.dismiss(None)
+
+
 class _LogPanel(Static):
     """Lines are cut to the panel's rows, so new rows mean new lines.
 
@@ -2849,6 +2975,25 @@ class CosmergonDashboard(_PrivateApp):
         width: 1fr;
         height: 100%;
         border: solid $csg-frame-agent;
+        border-subtitle-color: $csg-frame-agent;
+    }
+
+    /* The view through a marauder's eyes takes the place of one panel (cos20 #789). */
+    ScopeView {
+        display: none;
+        background: $csg-bg;
+        border: solid $csg-focus;
+        border-title-style: bold;
+        border-title-color: $csg-title;
+        border-subtitle-color: $csg-frame-log;
+    }
+    #scope-agent, #scope-economy {
+        width: 1fr;
+        height: 100%;
+    }
+    #scope-log {
+        height: 1fr;
+        min-height: 6;
     }
 
     #economy-panel {
@@ -2914,6 +3059,10 @@ class CosmergonDashboard(_PrivateApp):
         Binding("L", "log_screen", "Log full screen", show=False, priority=True),
         Binding("m", "chat_screen", "Chat", show=False, priority=True),
         Binding("v", "field_view", "Fields", show=False, priority=True),
+        # cos20 #789: Y moves the view through a marauder's eyes from place to place, N takes
+        # its next cam.
+        Binding("y", "scope_place", "Eyes", show=False, priority=True),
+        Binding("n", "scope_cam", "Cam", show=False, priority=True),
         Binding("tab", "cycle_focus", "Focus", show=False, priority=True),
         Binding("k", "show_key", "Key", show=False, priority=True),
         Binding("a", "earn", "Earn", show=False, priority=True),
@@ -2928,6 +3077,12 @@ class CosmergonDashboard(_PrivateApp):
     ]
 
     _APP_KEYS: ClassVar[frozenset[str]] = frozenset(key.action for key in BINDINGS)
+
+    # The view through a marauder's eyes (cos20 #789): made when it is first shown; where it
+    # stands and whose eyes are read from the config when the dashboard is mounted.
+    _scope: _ScopeOrNone = None
+    _scope_place: str = "off"
+    _scope_cam: str = ""
 
     def __init__(self, agent: CosmergonAgent, theme: Theme) -> None:
         self._theme = theme  # before super(): the stylesheet reads it through the variables
@@ -2985,8 +3140,11 @@ class CosmergonDashboard(_PrivateApp):
         yield Static("", id="hint-bar")
         with Horizontal(id="top-row"):
             yield Static("", id="agent-panel")
+            yield ScopeView(self._scope_source, self._theme, id="scope-agent")
             yield Static("", id="economy-panel")
+            yield ScopeView(self._scope_source, self._theme, id="scope-economy")
         yield _LogPanel("", id="log-panel")
+        yield ScopeView(self._scope_source, self._theme, id="scope-log")
         yield Static("", id="context-bar")
         yield Static("", id="fix-bar")
         yield Static("", id="status-bar")
@@ -3010,6 +3168,7 @@ class CosmergonDashboard(_PrivateApp):
                 w.display = not zu_klein
         hinweis = self.query_one("#too-small", Static)
         hinweis.display = zu_klein
+        self._scope_layout()
         self._platz_der_kontextzeile()
         if zu_klein:
             hinweis.update(
@@ -3043,12 +3202,19 @@ class CosmergonDashboard(_PrivateApp):
 
     def on_mount(self) -> None:
         # The titles sit in the frame line — a panel keeps every row for content (#475).
-        self.query_one("#agent-panel", Static).border_title = "AGENT"
+        agent_panel = self.query_one("#agent-panel", Static)
+        agent_panel.border_title = "AGENT"
+        # The key bar is full at the smallest window; the view's key stands in a frame line,
+        # like the log's keys (cos20 #789).
+        agent_panel.border_subtitle = r"\[Y] eyes"
         self.query_one("#economy-panel", Static).border_title = "ECONOMY"
         log_panel = self.query_one("#log-panel", Static)
         log_panel.border_title = self._log_title()
         mit_wem = "ask" if self._advisor else "chat"
         log_panel.border_subtitle = rf"\[L] next  \[Shift+L] full  \[M] {mit_wem}"
+        # The view comes back where it was; the full screen is not opened unasked (#789).
+        self._scope_place, self._scope_cam = display_scope()
+        self._scope_set("off" if self._scope_place == "full" else self._scope_place)
         self._register_agent_handlers()
         self._run_agent()
         self.set_interval(0.5, _on_time(self._redraw))
@@ -4014,6 +4180,8 @@ class CosmergonDashboard(_PrivateApp):
         if not self.is_running:
             return
         state = self.agent.state
+        if self._scope is not None and state is not None:
+            self._scope.set_bodies(list(state.marauders))
         self._sync_focus_border()
         self._draw_hint_bar(state)
         self._draw_agent_panel(state)
@@ -4896,6 +5064,8 @@ class CosmergonDashboard(_PrivateApp):
             return action in ("refresh_now", "create_field")
         if isinstance(self.screen, LogScreen):
             return action in ("log_next", "log_screen")
+        if isinstance(self.screen, ScopeScreen):
+            return action in ("scope_place", "scope_cam")
         return False
 
     @work
@@ -5755,6 +5925,51 @@ class CosmergonDashboard(_PrivateApp):
                 advisor=self._advisor,
             )
         )
+
+    def _scope_source(self) -> _ScopeOrNone:
+        return self._scope
+
+    def _scope_layout(self) -> None:
+        """Show the view in its place and hide the panel it stands for; hidden when too small."""
+        klein = self.query_one("#too-small", Static).display
+        place = self._scope_place
+        for name in ("agent", "economy", "log"):
+            here = place == name and not klein
+            self.query_one(f"#scope-{name}", ScopeView).display = here
+            self.query_one(f"#{name}-panel", Static).display = not here and not klein
+
+    def _scope_set(self, place: str) -> None:
+        """Move the view to ``place``; the streams end when it is shown nowhere."""
+        self._scope_place = place
+        if place == "off":
+            if self._scope is not None:
+                self._scope.close()
+            self._scope = None
+        elif self._scope is None:
+            self._scope = _scope.Scope(self.agent.base_url, self._scope_cam or _scope.RANDOM)
+        self._scope_layout()
+        set_display_scope(place, self._scope_cam)
+
+    @work
+    async def action_scope_place(self) -> None:
+        """[Y] — the view through a marauder's eyes: agent panel, economy panel, log, full
+        screen, off (cos20 #789)."""
+        if isinstance(self.screen, ScopeScreen):
+            self.screen.dismiss(None)
+            return
+        nach = SCOPE_PLACES[(SCOPE_PLACES.index(self._scope_place) + 1) % len(SCOPE_PLACES)]
+        self._scope_set(nach)
+        if nach == "full":
+            await self.push_screen_wait(ScopeScreen(self._scope_source, self._theme))
+            self._scope_set("off")
+
+    def action_scope_cam(self) -> None:
+        """[N] — the next cam: your marauders one by one, a random one that is out, a flight."""
+        if self._scope is None:
+            self._add_log(_c(self._theme.warn, "No view open — press \\[Y] first"))
+            return
+        self._scope_cam = self._scope.next_cam()
+        set_display_scope(self._scope_place, self._scope_cam)
 
     @work
     async def action_field_view(self) -> None:

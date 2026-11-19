@@ -208,6 +208,32 @@ def set_display_currency(currency: str) -> bool:
     return True
 
 
+SCOPE_PLACES = ("off", "agent", "economy", "log", "full")
+
+
+def display_scope() -> tuple[str, str]:
+    """Where the view through a marauder's eyes is shown and which cam it had: ``[display]``
+    ``scope_place`` (one of ``SCOPE_PLACES``) and ``scope_cam``. ``("off", "")`` if never set.
+    """
+    display = _read_raw().get("display") or {}
+    place, cam = display.get("scope_place"), display.get("scope_cam")
+    return (
+        place if place in SCOPE_PLACES else "off",
+        cam if isinstance(cam, str) and len(cam) <= 64 else "",
+    )
+
+
+def set_display_scope(place: str, cam: str) -> bool:
+    """Store place and cam of the view; ``False`` if config.toml was not readable (see
+    ``set_display_currency``)."""
+    data = _read_raw()
+    if CONFIG_PATH.exists() and not data:
+        return False
+    data.setdefault("display", {}).update(scope_place=place, scope_cam=cam)
+    _write_raw(data)
+    return True
+
+
 def _set_aside_unreadable() -> None:
     """Keep a config.toml that is no valid TOML as ``config.toml.broken`` before it is replaced.
 

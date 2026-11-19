@@ -527,6 +527,12 @@ class WorldBriefing:
         )
 
 
+def _inventory_items(data: dict[str, Any]) -> dict[str, int]:
+    """``inventory.items`` as ``{item: count}``; what is no whole number is left out."""
+    items = _dict_or_none(_dict_or_none(data, "inventory") or {}, "items") or {}
+    return {str(k): n for k, v in items.items() if (n := _number(int, v)) is not _NONE_OF_IT}
+
+
 @dataclass(frozen=True)
 class GameState:
     """Complete game state snapshot for one agent at one tick.
@@ -598,6 +604,10 @@ class GameState:
     # also ``my_score``, ``leader`` and ``bodies``. ``None``: in no tournament, or an older
     # backend (forward-compatibility, C3).
     tournament: dict | None = None
+    # Every marauder body of this agent (cos20 #789): ``id``, ``kind`` (main/tournament),
+    # ``body_slot``, ``state`` (recovery = in its berth, on_mission = out), ``dead`` and the
+    # ``cube_id`` it stands in. Empty on an older backend.
+    marauders: tuple[dict, ...] = ()
     # Your public showcase (cos20 #504): consent versions and whether your total energy is
     # public. ``None`` on older backends (forward-compatibility, C3).
     showcase: ShowcaseStand | None = None
@@ -656,16 +666,11 @@ class GameState:
             reflection_due=data.get("reflection_due", False),
             decisions_since_last_reflection=data.get("decisions_since_last_reflection", 0),
             available_actions=_dict_or_none(data, "available_actions") or {},
-            inventory_items={
-                str(k): n
-                for k, v in (
-                    _dict_or_none(_dict_or_none(data, "inventory") or {}, "items") or {}
-                ).items()
-                if (n := _number(int, v)) is not _NONE_OF_IT
-            },
+            inventory_items=_inventory_items(data),
             next_step=_dict_or_none(data, "next_step"),
             key_expiry=_dict_or_none(data, "key_expiry"),
             tournament=_dict_or_none(data, "tournament"),
+            marauders=tuple(m for m in data.get("marauders") or () if isinstance(m, dict)),
             showcase=_typed_or_none(ShowcaseStand, data, "showcase"),
             pending_contracts=_objects(_dict_or_none(data, "contracts"), "pending_inbound"),
             active_contracts=_objects(_dict_or_none(data, "contracts"), "active"),
