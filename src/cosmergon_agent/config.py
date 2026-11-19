@@ -234,6 +234,21 @@ def set_display_scope(place: str, cam: str) -> bool:
     return True
 
 
+def display_scope_blocks() -> bool:
+    """Whether the view is drawn in half blocks, not signs: ``[display]`` ``scope_blocks``."""
+    return (_read_raw().get("display") or {}).get("scope_blocks") is True
+
+
+def set_display_scope_blocks(blocks: bool) -> bool:
+    """Store the choice of signs or half blocks; ``False`` if config.toml was not readable."""
+    data = _read_raw()
+    if CONFIG_PATH.exists() and not data:
+        return False
+    data.setdefault("display", {}).update(scope_blocks=bool(blocks))
+    _write_raw(data)
+    return True
+
+
 def _set_aside_unreadable() -> None:
     """Keep a config.toml that is no valid TOML as ``config.toml.broken`` before it is replaced.
 

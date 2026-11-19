@@ -17,16 +17,19 @@ follows a marauder in it, ``Flight`` flies by itself, ``Scope`` holds the cams t
 
 from __future__ import annotations
 
+import itertools
 import logging
 import math
 import random
 import re
 import threading
 import time
+from collections.abc import Callable, Collection
 from typing import Any
 
-# What stands on a square of the field.
-EMPTY, CELL, OWN, WALL, TOWER = 0, 1, 2, 3, 4
+from cosmergon_agent import _posture
+from cosmergon_agent._posture import CELL, EMPTY, OWN, TOWER, WALL  # what stands on a square
+
 # Sizes in cells, as the browser's first-person view has them (marauder.js: cell 4 m, eye
 # 1.28 m, body 1.75 m, loot box 1.4 m); wall = half a storey (founder, 17.11.2026); tower =
 # shaft 0.95 storey plus deck and battlements (iso/src/ausbau.js).
@@ -85,6 +88,22 @@ def palette(
 
 PALETTE, _KEYS = palette()
 _BLANK = _KEYS["ground"][-1]
+CAPTION_KEY = _KEYS["loot"][0]
+_SPARSE = frozenset(".:+'`,-")  # texture that covers little of its cell: a step darker as a block
+_DIM = {k: keys[min(i + 1, len(keys) - 1)] for keys in _KEYS.values() for i, k in enumerate(keys)}
+
+
+def _halves(text: str, keys: str) -> str:
+    """One row of the picture as colours only: the key per cell, a blank where nothing is."""
+    return "".join(
+        " " if c == " " else _DIM[k] if c in _SPARSE else k for c, k in zip(text, keys, strict=True)
+    )
+
+
+def blocks(rows: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """A picture of twice the height folded to half blocks: per terminal row the keys of its
+    upper and of its lower half. Twice the resolution in height; the texture of signs is gone."""
+    return [(_halves(*rows[i]), _halves(*rows[i + 1])) for i in range(0, len(rows) - 1, 2)]
 
 
 def _hash(a: int, b: int, c: int = 0) -> int:
@@ -249,6 +268,7 @@ class Pov:
             self.x += 1.0
         self.angle = 0.3
         self.step_no = 0
+        self.tilt = 0.0  # the look up (below zero) or down, as a share of the picture's height
         self._turn = 0.0
         self._flat_rows: list[tuple[float, str, bool] | None] = []
 
@@ -296,6 +316,10 @@ class Pov:
                 return
             yield mx * 8192 + my, entry, side, facing, at(mx, my)
 
+    def _mid(self, height: int) -> float:
+        """The row of the horizon: the middle, moved by the look up or down."""
+        return height / 2 - self.tilt * height
+
     def frame(self, width: int, height: int) -> list[tuple[str, str]]:
         """The picture now, ``height`` rows of ``(text, keys)``, each ``width`` cells long."""
         if width < 1 or height < 1:
@@ -323,11 +347,12 @@ class Pov:
         self, vx: float, vy: float, height: int, scale: float, x: int
     ) -> tuple[list[str], list[str], float]:
         """One column of the picture, top to bottom, and how far its first block is away."""
-        mid = height / 2
+        mid = self._mid(height)
         text, keys = [" "] * height, [_BLANK] * height
         stretch = math.hypot(vx, vy)
         bottom, first = height, _FAR
         for spot, entry, side, facing, kind in self._walk(vx, vy):
+            entry = max(entry, 1e-3)  # standing exactly on a line between two squares
             if bottom <= mid - scale * (_HIGHEST - EYE) / entry - 0.5:
                 break  # nothing further away can reach above what is drawn
             if not kind:
@@ -357,7 +382,7 @@ class Pov:
         The same for every column of one picture, so it is worked out once. ``None``: the row
         looks further than a look reaches, or lies on the horizon.
         """
-        mid = height / 2
+        mid = self._mid(height)
         rows: list[tuple[float, str, bool] | None] = []
         for row in range(height):
             off = row + 0.5 - mid
@@ -412,22 +437,23 @@ class Pov:
             if not 0.3 < away < _FAR:
                 continue
             per_cell = width / (2 * _REACH * away)
+            mid = self._mid(height)
             left = (across / away / _REACH + 1) / 2 * width - wide * per_cell / 2
-            top = max(0, int(height / 2 - scale * (tall - EYE) / away - 0.5) + 1)
-            foot = min(height, int(height / 2 + scale * EYE / away - 0.5) + 1)
+            top = max(0, int(mid - scale * (tall - EYE) / away - 0.5) + 1)
+            foot = min(height, int(mid + scale * EYE / away - 0.5) + 1)
             shade = _KEYS[name][min(4, int(away / _DEPTH_STEP))]
             right = round(left + max(1.0, wide * per_cell))
             for x in range(max(0, round(left)), min(width, right)):
                 if away >= depth[x]:
                     continue
                 for row in range(top, foot):
-                    z = EYE + away * (height / 2 - row - 0.5) / scale
+                    z = EYE + away * (mid - row - 0.5) / scale
                     cols[x][0][row] = _thing_char(name, z / tall)
                     cols[x][1][row] = shade
 
 
 _Report = tuple[float, dict[str, Any]]  # seconds, {id: (x, y, vx, vy)} in cells
-_METRES = 4.0  # a cell is 4 m (marauder.js CELL_SIZE); the stream speaks in metres
+_METRES = _posture.CELL_M  # a cell is 4 m (marauder.js CELL_SIZE); the stream speaks in metres
 
 
 def _in_cells(body: dict[str, Any]) -> tuple[float, float, float, float]:
@@ -486,10 +512,13 @@ class Follow(Pov):
 
 _RESTLESS = 12.0  # seconds without anybody walking until the random cam looks elsewhere
 _PATIENCE = 4.0  # seconds the random cam stays with one that stopped walking
+_LOOK_BACK = 6  # reports back the way of a body is measured over (about three seconds)
+_STEP_M = 1.0  # metres made in that time from which a body counts as walking
 _DWELL = 60.0  # seconds a flight stays in one cube (konzept-space-night.md: the shortest preset)
 _NEEDS_EXTRA = "this view needs: pip install 'cosmergon-agent[pov]'"
 _LEVEL_AGE = 10.0  # seconds until a level of the world is read again
 _REPORTS_KEPT = 40
+_FRESH = 4  # reports (about two seconds) within which a changed ``firing`` stamp is a fight
 
 
 class Stream(threading.Thread):
@@ -600,7 +629,14 @@ class Live(Follow):
         self.idle_since = time.monotonic()  # since when nobody walked in front of the camera
         self.walked_at = time.monotonic()  # when the one it follows last walked
         self.passed: set[str] = set()  # those the viewer left with skip(), until all were seen
+        self._timer: Callable[[], float] = time.monotonic  # the one clock of the posture
+        self._rng = random.Random()  # nosec B311 - how a picture looks around, nothing secret
+        self._posture: _posture.Posture | None = None
+        self._posture_for = ""  # whom the posture belongs to; another body, a new posture
+        self._heading = 0.3  # where the body goes; the look is staged around it
+        self.true_x = self.true_y = 0.0  # the body's place on the path, before the posture
         super().__init__(Field(side=8), [], "")
+        self._heading = self.angle
 
     def advance(self, seconds: float) -> None:
         self.step_no += 1
@@ -617,7 +653,7 @@ class Live(Follow):
         if not self.hero_id:
             self.note = "nobody is out here"
             return
-        if self.fixed or self._walks(out[self.hero_id]):
+        if self.fixed or self.hero_id in self._walkers():
             self.idle_since = time.monotonic()
         level = out[self.hero_id]["z"]
         field = self.stream.field(int(level // _METRES))
@@ -625,40 +661,81 @@ class Live(Follow):
             self.note = "loading the level"
             return
         self.note, self.field, self.hero = "", field, self.hero_id
-        self.clock = time.monotonic() - self._BEHIND
+        now = self._timer()
+        self.clock = now - self._BEHIND
         later = [i for i, (t, _) in enumerate(reports) if t >= self.clock]
         at = max(1, later[0] if later else len(reports) - 1)
+        self.angle = self._heading
         if len(reports) > 1:  # only the two reports the clock stands between are worked out
             before, after = (
                 (t, {e["id"]: _in_cells(e) for e in found if e["z"] == level})
                 for t, found in reports[at - 1 : at + 1]
             )
             self._glide(before, after)
+            self._heading = self.angle
+            self._pose(now, reports)
 
-    def restless(self) -> bool:
-        """Whether it is time to look in another cube: nobody to follow for a while."""
-        return time.monotonic() - self.idle_since > _RESTLESS
+    def _glide(self, before: _Report, after: _Report) -> None:
+        """The others and the heading as before; the body on a spline where its speeds fit."""
+        super()._glide(before, after)
+        spot = _posture.spline_at(before, after, self.hero, self.clock)
+        if spot is not None:
+            self.x, self.y = spot
+        self.true_x, self.true_y = self.x, self.y
+
+    def _pose(self, now: float, reports: list[tuple[float, list[dict[str, Any]]]]) -> None:
+        """Look and posture at the real place: tension, gaze, gait and the events of a fight."""
+        if self._posture is None or self._posture_for != self.hero_id:
+            self._posture, self._posture_for = _posture.Posture(self._rng), self.hero_id
+        stamp, bodies = reports[-1]
+        before = {e["id"]: e for e in reports[-2][1]}
+        walking = self.hero_id in self._walkers()
+        view = _posture.View(
+            self.field,
+            self.true_x,
+            self.true_y,
+            self._heading,
+            walking,
+            stamp,
+            bodies,
+            before,
+            self.hero_id,
+        )
+        pose = self._posture.update(now, view)
+        self.x, self.y = self.true_x + pose.dx, self.true_y + pose.dy
+        self.angle, self.tilt = self._heading + pose.yaw, pose.tilt
 
     def _keep_or_choose(self, out: dict[Any, dict[str, Any]]) -> None:
         """Stay with the one that walks; after ``_PATIENCE`` of standing take the next."""
         now = time.monotonic()
-        body = out.get(self.hero_id)
-        if self._walks(body):
+        if self.hero_id in self._walkers():
             self.walked_at = now
             return
-        if self._worth(body) and now - self.walked_at < _PATIENCE:
+        worth = self._worth(out.get(self.hero_id), self._fighters())
+        if worth and now - self.walked_at < _PATIENCE:
             return
         self._take_another(out)
 
     def _take_another(self, out: dict[Any, dict[str, Any]]) -> None:
         """Another body than the one it follows and those the viewer left, if there is any."""
+        walkers, fighters = self._walkers(), self._fighters()
         seen = self.passed | {self.hero_id}
-        fresh = self._choose([b for i, b in out.items() if i not in seen])
+        fresh = self._choose([b for i, b in out.items() if i not in seen], walkers, fighters)
         if not fresh:  # everybody was seen: the round starts again
             self.passed.clear()
-            fresh = self._choose([b for i, b in out.items() if i != self.hero_id])
-        self.hero_id = fresh or self._choose(list(out.values()))
+            others = [b for i, b in out.items() if i != self.hero_id]
+            fresh = self._choose(others, walkers, fighters)
+        self.hero_id = fresh or self._choose(list(out.values()), walkers, fighters)
         self.walked_at = time.monotonic()
+
+    def last(self) -> list[dict[str, Any]]:
+        """The bodies of the stream's last report."""
+        reports = self.stream.reports
+        return reports[-1][1] if reports else []
+
+    def restless(self) -> bool:
+        """Whether nobody has walked in front of the camera for ``_RESTLESS`` seconds."""
+        return time.monotonic() - self.idle_since > _RESTLESS
 
     def skip(self) -> None:
         """The viewer wants another one: the random cam takes the next body in this cube."""
@@ -668,25 +745,58 @@ class Live(Follow):
         self.passed.add(self.hero_id)
         self._take_another({e["id"]: e for e in reports[-1][1]})
 
+    def _walkers(self) -> set[Any]:
+        """Who really went somewhere between an earlier report and the last one.
+
+        By the way made, not by the speed the stream names: a marauder in front of a wall keeps
+        its speed and stays where it is (seen on 19.11.2026: one stood so for a minute).
+        """
+        reports = self.stream.reports
+        if len(reports) < 2:
+            return set()
+        before = {e["id"]: e for e in reports[max(0, len(reports) - 1 - _LOOK_BACK)][1]}
+        walkers = set()
+        for body in reports[-1][1]:
+            old = before.get(body["id"])
+            if old is None or body.get("downed") or old["z"] != body["z"]:
+                continue
+            if math.hypot(body["x"] - old["x"], body["y"] - old["y"]) > _STEP_M:
+                walkers.add(body["id"])
+        return walkers
+
+    def _fighters(self) -> set[Any]:
+        """Who fired lately: whose ``firing`` stamp changed within the last ``_FRESH`` reports.
+
+        ``firing`` holds the subtick of the last shot (a counter for a human's) and stays set
+        for good, so only a change since the report before says "now".
+        """
+        reports = self.stream.reports[-(_FRESH + 1) :]
+        found = set()
+        for (_, old), (_, new) in itertools.pairwise(reports):
+            before = {e["id"]: e.get("firing") for e in old}
+            for body in new:
+                if body.get("firing") and before.get(body["id"], body["firing"]) != body["firing"]:
+                    found.add(body["id"])
+        return found
+
     @staticmethod
-    def _walks(body: dict[str, Any] | None) -> bool:
-        """Whether a body is on its feet and on its way: its speed is not zero."""
+    def _worth(body: dict[str, Any] | None, fighters: Collection[Any] = ()) -> bool:
+        """Whether a body may be shown at all: out, on its feet, and on its way or fighting."""
         if body is None or body.get("downed"):
             return False
-        return bool(body.get("vx") or body.get("vy"))
+        return body["id"] in fighters or body.get("state") == "moving"
 
     @classmethod
-    def _worth(cls, body: dict[str, Any] | None) -> bool:
-        """Whether a body is still worth following: out, on its feet, and walking or fighting."""
-        if body is None or body.get("downed"):
-            return False
-        return cls._walks(body) or bool(body.get("firing")) or body.get("state") == "moving"
-
-    @classmethod
-    def _choose(cls, bodies: list[dict[str, Any]]) -> str:
+    def _choose(
+        cls,
+        bodies: list[dict[str, Any]],
+        walkers: Collection[Any] = (),
+        fighters: Collection[Any] = (),
+    ) -> str:
         """One that walks, in a fight first; else one that fights; ``""`` if there is none."""
-        worth = [b for b in bodies if cls._worth(b)]
-        worth.sort(key=lambda b: (not cls._walks(b), not b.get("firing")))
+        worth = [b for b in bodies if b["id"] in walkers or cls._worth(b, fighters)]
+        worth = [b for b in worth if not b.get("downed")]
+        worth.sort(key=lambda b: (b["id"] not in walkers, b["id"] not in fighters))
         return str(worth[0]["id"]) if worth else ""
 
     def frame(self, width: int, height: int) -> list[tuple[str, str]]:
@@ -793,6 +903,7 @@ class Scope:
 
     def __init__(self, base_url: str, cam: str = RANDOM) -> None:
         self.base_url, self.cam = base_url.rstrip("/"), cam
+        self.fine = False  # half blocks in place of signs: twice the rows, no texture
         self.bodies: list[dict[str, Any]] = []
         self._streams: dict[str, Stream] = {}
         self._camera: Live | None = None
@@ -823,6 +934,26 @@ class Scope:
         """The chosen cam in words, for the frame of the view."""
         return dict(self.cams()).get(self.cam, _ROAMING[RANDOM])
 
+    def caption(self) -> str:
+        """What the marauder the picture follows does right now, as a line under the picture:
+        ``tournament 2 · on watch``. Empty for the flight and while there is no picture."""
+        camera = self._camera
+        if camera is None or self.cam == FLIGHT or camera.note or not camera.hero_id:
+            return ""
+        body = self._body()
+        seen = next((e for e in camera.last() if str(e["id"]) == camera.hero_id), None)
+        if seen is not None and seen.get("downed"):
+            doing = "down"
+        elif camera.hero_id in camera._walkers():
+            doing = "walking"
+        elif camera.hero_id in camera._fighters():
+            doing = "fighting"
+        elif body is not None and body.get("state") == "recovery":
+            doing = "in its berth"
+        else:
+            doing = "on watch"
+        return f"{self.title()} · {doing}"
+
     def step(self) -> None:
         camera = self._live()
         if camera is not None:
@@ -833,7 +964,23 @@ class Scope:
         camera = self._live()
         if camera is None:
             return note_frame(self._why_not(), width, height)
-        return camera.frame(width, height)
+        rows = camera.frame(width, height)
+        line = f" {self.caption()} "
+        if len(line) > 2 and height >= 4 and len(line) <= width and rows:
+            at = (width - len(line)) // 2
+            text, keys = rows[-1]
+            rows[-1] = (
+                text[:at] + line + text[at + len(line) :],
+                keys[:at] + _KEYS["loot"][0] * len(line) + keys[at + len(line) :],
+            )
+        return rows
+
+    def blocks(self, width: int, height: int) -> list[tuple[str, str]] | None:
+        """The picture in half blocks (``blocks``); ``None`` where a line of text is shown."""
+        camera = self._live()
+        if camera is None or camera.note:
+            return None
+        return blocks(camera.frame(width, 2 * height))
 
     def close(self) -> None:
         """End every stream; the view is not shown any more."""

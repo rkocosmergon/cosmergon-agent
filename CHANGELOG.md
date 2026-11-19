@@ -9,11 +9,23 @@
 - Dashboard, through a marauder's eyes: the random cam stood still. It took a marauder "in a
   fight" first, and most marauders that are out stand at their post with a target; of some 130
   in a cube about ten walk at a time. It now takes one that walks, leaves one that has stood
-  for a few seconds, and looks in another cube when nobody walks in this one.
+  for a few seconds, and looks in another cube when nobody walks in this one. "In a fight" was
+  read wrongly as well: the stream's `firing` and `hit` are stamps of the last shot or hit and
+  stay set; only a change counts now.
+- The view ended the dashboard with a division by zero when the camera stood exactly on the line
+  between two squares, which a standing marauder often does. This was in 0.34.0.
 
 ### Added
 
 - `[J]` in the view: jump to another marauder (random cam) or on to the next cube (flight).
+- The camera has a posture. It stays at the marauder's real place and looks like somebody who is
+  awake: mostly ahead, now and then to one side and held, at a foe or at whoever fires, up at a
+  tower, at once towards a shot that hit; its way bends through the reports and its head moves a
+  little with its steps. The more is going on around it, the shorter it holds a look.
+- A line in the picture says what the marauder does: walking, on watch, fighting, down, in its
+  berth.
+- `[B]` in the view: half blocks in place of signs, twice the rows without the texture. The
+  choice is kept in `config.toml` (`[display] scope_blocks`).
 
 ## [0.34.0] — 2026-11-19
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import itertools
 import json
 import logging
 import math
@@ -101,12 +102,14 @@ from cosmergon_agent.config import (
     SCOPE_PLACES,
     AgentEntry,
     display_scope,
+    display_scope_blocks,
     is_onboarding_dismissed,
     load_all_agents,
     load_token,
     save_agent,
     set_active_agent,
     set_display_scope,
+    set_display_scope_blocks,
     set_onboarding_dismissed,
 )
 from cosmergon_agent.exceptions import ConnectionError as CsgConnectionError
@@ -1465,6 +1468,7 @@ _HELP_VIEWS = (
     "[cyan]\\[Y][/cyan]  Eyes: the world through a marauder's eyes — panel, log, full, off",
     "[cyan]\\[N][/cyan]  Eyes: next cam (your marauders, a random one out, a flight)",
     "[cyan]\\[J][/cyan]  Eyes: jump to another marauder (random cam) or cube (flight)",
+    "[cyan]\\[B][/cyan]  Eyes: signs or half blocks (twice the rows, no texture)",
 )
 
 
@@ -2840,7 +2844,9 @@ class ScopeView(Widget):
         self._styles = _scope_styles(theme)
         self._step = 0
         self._rows: list[tuple[str, str]] = []
-        self._rows_for: tuple[int, int, int] | None = None
+        self._rows_for: tuple[int, int, int, bool] | None = None
+        self._halves: list[tuple[str, str]] | None = None
+        self._pairs: dict[tuple[str, str], Style] = {}
         self._rate = 0.0
         self._timer: Any = None
 
@@ -2862,20 +2868,52 @@ class ScopeView(Widget):
         self._step += 1
         self.border_title = f"EYES · {view.title()}"
         if not self.border_subtitle:
-            self.border_subtitle = r"\[N] cam  \[J] other  \[Y] place"
+            self.border_subtitle = r"\[N] cam  \[J] other  \[B] blocks  \[Y] place"
         self.refresh()
 
     def render_line(self, y: int) -> Strip:
         view = self._source()
-        want = (self.size.width, self.size.height, self._step)
-        if view is not None and want != self._rows_for:
-            self._rows, self._rows_for = view.frame(want[0], want[1]), want
-        if view is None or y >= len(self._rows):
+        if view is None:
+            return Strip.blank(self.size.width)
+        want = (self.size.width, self.size.height, self._step, view.fine)
+        if want != self._rows_for:
+            self._halves = view.blocks(want[0], want[1]) if view.fine else None
+            self._rows = [] if self._halves is not None else view.frame(want[0], want[1])
+            self._rows_for = want
+        if self._halves is not None:
+            return self._fine_line(view, y)
+        if y >= len(self._rows):
             return Strip.blank(self.size.width)
         text, keys = self._rows[y]
         runs = _SCOPE_RUN.finditer(keys)
         parts = [Segment(text[m.start() : m.end()], self._styles[m[1]]) for m in runs]
         return Strip(parts, len(text))
+
+    def _pair(self, pair: tuple[str, str]) -> Style:
+        """The style of a half block: its upper colour as the sign's, its lower as the ground."""
+        style = self._pairs.get(pair)
+        if style is None:
+            night = next(iter(self._styles.values())).bgcolor
+            upper, lower = (self._styles[k].color if k != " " else night for k in pair)
+            style = self._pairs[pair] = Style(color=upper, bgcolor=lower)
+        return style
+
+    def _fine_line(self, view: _scope.Scope, y: int) -> Strip:
+        """One row in half blocks; the caption lies as text over the middle of the last one."""
+        rows = self._halves or []
+        if y >= len(rows):
+            return Strip.blank(self.size.width)
+        pairs = list(zip(*rows[y], strict=True))
+        line = f" {view.caption()} " if y == len(rows) - 1 else ""
+        at = (len(pairs) - len(line)) // 2 if 2 < len(line) <= len(pairs) else -1
+        parts: list[Segment] = []
+        for part in (pairs[: max(at, 0)], None, pairs[at + len(line) :]) if at >= 0 else (pairs,):
+            if part is None:
+                parts.append(Segment(line, self._styles[_scope.CAPTION_KEY]))
+                continue
+            for pair, run in itertools.groupby(part):
+                parts.append(Segment("\u2580" * len(list(run)), self._pair(pair)))
+        return Strip(parts, len(pairs))
 
 
 class ScopeScreen(_Dialog):
@@ -2895,7 +2933,7 @@ class ScopeScreen(_Dialog):
 
     def compose(self) -> ComposeResult:
         view = ScopeView(self._source, self._theme, id="scope-full")
-        view.border_subtitle = r"\[N] next cam  \[J] another  \[Y] close"
+        view.border_subtitle = r"\[N] next cam  \[J] another  \[B] blocks  \[Y] close"
         yield view
 
     def on_key(self, event: Any) -> None:
@@ -3065,6 +3103,7 @@ class CosmergonDashboard(_PrivateApp):
         Binding("y", "scope_place", "Eyes", show=False, priority=True),
         Binding("n", "scope_cam", "Cam", show=False, priority=True),
         Binding("j", "scope_skip", "Another", show=False, priority=True),
+        Binding("b", "scope_fine", "Blocks", show=False, priority=True),
         Binding("tab", "cycle_focus", "Focus", show=False, priority=True),
         Binding("k", "show_key", "Key", show=False, priority=True),
         Binding("a", "earn", "Earn", show=False, priority=True),
@@ -5067,7 +5106,7 @@ class CosmergonDashboard(_PrivateApp):
         if isinstance(self.screen, LogScreen):
             return action in ("log_next", "log_screen")
         if isinstance(self.screen, ScopeScreen):
-            return action in ("scope_place", "scope_cam", "scope_skip")
+            return action in ("scope_place", "scope_cam", "scope_skip", "scope_fine")
         return False
 
     @work
@@ -5949,6 +5988,7 @@ class CosmergonDashboard(_PrivateApp):
             self._scope = None
         elif self._scope is None:
             self._scope = _scope.Scope(self.agent.base_url, self._scope_cam or _scope.RANDOM)
+            self._scope.fine = display_scope_blocks()
         self._scope_layout()
         set_display_scope(place, self._scope_cam)
 
@@ -5977,6 +6017,12 @@ class CosmergonDashboard(_PrivateApp):
         """[J] — another one of the same cam: the next marauder, or the next cube in a flight."""
         if self._scope is not None:
             self._scope.skip()
+
+    def action_scope_fine(self) -> None:
+        """[B] — signs or half blocks: the texture, or twice the rows without it."""
+        if self._scope is not None:
+            self._scope.fine = not self._scope.fine
+            set_display_scope_blocks(self._scope.fine)
 
     @work
     async def action_field_view(self) -> None:
