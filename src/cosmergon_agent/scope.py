@@ -484,7 +484,8 @@ class Follow(Pov):
         self.field.marauders = others
 
 
-_RESTLESS = 12.0  # seconds without anybody to follow until the random cam looks elsewhere
+_RESTLESS = 12.0  # seconds without anybody walking until the random cam looks elsewhere
+_PATIENCE = 4.0  # seconds the random cam stays with one that stopped walking
 _DWELL = 60.0  # seconds a flight stays in one cube (konzept-space-night.md: the shortest preset)
 _NEEDS_EXTRA = "this view needs: pip install 'cosmergon-agent[pov]'"
 _LEVEL_AGE = 10.0  # seconds until a level of the world is read again
@@ -580,8 +581,14 @@ class Live(Follow):
     """The camera in the head of a marauder that walks right now.
 
     With ``hero`` it stays with that body and says so when it is not out. Without, it takes
-    one that experiences something: in a fight first, else walking; when that one goes down or
-    home, the next. A second behind the world, so there is always a next report to glide to.
+    one that walks, a walking one in a fight first; when that one goes down, home, or stands
+    for longer than ``_PATIENCE``, the next. Only when nobody walks does it stay with one that
+    stands and fights, and the cube counts as quiet (``restless``). A second behind the world,
+    so there is always a next report to glide to.
+
+    Measured on 19.11.2026 (cos20 #789): of some 130 bodies in a cube about ten walk at a time,
+    while most of the others stand with ``firing`` set. Taking "in a fight" first gave a picture
+    that never moved.
     """
 
     _BEHIND = 1.0
@@ -590,7 +597,9 @@ class Live(Follow):
         self.stream, self.fixed, self.label = stream, hero, label
         self.note = "waiting for the world"
         self.hero_id = hero
-        self.idle_since = time.monotonic()  # since when there was nobody to follow
+        self.idle_since = time.monotonic()  # since when nobody walked in front of the camera
+        self.walked_at = time.monotonic()  # when the one it follows last walked
+        self.passed: set[str] = set()  # those the viewer left with skip(), until all were seen
         super().__init__(Field(side=8), [], "")
 
     def advance(self, seconds: float) -> None:
@@ -603,12 +612,13 @@ class Live(Follow):
         if self.fixed and self.fixed not in out:
             self.note = f"{self.label} is in its berth"
             return
-        if not self.fixed and not self._worth(out.get(self.hero_id)):
-            self.hero_id = self._choose(list(out.values()))
+        if not self.fixed:
+            self._keep_or_choose(out)
         if not self.hero_id:
             self.note = "nobody is out here"
             return
-        self.idle_since = time.monotonic()
+        if self.fixed or self._walks(out[self.hero_id]):
+            self.idle_since = time.monotonic()
         level = out[self.hero_id]["z"]
         field = self.stream.field(int(level // _METRES))
         if field is None:
@@ -629,18 +639,54 @@ class Live(Follow):
         """Whether it is time to look in another cube: nobody to follow for a while."""
         return time.monotonic() - self.idle_since > _RESTLESS
 
+    def _keep_or_choose(self, out: dict[Any, dict[str, Any]]) -> None:
+        """Stay with the one that walks; after ``_PATIENCE`` of standing take the next."""
+        now = time.monotonic()
+        body = out.get(self.hero_id)
+        if self._walks(body):
+            self.walked_at = now
+            return
+        if self._worth(body) and now - self.walked_at < _PATIENCE:
+            return
+        self._take_another(out)
+
+    def _take_another(self, out: dict[Any, dict[str, Any]]) -> None:
+        """Another body than the one it follows and those the viewer left, if there is any."""
+        seen = self.passed | {self.hero_id}
+        fresh = self._choose([b for i, b in out.items() if i not in seen])
+        if not fresh:  # everybody was seen: the round starts again
+            self.passed.clear()
+            fresh = self._choose([b for i, b in out.items() if i != self.hero_id])
+        self.hero_id = fresh or self._choose(list(out.values()))
+        self.walked_at = time.monotonic()
+
+    def skip(self) -> None:
+        """The viewer wants another one: the random cam takes the next body in this cube."""
+        reports = self.stream.reports
+        if self.fixed or not reports:
+            return
+        self.passed.add(self.hero_id)
+        self._take_another({e["id"]: e for e in reports[-1][1]})
+
     @staticmethod
-    def _worth(body: dict[str, Any] | None) -> bool:
-        """Whether a body is still worth following: out, on its feet, and moving or fighting."""
+    def _walks(body: dict[str, Any] | None) -> bool:
+        """Whether a body is on its feet and on its way: its speed is not zero."""
         if body is None or body.get("downed"):
             return False
-        return bool(body.get("firing")) or body.get("state") == "moving"
+        return bool(body.get("vx") or body.get("vy"))
+
+    @classmethod
+    def _worth(cls, body: dict[str, Any] | None) -> bool:
+        """Whether a body is still worth following: out, on its feet, and walking or fighting."""
+        if body is None or body.get("downed"):
+            return False
+        return cls._walks(body) or bool(body.get("firing")) or body.get("state") == "moving"
 
     @classmethod
     def _choose(cls, bodies: list[dict[str, Any]]) -> str:
-        """One that is in a fight, else one that walks; ``""`` if there is none."""
+        """One that walks, in a fight first; else one that fights; ``""`` if there is none."""
         worth = [b for b in bodies if cls._worth(b)]
-        worth.sort(key=lambda b: not b.get("firing"))
+        worth.sort(key=lambda b: (not cls._walks(b), not b.get("firing")))
         return str(worth[0]["id"]) if worth else ""
 
     def frame(self, width: int, height: int) -> list[tuple[str, str]]:
@@ -664,11 +710,16 @@ class Flight(Live):
     def __init__(self, stream: Stream) -> None:
         self.level: int | None = None  # set before the first step, which the base takes
         self.since = time.monotonic()
+        self.leave = False  # the viewer asked for the next cube (skip)
         super().__init__(stream)
         self.note = "flying to the next cube"
 
     def restless(self) -> bool:
-        return time.monotonic() - self.since > _DWELL
+        return self.leave or time.monotonic() - self.since > _DWELL
+
+    def skip(self) -> None:
+        """The viewer wants another one: the flight goes on to the next cube."""
+        self.leave = True
 
     def advance(self, seconds: float) -> None:
         self.step_no += 1
@@ -762,6 +813,11 @@ class Scope:
         keys = [key for key, _ in self.cams()]
         self.cam = keys[(keys.index(self.cam) + 1) % len(keys)] if self.cam in keys else keys[0]
         return self.cam
+
+    def skip(self) -> None:
+        """Another one of the same cam: the next marauder (random), the next cube (flight)."""
+        if self._camera is not None and self.cam in _ROAMING:
+            self._camera.skip()
 
     def title(self) -> str:
         """The chosen cam in words, for the frame of the view."""

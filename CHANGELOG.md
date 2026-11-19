@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.34.1] — 2026-11-19
+
+### Fixed
+
+- Dashboard, through a marauder's eyes: the random cam stood still. It took a marauder "in a
+  fight" first, and most marauders that are out stand at their post with a target; of some 130
+  in a cube about ten walk at a time. It now takes one that walks, leaves one that has stood
+  for a few seconds, and looks in another cube when nobody walks in this one.
+
+### Added
+
+- `[J]` in the view: jump to another marauder (random cam) or on to the next cube (flight).
+
 ## [0.34.0] — 2026-11-19
 
 ### Added

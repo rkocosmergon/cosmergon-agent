@@ -214,6 +214,7 @@ in the dashboard, or when a program of yours does.
 | `v` | Field view |
 | `y` | Eyes: the world through a marauder's eyes — in place of the agent panel, the economy panel or the log, on the full screen, off |
 | `n` | Eyes: the next cam — your marauders one by one, a random marauder that is out, a flight between the cubes |
+| `j` | Eyes: jump to another marauder (random cam) or to the next cube (flight) |
 | `m` | Chat with your agent — or ask your advisor, where one is set up (see below) |
 | `l` | Log: next tab — world, tournament, chat, you |
 | `Shift+l` | Log on the full screen (long messages wrap there) |

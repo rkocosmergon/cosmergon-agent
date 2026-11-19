@@ -1464,6 +1464,7 @@ _HELP_VIEWS = (
     "[cyan]\\[V][/cyan]  View Conway field (zoom, scroll, minimap)",
     "[cyan]\\[Y][/cyan]  Eyes: the world through a marauder's eyes — panel, log, full, off",
     "[cyan]\\[N][/cyan]  Eyes: next cam (your marauders, a random one out, a flight)",
+    "[cyan]\\[J][/cyan]  Eyes: jump to another marauder (random cam) or cube (flight)",
 )
 
 
@@ -2861,7 +2862,7 @@ class ScopeView(Widget):
         self._step += 1
         self.border_title = f"EYES · {view.title()}"
         if not self.border_subtitle:
-            self.border_subtitle = r"\[N] cam  \[Y] place"
+            self.border_subtitle = r"\[N] cam  \[J] other  \[Y] place"
         self.refresh()
 
     def render_line(self, y: int) -> Strip:
@@ -2894,7 +2895,7 @@ class ScopeScreen(_Dialog):
 
     def compose(self) -> ComposeResult:
         view = ScopeView(self._source, self._theme, id="scope-full")
-        view.border_subtitle = r"\[N] next cam  \[Y] close"
+        view.border_subtitle = r"\[N] next cam  \[J] another  \[Y] close"
         yield view
 
     def on_key(self, event: Any) -> None:
@@ -3063,6 +3064,7 @@ class CosmergonDashboard(_PrivateApp):
         # its next cam.
         Binding("y", "scope_place", "Eyes", show=False, priority=True),
         Binding("n", "scope_cam", "Cam", show=False, priority=True),
+        Binding("j", "scope_skip", "Another", show=False, priority=True),
         Binding("tab", "cycle_focus", "Focus", show=False, priority=True),
         Binding("k", "show_key", "Key", show=False, priority=True),
         Binding("a", "earn", "Earn", show=False, priority=True),
@@ -5065,7 +5067,7 @@ class CosmergonDashboard(_PrivateApp):
         if isinstance(self.screen, LogScreen):
             return action in ("log_next", "log_screen")
         if isinstance(self.screen, ScopeScreen):
-            return action in ("scope_place", "scope_cam")
+            return action in ("scope_place", "scope_cam", "scope_skip")
         return False
 
     @work
@@ -5970,6 +5972,11 @@ class CosmergonDashboard(_PrivateApp):
             return
         self._scope_cam = self._scope.next_cam()
         set_display_scope(self._scope_place, self._scope_cam)
+
+    def action_scope_skip(self) -> None:
+        """[J] — another one of the same cam: the next marauder, or the next cube in a flight."""
+        if self._scope is not None:
+            self._scope.skip()
 
     @work
     async def action_field_view(self) -> None:
