@@ -1796,6 +1796,9 @@ class CosmergonAgent:
     ) -> list[dict] | None:
         """Fetch the financial bookings of this agent: market, transfers, evolution, loot.
 
+        Field yield, upkeep and decay are not in this list: they are mechanical bookings,
+        see :meth:`get_energy_events`.
+
         Args:
             limit: At most this many rows, newest first (1-500).
             transaction_type: Only this type, e.g. ``"preset_purchase"``.
