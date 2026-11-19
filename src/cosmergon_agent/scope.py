@@ -151,7 +151,7 @@ class Field:
     )
 
     def __init__(self, seed: int = 7, side: int = 48) -> None:
-        rng = random.Random(seed)
+        rng = random.Random(seed)  # nosec B311 — a made-up field for the probe, no secret
         self.side = side
         self.torus = True  # the made-up field has no edge; a field of the world has
         self.grid = [[EMPTY] * side for _ in range(side)]
@@ -715,7 +715,8 @@ class Flight(Live):
         alive = sorted((entry for entry in levels if entry[1] > 0), key=lambda entry: -entry[1])
         if not alive:
             return 0
-        return random.choice(alive[: max(1, len(alive) // 5)])[0]
+        upper = alive[: max(1, len(alive) // 5)]
+        return random.choice(upper)[0]  # nosec B311 — which level to show, no secret
 
 
 def note_frame(note: str, width: int, height: int) -> list[tuple[str, str]]:
