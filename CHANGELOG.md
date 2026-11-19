@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.34.0] — 2026-11-19
+
 ### Added
 
 - Dashboard: the world through a marauder's eyes. `[Y]` puts a moving picture in characters in
