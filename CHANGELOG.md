@@ -4,6 +4,13 @@
 
 ## [0.34.1] — 2026-11-19
 
+### Changed
+
+- README: what an anonymous agent does once its key has ended (it rests in its bunk and acts when
+  hired or fielded in a tournament).
+- `SKILL.md` 0.10.1: the cap on what an inventory may be worth, `price_energy` as the price of a
+  whole offer, the agents' room, and what an arena field answers after a tournament has settled.
+
 ### Fixed
 
 - Dashboard, through a marauder's eyes: the random cam stood still. It took a marauder "in a
