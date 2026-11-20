@@ -87,6 +87,7 @@ from cosmergon_agent import (
     earn,
     shop,
 )
+from cosmergon_agent import pov_bridge as _bridge
 from cosmergon_agent import pov_place as _pov
 from cosmergon_agent import scope as _scope
 from cosmergon_agent.action import (
@@ -2822,6 +2823,7 @@ def _scope_styles(theme: Theme) -> dict[str, Style]:
 
 
 _ScopeOrNone = _scope.Scope | None
+_ScopeT = _scope.Scope  # the class body's attribute ``_scope`` hides the module there
 _SCOPE_RUN = re.compile(r"(.)\1*", re.DOTALL)
 
 
@@ -2870,8 +2872,14 @@ class ScopeView(Widget):
                 return None
         except Exception:  # not mounted (NoScreen / NoActiveAppError)
             return None
+        if not self._pictured():  # a line of text stands there: nothing may lie over it
+            return None
         area = self.content_region
         return (area.x, area.y, area.width, area.height) if area.width and area.height else None
+
+    def _pictured(self) -> bool:
+        view = self._source()
+        return view is not None and view.pictured()
 
     def _report(self) -> None:
         report = getattr(self.app, "_scope_report", None)
@@ -2904,6 +2912,9 @@ class ScopeView(Widget):
         if view is None or not seen or not (self._extern or self.app.app_focus):
             return
         view.step()
+        push = getattr(self.app, "_scope_push", None)
+        if self._extern and push is not None:
+            push(view)
         self._step += 1
         self.border_title = f"EYES · {view.title()}"
         if not self.border_subtitle:
@@ -2914,7 +2925,7 @@ class ScopeView(Widget):
         view = self._source()
         if view is None:
             return Strip.blank(self.size.width)
-        if self._extern:
+        if self._extern and view.pictured():
             night = next(iter(self._styles.values())).bgcolor
             return Strip.blank(self.size.width, Style(bgcolor=night))
         want = (self.size.width, self.size.height, self._step, view.fine)
@@ -3171,6 +3182,8 @@ class CosmergonDashboard(_PrivateApp):
     _scope_cam: str = ""
     _scope_extern: bool = False  # cos20 #799: a native program draws the view; off, set by tests
     _scope_extern_on: bool = False  # ... and it can: a terminal with pixel sizes, a place to write
+    _scope_bridge: _bridge.Bridge | None = None  # the native program, while it runs (cos20 #799)
+    _scope_bridge_lost: bool = False  # it ended by itself: not started again in this run
 
     def __init__(self, agent: CosmergonAgent, theme: Theme) -> None:
         self._theme = theme  # before super(): the stylesheet reads it through the variables
@@ -6029,6 +6042,7 @@ class CosmergonDashboard(_PrivateApp):
 
     def _scope_extern_apply(self) -> None:
         """Hand the extern mode to the views; the file goes with the mode (cos20 #799)."""
+        self._scope_bridge_sync()
         was = self._scope_extern_on
         on = self._scope_extern and self._scope_extern_possible()
         self._scope_extern_on = on
@@ -6038,6 +6052,46 @@ class CosmergonDashboard(_PrivateApp):
         if was and not on:
             _pov.remove_place()
         self._scope_report()
+
+    def _scope_bridge_sync(self) -> None:
+        """The native program lives while the view is placed somewhere (cos20 #799, P6)."""
+        bridge = self._scope_bridge
+        if bridge is not None and (self._scope_place == "off" or not bridge.alive()):
+            self._scope_bridge_lost = self._scope_bridge_lost or not bridge.alive()
+            self._scope_bridge_end()
+        elif bridge is None and self._scope_place != "off" and not self._scope_bridge_lost:
+            self._scope_bridge_begin()
+
+    def _scope_bridge_begin(self) -> None:
+        path = _bridge.program_path() if self._scope_extern_possible() else None
+        if path is None:
+            return
+        bridge = _bridge.Bridge(path)
+        if bridge.start():
+            self._scope_bridge, self._scope_extern = bridge, True
+        else:
+            self._scope_bridge_lost = True
+
+    def _scope_bridge_end(self) -> None:
+        """Close the program; the character picture is back."""
+        bridge, self._scope_bridge = self._scope_bridge, None
+        if bridge is not None:
+            self._scope_extern = False
+            bridge.close()
+
+    def _scope_push(self, view: _ScopeT) -> None:
+        """Tell the program what the view shows now; when it is gone, the characters return."""
+        bridge = self._scope_bridge
+        if bridge is None:
+            return
+        try:
+            bridge.push(view.sight())
+        except Exception:  # the picture is a courtesy, never a crash here
+            logger.debug("sending the picture failed", exc_info=True)
+        if not bridge.alive():
+            self._scope_bridge_lost = True
+            self._scope_bridge_end()
+            self._scope_extern_apply()
 
     @staticmethod
     def _scope_extern_possible() -> bool:
@@ -6058,6 +6112,7 @@ class CosmergonDashboard(_PrivateApp):
             logger.debug("reporting the place failed", exc_info=True)
 
     def on_unmount(self) -> None:
+        self._scope_bridge_end()
         if self._scope_extern_on:
             _pov.remove_place()
 

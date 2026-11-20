@@ -17,6 +17,7 @@ follows a marauder in it, ``Flight`` flies by itself, ``Scope`` holds the cams t
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 import logging
 import math
@@ -263,6 +264,33 @@ class Field:
                 m[2] += 1.3
 
 
+@dataclasses.dataclass(frozen=True)
+class SightThing:
+    """A marauder or a loot box as an outside reader sees it: a stable key, a place, a facing."""
+
+    key: Any
+    kind: str  # "marauder" or "loot"
+    x: float
+    y: float
+    angle: float  # radians, as the camera's: x = cos, y = sin
+
+
+@dataclasses.dataclass(frozen=True)
+class Sight:
+    """What the view shows, read only: the squares, the camera and the things (cos20 #799).
+
+    ``at(x, y)`` is ``Field.at``: what stands on a square (EMPTY, CELL, OWN, WALL, TOWER).
+    """
+
+    side: int
+    torus: bool
+    at: Callable[[int, int], int]
+    x: float
+    y: float
+    angle: float
+    things: tuple[SightThing, ...]
+
+
 class Pov:
     """The camera "through its eyes": a marauder crosses the field and looks ahead."""
 
@@ -272,6 +300,7 @@ class Pov:
         while not self.field.free(self.x, self.y):
             self.x += 1.0
         self.angle = 0.3
+        self.keys: list[Any] = []  # who the field's marauders are, one key each (when known)
         self.step_no = 0
         self.tilt = 0.0  # the look up (below zero) or down, as a share of the picture's height
         self._turn = 0.0
@@ -291,6 +320,21 @@ class Pov:
         self.step_no += 1
         if self.step_no % _TICK_STEPS == 0:
             self.field.tick()
+
+    def sight(self) -> Sight:
+        """The field, the camera and the things now, for a reader outside (read only)."""
+        marauders = self.field.marauders
+        own = len(self.keys) == len(marauders)
+        things = [
+            SightThing(("m", self.keys[i] if own else i), "marauder", m[0], m[1], m[2])
+            for i, m in enumerate(marauders)
+        ]
+        seen: dict[tuple[float, float], int] = {}
+        for x, y in self.field.loot:  # a loot box never moves: its place is its identity
+            seen[(x, y)] = n = seen.get((x, y), 0) + 1
+            things.append(SightThing(("l", x, y, n), "loot", x, y, 0.0))
+        field = self.field
+        return Sight(field.side, field.torus, field.at, self.x, self.y, self.angle, tuple(things))
 
     def _free(self, off: float) -> float:
         """How far the way is free in a direction, in cells."""
@@ -501,18 +545,20 @@ class Follow(Pov):
         """Put the camera and the others between two reports, by the clock."""
         (t0, old), (t1, new) = before, after
         share = min(1.0, max(0.0, (self.clock - t0) / (t1 - t0))) if t1 > t0 else 1.0
-        others = []
+        others: list[list[float]] = []
+        keys: list[Any] = []
         for key, (x1, y1, vx, vy) in new.items():
             x0, y0 = old.get(key, (x1, y1))[:2]
             x, y = x0 + (x1 - x0) * share, y0 + (y1 - y0) * share
             if key != self.hero:
-                others.append([x, y, 0.0])
+                others.append([x, y, math.atan2(vy, vx) if vx or vy else 0.0])
+                keys.append(key)
                 continue
             self.x, self.y = x, y
             if vx or vy:
                 turn = (math.atan2(vy, vx) - self.angle + math.pi) % (2 * math.pi) - math.pi
                 self.angle += turn * 0.2
-        self.field.marauders = others
+        self.field.marauders, self.keys = others, keys
 
 
 _RESTLESS = 12.0  # seconds without anybody walking until the random cam looks elsewhere
@@ -918,7 +964,9 @@ class Flight(Live):
         self.field = field
         bodies = self.stream.reports[-1][1] if self.stream.reports else []
         here = (b for b in bodies if int(b["z"] // _METRES) == self.level)
-        field.marauders = [[b["x"] / _METRES, b["y"] / _METRES, 0.0] for b in here]
+        here_now = list(here)
+        field.marauders = [[b["x"] / _METRES, b["y"] / _METRES, 0.0] for b in here_now]
+        self.keys = [b["id"] for b in here_now]
         self._fly()
 
     def _fly(self) -> None:
@@ -1029,6 +1077,18 @@ class Scope:
         camera = self._live()
         if camera is not None:
             camera.step()
+
+    def pictured(self) -> bool:
+        """Whether the view shows a picture now, not a line of text that says why there is none."""
+        camera = self._camera
+        return camera is not None and not camera.note
+
+    def sight(self) -> Sight | None:
+        """What the view shows now, read only; ``None`` while it shows a line of text."""
+        camera = self._camera
+        if camera is None or camera.note:
+            return None
+        return camera.sight()
 
     def frame(self, width: int, height: int) -> list[tuple[str, str]]:
         """The picture of the chosen cam, or a line that says why there is none."""
