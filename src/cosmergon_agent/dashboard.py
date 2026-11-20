@@ -87,6 +87,7 @@ from cosmergon_agent import (
     earn,
     shop,
 )
+from cosmergon_agent import pov_place as _pov
 from cosmergon_agent import scope as _scope
 from cosmergon_agent.action import (
     action_done_word,
@@ -2849,9 +2850,46 @@ class ScopeView(Widget):
         self._pairs: dict[tuple[str, str], Style] = {}
         self._rate = 0.0
         self._timer: Any = None
+        self._extern = False
+
+    @property
+    def extern(self) -> bool:
+        """A native program draws the picture over this area (cos20 #799): the area stays empty."""
+        return self._extern
+
+    @extern.setter
+    def extern(self, value: bool) -> None:
+        if value != self._extern:
+            self._extern = value
+            self.refresh()
+
+    def place_cells(self) -> tuple[int, int, int, int] | None:
+        """The content area in terminal cells while this view is what the user sees, else None."""
+        try:
+            if not self.display or self.screen is not self.app.screen:
+                return None
+        except Exception:  # not mounted (NoScreen / NoActiveAppError)
+            return None
+        area = self.content_region
+        return (area.x, area.y, area.width, area.height) if area.width and area.height else None
+
+    def _report(self) -> None:
+        report = getattr(self.app, "_scope_report", None)
+        if self._extern and report is not None:
+            report()
+
+    def on_mount(self) -> None:
+        self._report()
+
+    def on_show(self) -> None:
+        self._report()
+
+    def on_hide(self) -> None:
+        self._report()
 
     def on_resize(self) -> None:
         """The rate follows the size; the timer is set anew only when the rate changes."""
+        self._report()
         large = self.size.width * self.size.height > self.LARGE
         rate = self.RATE_LARGE if large else self.RATE
         if rate != self._rate:
@@ -2861,8 +2899,9 @@ class ScopeView(Widget):
 
     def _tick(self) -> None:
         view = self._source()
-        seen = self.display and self.screen is self.app.screen and self.app.app_focus
-        if view is None or not seen:
+        self._report()
+        seen = self.display and self.screen is self.app.screen
+        if view is None or not seen or not (self._extern or self.app.app_focus):
             return
         view.step()
         self._step += 1
@@ -2875,6 +2914,9 @@ class ScopeView(Widget):
         view = self._source()
         if view is None:
             return Strip.blank(self.size.width)
+        if self._extern:
+            night = next(iter(self._styles.values())).bgcolor
+            return Strip.blank(self.size.width, Style(bgcolor=night))
         want = (self.size.width, self.size.height, self._step, view.fine)
         if want != self._rows_for:
             self._halves = view.blocks(want[0], want[1]) if view.fine else None
@@ -2927,12 +2969,15 @@ class ScopeScreen(_Dialog):
     }
     """
 
-    def __init__(self, source: Callable[[], _scope.Scope | None], theme: Theme) -> None:
+    def __init__(
+        self, source: Callable[[], _scope.Scope | None], theme: Theme, extern: bool = False
+    ) -> None:
         super().__init__()
-        self._source, self._theme = source, theme
+        self._source, self._theme, self._extern = source, theme, extern
 
     def compose(self) -> ComposeResult:
         view = ScopeView(self._source, self._theme, id="scope-full")
+        view.extern = self._extern
         view.border_subtitle = r"\[N] next cam  \[J] another  \[B] blocks  \[Y] close"
         yield view
 
@@ -3124,6 +3169,8 @@ class CosmergonDashboard(_PrivateApp):
     _scope: _ScopeOrNone = None
     _scope_place: str = "off"
     _scope_cam: str = ""
+    _scope_extern: bool = False  # cos20 #799: a native program draws the view; off, set by tests
+    _scope_extern_on: bool = False  # ... and it can: a terminal with pixel sizes, a place to write
 
     def __init__(self, agent: CosmergonAgent, theme: Theme) -> None:
         self._theme = theme  # before super(): the stylesheet reads it through the variables
@@ -5978,6 +6025,41 @@ class CosmergonDashboard(_PrivateApp):
             here = place == name and not klein
             self.query_one(f"#scope-{name}", ScopeView).display = here
             self.query_one(f"#{name}-panel", Static).display = not here and not klein
+        self._scope_extern_apply()
+
+    def _scope_extern_apply(self) -> None:
+        """Hand the extern mode to the views; the file goes with the mode (cos20 #799)."""
+        was = self._scope_extern_on
+        on = self._scope_extern and self._scope_extern_possible()
+        self._scope_extern_on = on
+        for screen in self.screen_stack:
+            for view in screen.query(ScopeView):
+                view.extern = on
+        if was and not on:
+            _pov.remove_place()
+        self._scope_report()
+
+    @staticmethod
+    def _scope_extern_possible() -> bool:
+        return _pov.cell_pixels(_pov.terminal_fd()) is not None and _pov.place_path() is not None
+
+    def _scope_report(self) -> None:
+        """Write where the empty area lies: the displayed view's, or ``visible: false``."""
+        terminal = _pov.cell_pixels(_pov.terminal_fd())
+        if not self._scope_extern_on or terminal is None:
+            return
+        try:
+            cells = None
+            for view in self.screen.query(ScopeView):
+                if view.extern and (cells := view.place_cells()) is not None:
+                    break
+            _pov.write_place(_pov.build_place(cells is not None, cells or (0, 0, 0, 0), terminal))
+        except Exception:  # the place is a courtesy to another program, never a crash here
+            logger.debug("reporting the place failed", exc_info=True)
+
+    def on_unmount(self) -> None:
+        if self._scope_extern_on:
+            _pov.remove_place()
 
     def _scope_set(self, place: str) -> None:
         """Move the view to ``place``; the streams end when it is shown nowhere."""
@@ -6002,7 +6084,9 @@ class CosmergonDashboard(_PrivateApp):
         nach = SCOPE_PLACES[(SCOPE_PLACES.index(self._scope_place) + 1) % len(SCOPE_PLACES)]
         self._scope_set(nach)
         if nach == "full":
-            await self.push_screen_wait(ScopeScreen(self._scope_source, self._theme))
+            await self.push_screen_wait(
+                ScopeScreen(self._scope_source, self._theme, self._scope_extern_on)
+            )
             self._scope_set("off")
 
     def action_scope_cam(self) -> None:
