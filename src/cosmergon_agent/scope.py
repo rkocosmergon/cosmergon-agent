@@ -159,6 +159,10 @@ def _rect(value: Any) -> tuple[int, int, int, int]:
     return x0, y0, x1, y1
 
 
+_SIDE_LEAST = 8  # squares: the smallest field the picture is built for
+_SIDE_MOST = 1024  # squares: eight times the widest field of the world (128)
+
+
 class Field:
     """A made-up field: a square torus of living cells, some walls and towers, things on it."""
 
@@ -195,7 +199,8 @@ class Field:
     @classmethod
     def from_level(cls, level: dict[str, Any]) -> Field:
         """A field as the world's public spectator route gives it: cells, walls, towers, loot."""
-        field = cls(side=int(level.get("field_width") or 128))
+        # The side is the world's number; a field of side n is n * n squares (0.34.3).
+        field = cls(side=min(max(_SIDE_LEAST, int(level.get("field_width") or 128)), _SIDE_MOST))
         n, field.torus = field.side, False
         field.grid = [[EMPTY] * n for _ in range(n)]
         for at in level.get("cells") or {}:
@@ -528,10 +533,15 @@ _OPEN_SECONDS = 20.0  # for the connection to stand, like the reading requests b
 _BODIES = 1000  # entries of one message that are looked at
 
 
+_PLACE_KEYS = ("x", "y", "z", "vx", "vy")
+_FAR_M = 1e6  # metres: far beyond any cube, and small enough for every sum of the picture
+
+
 def _marauders(message: str | bytes) -> list[dict[str, Any]]:
     """The marauders of one message of the stream, every text in them printable.
 
-    Only entries that are objects count, and only the first ``_BODIES``. What is no JSON, not
+    Only entries that are objects count, only the first ``_BODIES``, and only whole ones
+    (``_whole``). What is no JSON, not
     finite or no object at the top raises ``ValueError``; the stream then opens again.
     """
     import json
@@ -544,7 +554,25 @@ def _marauders(message: str | bytes) -> list[dict[str, Any]]:
         raise ValueError("the stream's message is no object")
     found = read.get("entities")
     entries = found[:_BODIES] if isinstance(found, list) else []
-    return [e for e in entries if isinstance(e, dict) and e.get("kind") == "marauder"]
+    return [e for e in entries if isinstance(e, dict) and e.get("kind") == "marauder" and _whole(e)]
+
+
+def _whole(body: dict[str, Any]) -> bool:
+    """Whether a body carries what the picture reckons with: who it is, where, and how fast.
+
+    Until 0.34.2 a body without ``id``, or with a text or a number of 400 digits as its ``x``,
+    stopped the picture for as long as the stream named it (cos20 #492, K56). It is left out now.
+    """
+    name = body.get("id")
+    if not isinstance(name, str) or not name:
+        return False
+    for key in _PLACE_KEYS:
+        value = body.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        if not -_FAR_M <= value <= _FAR_M:  # also false for nan
+            return False
+    return True
 
 
 class Stream(threading.Thread):

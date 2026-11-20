@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.34.3] — 2026-11-20
+
+### Fixed
+
+- The 3D view left out no body of the stream that it could not reckon with: one without `id`, or
+  with a text or a number of 400 digits as its place, stopped the picture for as long as the
+  stream named it. Such a body is left out now and the picture goes on.
+- The side of a level's field is held within 1,024 squares; it was taken as the world named it.
+
 ## [0.34.2] — 2026-11-20
 
 ### Fixed
