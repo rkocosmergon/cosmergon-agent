@@ -520,12 +520,42 @@ _LEVEL_AGE = 10.0  # seconds until a level of the world is read again
 _REPORTS_KEPT = 40
 _FRESH = 4  # reports (about two seconds) within which a changed ``firing`` stamp is a fight
 
+# The stream's door (0.34.2, cos20 #492): what ``_http`` is for every HTTP answer. The largest
+# message of the four busiest cubes was 51,778 bytes with 161 bodies (production, 20.11.2026).
+_MESSAGE_BYTES = 256 * 1024  # one message, as it is: the connection is asked for unpacked
+_MESSAGES_WAITING = 4  # read but not yet taken; the picture only wants the newest
+_OPEN_SECONDS = 20.0  # for the connection to stand, like the reading requests beside it
+_BODIES = 1000  # entries of one message that are looked at
+
+
+def _marauders(message: str | bytes) -> list[dict[str, Any]]:
+    """The marauders of one message of the stream, every text in them printable.
+
+    Only entries that are objects count, and only the first ``_BODIES``. What is no JSON, not
+    finite or no object at the top raises ``ValueError``; the stream then opens again.
+    """
+    import json
+
+    from cosmergon_agent._http import _finite, _no_constant
+    from cosmergon_agent.state import _texts
+
+    read = _texts(json.loads(message, parse_constant=_no_constant, parse_float=_finite))
+    if not isinstance(read, dict):
+        raise ValueError("the stream's message is no object")
+    found = read.get("entities")
+    entries = found[:_BODIES] if isinstance(found, list) else []
+    return [e for e in entries if isinstance(e, dict) and e.get("kind") == "marauder"]
+
 
 class Stream(threading.Thread):
     """Reads the world's public entity stream of one cube, and levels of it, beside the picture.
 
     Nothing is sent but the two reading requests; no key, no name. An error ends neither the
     thread nor the terminal: it stands in ``error`` and the stream is opened again.
+
+    The stream has a door like every HTTP answer of the SDK (``_http``): asked for unpacked, one
+    message at most ``_MESSAGE_BYTES``, at most ``_MESSAGES_WAITING`` waiting, ``_OPEN_SECONDS``
+    to stand, and after ``_http.ANSWER_BYTES`` it ends and opens again. Its texts are printable.
     """
 
     def __init__(self, base_url: str, cube: str) -> None:
@@ -552,19 +582,32 @@ class Stream(threading.Thread):
             time.sleep(5.0)
 
     async def _read(self) -> None:
-        import json
-
         import websockets
 
+        from cosmergon_agent._http import ANSWER_BYTES
+
         url = f"{self.base_url.replace('http', 'ws', 1)}/ws/entities/{self.cube}"
-        async with websockets.connect(url) as ws:
+        seen = 0
+        async with websockets.connect(
+            url,
+            compression=None,
+            max_size=_MESSAGE_BYTES,
+            max_queue=_MESSAGES_WAITING,
+            open_timeout=_OPEN_SECONDS,
+        ) as ws:
             async for message in ws:
                 if self.closed:
                     return
-                found = json.loads(message).get("entities") or []
-                bodies = [e for e in found if e.get("kind") == "marauder"]
-                self.reports = [*self.reports[-_REPORTS_KEPT:], (time.monotonic(), bodies)]
-                self.error = ""
+                seen += len(message)
+                if seen > ANSWER_BYTES:  # like a live event stream: it ends and opens again
+                    return
+                self.take(message)
+
+    def take(self, message: str | bytes) -> None:
+        """One message of the stream becomes the newest report."""
+        bodies = _marauders(message)
+        self.reports = [*self.reports[-_REPORTS_KEPT:], (time.monotonic(), bodies)]
+        self.error = ""
 
     def field(self, level: int) -> Field | None:
         """The level's field, read again when it is old; ``None`` until the first answer."""

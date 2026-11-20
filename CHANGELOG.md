@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.34.2] — 2026-11-20
+
+### Fixed
+
+- The 3D view's stream (`scope.Stream`, the extra `pov`) now has a door like every HTTP answer of
+  the SDK: the connection is asked for unpacked, one message may be 256 KiB, four may wait, the
+  connection has 20 seconds to stand, and after 8 MiB it ends and opens again. Entries that are
+  no objects are left out, at most 1,000 are looked at, and every text in them is printable.
+  Until now the stream ran with the library's defaults and took packed messages.
+
 ## [0.34.1] — 2026-11-19
 
 ### Changed
