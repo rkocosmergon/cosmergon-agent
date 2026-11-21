@@ -11,6 +11,7 @@ Stdlib only, no Textual. Nothing here raises into the dashboard.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import select
@@ -20,6 +21,8 @@ import time
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from cosmergon_agent import pov_place
 
 if TYPE_CHECKING:
     from cosmergon_agent.scope import Sight
@@ -88,6 +91,62 @@ def program_path() -> Path | None:
     if not os.access(real, os.X_OK) or not _ours(file_info, uid) or not _ours(dir_info, uid):
         return None
     return real
+
+
+# --- the window follower ------------------------------------------------------------------------
+
+_FOLLOW_FILE = "pov-follow.json"  # next to the place file; written by the follower program
+_FOLLOW_MOST = 4096  # bytes read of that file
+
+
+def _follow_pid(uid: int) -> int | None:
+    """The pid in the follower's file, or None unless the file is ours and well formed."""
+    place = pov_place.place_path()
+    if place is None:
+        return None
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(place.with_name(_FOLLOW_FILE), flags)
+    except (OSError, ValueError):
+        return None
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != uid:
+            return None
+        if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            return None
+        data = json.loads(os.read(fd, _FOLLOW_MOST))
+    except (OSError, ValueError, RecursionError):  # deep nesting fits into 4096 bytes
+        return None
+    finally:
+        os.close(fd)
+    pid = data.get("pid") if isinstance(data, dict) else None
+    return pid if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0 else None
+
+
+def follower_alive() -> bool:
+    """True when the follower program (it lays the window over the placeholder) lives.
+
+    It says so in ``$XDG_RUNTIME_DIR/cosmergon/pov-follow.json`` (a regular file of ours that
+    group and others cannot write) with its ``pid``; that process must exist and be ours.
+    Anything else, and any error, is False.
+    """
+    uid = _uid()
+    if uid is None:
+        return False
+    pid = _follow_pid(uid)
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, 0)
+    except (OSError, OverflowError):  # gone, not ours, or no such number
+        return False
+    return True
+
+
+def window_allowed() -> bool:
+    """May the program be started? With a follower, or when the window is asked for beside."""
+    return os.environ.get("COSMERGON_POV_WINDOW") == "beside" or follower_alive()
 
 
 # --- the translation ----------------------------------------------------------------------------

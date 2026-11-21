@@ -2908,6 +2908,9 @@ class ScopeView(Widget):
     def _tick(self) -> None:
         view = self._source()
         self._report()
+        poll = getattr(self.app, "_scope_window_poll", None)
+        if poll is not None:
+            poll()
         seen = self.display and self.screen is self.app.screen
         if view is None or not seen or not (self._extern or self.app.app_focus):
             return
@@ -3184,6 +3187,9 @@ class CosmergonDashboard(_PrivateApp):
     _scope_extern_on: bool = False  # ... and it can: a terminal with pixel sizes, a place to write
     _scope_bridge: _bridge.Bridge | None = None  # the native program, while it runs (cos20 #799)
     _scope_bridge_lost: bool = False  # it ended by itself: not started again in this run
+    _scope_window_at: float = -1e9  # monotonic time of the last ``window_allowed`` question ...
+    _scope_window_val: bool = False  # ... and its answer
+    _scope_window_seen: bool = False  # the answer the bridge was last brought in line with
 
     def __init__(self, agent: CosmergonAgent, theme: Theme) -> None:
         self._theme = theme  # before super(): the stylesheet reads it through the variables
@@ -6056,13 +6062,33 @@ class CosmergonDashboard(_PrivateApp):
     def _scope_bridge_sync(self) -> None:
         """The native program lives while the view is placed somewhere (cos20 #799, P6)."""
         bridge = self._scope_bridge
-        if bridge is not None and (self._scope_place == "off" or not bridge.alive()):
+        if bridge is not None and (
+            self._scope_place == "off" or not bridge.alive() or not self._scope_window_ok()
+        ):  # no follower any more is no loss: it may come back
             self._scope_bridge_lost = self._scope_bridge_lost or not bridge.alive()
             self._scope_bridge_end()
         elif bridge is None and self._scope_place != "off" and not self._scope_bridge_lost:
             self._scope_bridge_begin()
 
+    def _scope_window_ok(self) -> bool:
+        """``window_allowed`` asked at most once a second (the files are read, the tick is fast)."""
+        now = time.monotonic()
+        if now - self._scope_window_at >= 1.0:
+            self._scope_window_at, self._scope_window_val = now, _bridge.window_allowed()
+        return self._scope_window_val
+
+    def _scope_window_poll(self) -> None:
+        """Follow the follower: when its coming or going is seen, the program starts or ends."""
+        if self._scope_place == "off":
+            return
+        ok = self._scope_window_ok()
+        if ok != self._scope_window_seen:
+            self._scope_window_seen = ok
+            self._scope_extern_apply()
+
     def _scope_bridge_begin(self) -> None:
+        if not self._scope_window_ok():  # not lost: the follower may come later
+            return
         path = _bridge.program_path() if self._scope_extern_possible() else None
         if path is None:
             return
