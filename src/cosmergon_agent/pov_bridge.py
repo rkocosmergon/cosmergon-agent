@@ -41,8 +41,10 @@ _CHARS = {0: ".", 1: "#", 2: "#", 3: "=", 4: "T"}  # _posture: EMPTY, CELL, OWN,
 _CHARS_OWN = {**_CHARS, 2: "O"}  # for a program that knows its own kind of square
 # What a program may be able to do beyond the first protocol, named in its ``capabilities`` file:
 # ``own`` (``O`` in a row, ``own`` as a kind), ``origin``, ``daytime``, ``clouds``, ``world``
-# (``world``, ``cube`` and ``nocube`` lines).
-CAPABILITIES = frozenset({"own", "origin", "daytime", "clouds", "world"})
+# (``world``, ``cube`` and ``nocube`` lines), ``kinds`` (the kinds of thing ``monster``, ``bird``
+# and ``corpse``; a ``thing`` line may give a known id another kind).
+CAPABILITIES = frozenset({"own", "origin", "daytime", "clouds", "world", "kinds"})
+_LIKE_MARAUDER = frozenset({"monster", "bird"})  # what a program without ``kinds`` draws so
 _CAPS_FILE = "capabilities"  # next to the program; a program without it gets the first protocol
 _CAPS_MOST = 1024  # bytes read of that file
 _THEME_NAME = re.compile(r"[a-z0-9]{1,32}")
@@ -286,16 +288,29 @@ class Window:
         """The things in the window, the nearest ``MAX_THINGS``: key -> (kind, "x y angle")."""
         found = []
         for thing in sight.things:
+            kind = self._kind(thing.kind)
             at = _place(sight, origin, thing.x, thing.y)
-            if at is not None and math.isfinite(thing.angle):
+            if kind is not None and at is not None and math.isfinite(thing.angle):
                 far = (thing.x - sight.x) ** 2 + (thing.y - sight.y) ** 2
-                found.append((far, repr(thing.key), thing, at))
+                found.append((far, repr(thing.key), thing, kind, at))
         found.sort(key=lambda item: item[:2])
         out = {}
-        for _, _, thing, (px, py) in found[:MAX_THINGS]:
-            out[thing.key] = (thing.kind, f"{_num(px, _POS_MOST)} {_num(py, _POS_MOST)} "
+        for _, _, thing, kind, (px, py) in found[:MAX_THINGS]:
+            out[thing.key] = (kind, f"{_num(px, _POS_MOST)} {_num(py, _POS_MOST)} "
                               f"{_angle(thing.angle)}")  # fmt: skip
         return out
+
+    def _kind(self, kind: str) -> str | None:
+        """The kind the program is told, or None for a thing it must not be told of.
+
+        Without ``kinds`` a monster or a bird is a marauder (the only figure it has), and a
+        body that is down is not sent at all: a lying body must not show up standing.
+        """
+        if "kinds" in self._caps:
+            return kind
+        if kind == "corpse":
+            return None
+        return "marauder" if kind in _LIKE_MARAUDER else kind
 
     def _thing_lines(self, things: dict[object, tuple[str, str]], full: bool) -> list[str]:
         """``gone`` for those that left, ``thing`` for those new or changed (all when ``full``)."""
@@ -331,7 +346,7 @@ def _whole(*values: object) -> bool:
     return all(isinstance(v, int) and not isinstance(v, bool) for v in values)
 
 
-def _cube_ok(x: int, y: int, z: int, dim: int) -> bool:
+def cube_ok(x: int, y: int, z: int, dim: int) -> bool:
     """Whether the program takes a cube at this grid position with this edge."""
     return (
         _whole(x, y, z, dim)
@@ -364,7 +379,7 @@ class _WorldTold:
         cube = (0, 0, 0) if world.cube is None else world.cube  # the program's own default
         here = (*cube, world.level, world.dim)
         level_ok = _whole(world.level) and 0 <= world.level < world.dim
-        if not (_cube_ok(*cube, world.dim) and level_ok):
+        if not (cube_ok(*cube, world.dim) and level_ok):
             return []
         out = []
         if here != self._told:
@@ -378,7 +393,7 @@ class _WorldTold:
         """The neighbours the program takes, the nearest ``MAX_CUBES`` by grid distance."""
         found: dict[object, tuple[int, ...]] = {}
         for key, *place in world.neighbours:
-            if len(place) == 4 and _cube_ok(*place) and tuple(place[:3]) != cube:
+            if len(place) == 4 and cube_ok(*place) and tuple(place[:3]) != cube:
                 found.setdefault(key, tuple(place))
         cx, cy, cz = cube
 

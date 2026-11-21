@@ -25,10 +25,11 @@ import random
 import re
 import threading
 import time
+import uuid
 from collections.abc import Callable, Collection
 from typing import Any
 
-from cosmergon_agent import _posture
+from cosmergon_agent import _posture, pov_bridge
 from cosmergon_agent._posture import CELL, EMPTY, OWN, TOWER, WALL  # what stands on a square
 
 # Sizes in cells, as the browser's first-person view has them (marauder.js: cell 4 m, eye
@@ -269,7 +270,10 @@ class SightThing:
     """A marauder or a loot box as an outside reader sees it: a stable key, a place, a facing."""
 
     key: Any
-    kind: str  # "marauder" or "loot"
+    # "marauder", "monster", "bird" (a thief bird), "loot", or "corpse" for a body that is down
+    # (of any kind: it lies where it fell and does not turn, angle 0). The key stays the same
+    # when a body goes down, so a reader sees the same thing change its kind.
+    kind: str
     x: float
     y: float
     angle: float  # radians, as the camera's: x = cos, y = sin
@@ -281,8 +285,8 @@ class SightWorld:
 
     ``level`` is the field's level in its cube and ``dim`` the cube's edge in cells. ``cube`` is
     the cube's grid position in its room, ``None`` while it is not known; ``neighbours`` are the
-    other cubes of the room as ``(key, x, y, z, dim)``. The public render routes name neither
-    the grid position nor the room, so a caller that knows them hands them in (``Live.places``).
+    other cubes of the room as ``(key, x, y, z, dim)``. ``Stream.locate`` reads them from the
+    world (the cube's meta and its room); a caller that knows better sets ``Live.places``.
     """
 
     level: int
@@ -309,6 +313,18 @@ class Sight:
     world: SightWorld | None = None
 
 
+@dataclasses.dataclass(frozen=True)
+class _Being:
+    """A body of the stream the picture here does not draw but a reader outside sees."""
+
+    key: Any
+    kind: str  # "monster" or "bird"
+    x: float
+    y: float
+    angle: float
+    downed: bool
+
+
 class Pov:
     """The camera "through its eyes": a marauder crosses the field and looks ahead."""
 
@@ -319,6 +335,11 @@ class Pov:
             self.x += 1.0
         self.angle = 0.3
         self.keys: list[Any] = []  # who the field's marauders are, one key each (when known)
+        # The reader outside also sees what the drawer here does not: bodies that are no
+        # marauder (``foes``) and which of the marauders are down (``down``, by key).
+        self.foes: list[_Being] = []
+        self.down: frozenset[Any] = frozenset()
+        self.traits: dict[Any, tuple[str, bool]] = {}  # id -> (sight kind, down) of the report
         self.step_no = 0
         self.tilt = 0.0  # the look up (below zero) or down, as a share of the picture's height
         self._turn = 0.0
@@ -343,10 +364,15 @@ class Pov:
         """The field, the camera and the things now, for a reader outside (read only)."""
         marauders = self.field.marauders
         own = len(self.keys) == len(marauders)
-        things = [
-            SightThing(("m", self.keys[i] if own else i), "marauder", m[0], m[1], m[2])
-            for i, m in enumerate(marauders)
-        ]
+        things = []
+        for i, m in enumerate(marauders):
+            key = self.keys[i] if own else i
+            lying = own and key in self.down
+            kind, angle = ("corpse", 0.0) if lying else ("marauder", m[2])
+            things.append(SightThing(("m", key), kind, m[0], m[1], angle))
+        for b in self.foes:
+            kind, angle = ("corpse", 0.0) if b.downed else (b.kind, b.angle)
+            things.append(SightThing(("m", b.key), kind, b.x, b.y, angle))
         seen: dict[tuple[float, float], int] = {}
         for x, y in self.field.loot:  # a loot box never moves: its place is its identity
             seen[(x, y)] = n = seen.get((x, y), 0) + 1
@@ -519,6 +545,37 @@ class Pov:
                     cols[x][1][row] = shade
 
 
+# Body radii in metres (cos20 backend/app/core/movement_profiles.py, ``hitbox_radius``): the
+# server keeps living bodies apart by the sum of two of them.
+_RADIUS_M = {"marauder": 0.6, "monster": 0.9, "bird": 0.8}
+
+
+def _kept_off(
+    spot: tuple[float, float],
+    straight: tuple[float, float],
+    living: list[tuple[float, float, float]],
+) -> tuple[float, float]:
+    """The point of the way from ``straight`` to ``spot`` that is the last one not nearer to
+    any body of ``living`` (``(x, y, reach)``) than ``straight`` is or its ``reach``.
+
+    A spline through the reports swings out a little between them; where that would put the
+    camera into a body the server holds apart, it stops at the edge of that body's circle.
+    """
+    dx, dy = spot[0] - straight[0], spot[1] - straight[1]
+    a = dx * dx + dy * dy
+    share = 1.0
+    for bx, by, reach in living:
+        fx, fy = straight[0] - bx, straight[1] - by
+        near = min(reach, math.hypot(fx, fy))
+        toward = fx * dx + fy * dy
+        disc = toward * toward - a * max(0.0, fx * fx + fy * fy - near * near)
+        if a > 0 and disc > 0:
+            entry = (-toward - math.sqrt(disc)) / a  # where the way meets the circle
+            if -1e-9 <= entry < share:
+                share = max(entry, 0.0)
+    return straight[0] + dx * share, straight[1] + dy * share
+
+
 _Report = tuple[float, dict[str, Any]]  # seconds, {id: (x, y, vx, vy)} in cells
 _METRES = _posture.CELL_M  # a cell is 4 m (marauder.js CELL_SIZE); the stream speaks in metres
 
@@ -565,18 +622,28 @@ class Follow(Pov):
         share = min(1.0, max(0.0, (self.clock - t0) / (t1 - t0))) if t1 > t0 else 1.0
         others: list[list[float]] = []
         keys: list[Any] = []
+        foes: list[_Being] = []
+        down: set[Any] = set()
         for key, (x1, y1, vx, vy) in new.items():
             x0, y0 = old.get(key, (x1, y1))[:2]
             x, y = x0 + (x1 - x0) * share, y0 + (y1 - y0) * share
             if key != self.hero:
-                others.append([x, y, math.atan2(vy, vx) if vx or vy else 0.0])
+                kind, downed = self.traits.get(key, ("marauder", False))
+                angle = math.atan2(vy, vx) if vx or vy else 0.0
+                if kind != "marauder":
+                    foes.append(_Being(key, kind, x, y, angle, downed))
+                    continue
+                others.append([x, y, angle])
                 keys.append(key)
+                if downed:
+                    down.add(key)
                 continue
             self.x, self.y = x, y
             if vx or vy:
                 turn = (math.atan2(vy, vx) - self.angle + math.pi) % (2 * math.pi) - math.pi
                 self.angle += turn * 0.2
         self.field.marauders, self.keys = others, keys
+        self.foes, self.down = foes, frozenset(down)
 
 
 _RESTLESS = 12.0  # seconds without anybody walking until the random cam looks elsewhere
@@ -587,6 +654,11 @@ _DWELL = 60.0  # seconds a flight stays in one cube (konzept-space-night.md: the
 _NEEDS_EXTRA = "this view needs: pip install 'cosmergon-agent[pov]'"
 _LEVEL_AGE = 10.0  # seconds until a level of the world is read again
 _REPORTS_KEPT = 40
+# Where the cube lies in its room is asked once per stream (so once per cube shown). When that
+# does not work (an older server that names no position, a network error) it is asked again
+# only after this many seconds: two small reads every five minutes, never one per picture.
+_PLACE_RETRY = 300.0
+_ROOM_CUBES = 4096  # cubes of a room's answer that are looked at
 _FRESH = 4  # reports (about two seconds) within which a changed ``firing`` stamp is a fight
 
 # The stream's door (0.34.2, cos20 #492): what ``_http`` is for every HTTP answer. The largest
@@ -601,8 +673,12 @@ _PLACE_KEYS = ("x", "y", "z", "vx", "vy")
 _FAR_M = 1e6  # metres: far beyond any cube, and small enough for every sum of the picture
 
 
-def _marauders(message: str | bytes) -> list[dict[str, Any]]:
-    """The marauders of one message of the stream, every text in them printable.
+_SIGHT_KIND = {"marauder": "marauder", "monster": "monster", "thief_bird": "bird"}
+
+
+def _bodies(message: str | bytes) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The bodies of one message of the stream, every text in them printable: the marauders
+    and, apart, the monsters and thief birds.
 
     Only entries that are objects count, only the first ``_BODIES``, and only whole ones
     (``_whole``). What is no JSON, not
@@ -618,7 +694,9 @@ def _marauders(message: str | bytes) -> list[dict[str, Any]]:
         raise ValueError("the stream's message is no object")
     found = read.get("entities")
     entries = found[:_BODIES] if isinstance(found, list) else []
-    return [e for e in entries if isinstance(e, dict) and e.get("kind") == "marauder" and _whole(e)]
+    whole = [e for e in entries if isinstance(e, dict) and _whole(e)]
+    marauders = [e for e in whole if e.get("kind") == "marauder"]
+    return marauders, [e for e in whole if e.get("kind") in ("monster", "thief_bird")]
 
 
 def _whole(body: dict[str, Any]) -> bool:
@@ -639,6 +717,44 @@ def _whole(body: dict[str, Any]) -> bool:
     return True
 
 
+def _meta_place(meta: Any) -> tuple[tuple[int, int, int, int] | None, str | None]:
+    """The cube's grid place and edge, and its room's id, from the answer of
+    ``/render/iso/cube/<id>``. ``None`` for what is missing or no valid value: an older server
+    names neither, and everything from the net is data (whole numbers, not truth values)."""
+    if not isinstance(meta, dict):
+        return None, None
+    place = (meta.get("cube_x"), meta.get("cube_y"), meta.get("cube_z"), meta.get("size_x"))
+    own = tuple(place) if pov_bridge.cube_ok(*place) else None  # type: ignore[arg-type]
+    return own, _uuid(meta.get("space_id"))  # type: ignore[return-value]
+
+
+def _uuid(value: Any) -> str | None:
+    """A UUID as its text, or None; the room's id goes into a path, so only this shape does."""
+    try:
+        return str(uuid.UUID(value)) if isinstance(value, str) else None
+    except ValueError:
+        return None
+
+
+def _room_places(room: Any, edge: int, own: str) -> dict[str, tuple[int, int, int, int]]:
+    """The other cubes of a room as ``id -> (x, y, z, edge)`` from ``/universe/rooms/<id>/detail``.
+
+    The cubes of a room share one edge (``Space.cube_dimension``, models/space.py), so the
+    edge of the cube shown is theirs; the answer names none per cube. Cubes without a grid
+    place, with a value out of bounds, or without an id are left out.
+    """
+    cubes = room.get("cubes") if isinstance(room, dict) else None
+    found: dict[str, tuple[int, int, int, int]] = {}
+    for cube in cubes[:_ROOM_CUBES] if isinstance(cubes, list) else []:
+        if not isinstance(cube, dict):
+            continue
+        ident = _uuid(cube.get("id"))
+        place = (cube.get("cube_x"), cube.get("cube_y"), cube.get("cube_z"), edge)
+        if ident is not None and ident != _uuid(own) and pov_bridge.cube_ok(*place):  # type: ignore[arg-type]
+            found.setdefault(ident, place)  # type: ignore[arg-type]
+    return found
+
+
 class Stream(threading.Thread):
     """Reads the world's public entity stream of one cube, and levels of it, beside the picture.
 
@@ -654,11 +770,19 @@ class Stream(threading.Thread):
         super().__init__(daemon=True)
         self.base_url, self.cube = base_url.rstrip("/"), cube
         self.reports: list[tuple[float, list[dict[str, Any]]]] = []
+        # Monsters and thief birds of the same messages, under the same stamps as ``reports``
+        # (only a reader outside sees them; no choice of a camera ever looks at them).
+        self.beings: list[tuple[float, list[dict[str, Any]]]] = []
         self.error = ""
         self.closed = False
         self._fields: dict[int, tuple[float, Field | None]] = {}
         self._levels: list[tuple[int, int]] | None = None
         self._levels_asked = False
+        # cube id -> (grid x, y, z, edge): this cube and the others of its room, once known
+        self.places: dict[str, tuple[int, int, int, int]] = {}
+        self._place_next = -math.inf  # monotonic time before which it is not asked (again)
+        self._place_busy = False
+        self._place_thread: threading.Thread | None = None
 
     def run(self) -> None:
         import asyncio
@@ -697,8 +821,10 @@ class Stream(threading.Thread):
 
     def take(self, message: str | bytes) -> None:
         """One message of the stream becomes the newest report."""
-        bodies = _marauders(message)
-        self.reports = [*self.reports[-_REPORTS_KEPT:], (time.monotonic(), bodies)]
+        bodies, beings = _bodies(message)
+        stamp = time.monotonic()
+        self.reports = [*self.reports[-_REPORTS_KEPT:], (stamp, bodies)]
+        self.beings = [*self.beings[-_REPORTS_KEPT:], (stamp, beings)]
         self.error = ""
 
     def field(self, level: int) -> Field | None:
@@ -715,6 +841,38 @@ class Stream(threading.Thread):
             self._levels_asked = True
             threading.Thread(target=self._load_levels, daemon=True).start()
         return self._levels
+
+    def locate(self) -> None:
+        """Ask where this cube lies in its room, if it is time: at the first call, and again
+        only ``_PLACE_RETRY`` seconds after an answer that lacked it. Cheap to call every
+        picture; the reading runs in a thread, the answer lands in ``places``."""
+        if self._place_busy or time.monotonic() < self._place_next:
+            return
+        self._place_busy = True
+        self._place_thread = threading.Thread(target=self._load_places, daemon=True)
+        self._place_thread.start()
+
+    def _load_places(self) -> None:
+        """The cube's meta (its place and its room), then the room's cubes: two reads."""
+        retry = time.monotonic() + _PLACE_RETRY
+        try:
+            own, room = _meta_place(self._get(f"/api/v1/render/iso/cube/{self.cube}"))
+            if own is not None:
+                self.places = {self.cube: own}
+            if own is not None and room is not None:
+                found = self._get(f"/api/v1/universe/rooms/{room}/detail")
+                self.places = {self.cube: own, **_room_places(found, own[3], self.cube)}
+                retry = math.inf  # known: not asked again for this cube
+        except Exception as exc:  # no position: as before, neither place nor neighbours
+            logger.debug("scope: place not read: %s", type(exc).__name__)
+        self._place_next, self._place_busy = retry, False
+
+    def _get(self, path: str) -> Any:
+        from cosmergon_agent import _http
+
+        answer = _http.get(f"{self.base_url}{path}", timeout=20.0)
+        answer.raise_for_status()
+        return answer.json()
 
     def _load_levels(self) -> None:
         from cosmergon_agent import _http
@@ -760,7 +918,7 @@ class Live(Follow):
     def __init__(self, stream: Stream, hero: str = "", label: str = "") -> None:
         self.stream, self.fixed, self.label = stream, hero, label
         self.level_seen: int | None = None  # the level of the field shown, once there is one
-        # cube id -> (grid x, y, z, dim): what the routes do not say; the one who knows sets it
+        # cube id -> (grid x, y, z, dim); what is set here wins over what ``Stream.locate`` read
         self.places: dict[str, tuple[int, int, int, int]] = {}
         self.note = "waiting for the world"
         self.hero_id = hero
@@ -775,6 +933,12 @@ class Live(Follow):
         self.true_x = self.true_y = 0.0  # the body's place on the path, before the posture
         super().__init__(Field(side=8), [], "")
         self._heading = self.angle
+
+    def _locate(self) -> None:
+        """Have the stream ask where its cube lies (it does so once; a test's stand-in may not)."""
+        locate = getattr(self.stream, "locate", None)
+        if locate is not None:
+            locate()
 
     def advance(self, seconds: float) -> None:
         self.step_no += 1
@@ -794,6 +958,7 @@ class Live(Follow):
         if self.fixed or self.hero_id in self._walkers():
             self.idle_since = time.monotonic()
         level = out[self.hero_id]["z"]
+        self._locate()
         field = self.stream.field(int(level // _METRES))
         if field is None:
             self.note = "loading the level"
@@ -806,34 +971,58 @@ class Live(Follow):
         at = max(1, later[0] if later else len(reports) - 1)
         self.angle = self._heading
         if len(reports) > 1:  # only the two reports the clock stands between are worked out
-            before, after = (
-                (t, {e["id"]: _in_cells(e) for e in found if e["z"] == level})
-                for t, found in reports[at - 1 : at + 1]
-            )
+            before, after = self._around(at, level)
             self._glide(before, after)
             self._heading = self.angle
             self._pose(now, reports)
+
+    def _around(self, at: int, level: float) -> tuple[_Report, _Report]:
+        """The two reports before and at ``at``, on one level, with the stream's monsters and
+        birds among the marauders; and what the newer one says of each body's kind and state."""
+        beings = dict(getattr(self.stream, "beings", []))
+        pair = []
+        for stamp, found in self.stream.reports[at - 1 : at + 1]:
+            bodies = [*found, *beings.get(stamp, [])]
+            pair.append((stamp, bodies, {e["id"]: _in_cells(e) for e in bodies if e["z"] == level}))
+        self.traits = {
+            e["id"]: (_SIGHT_KIND.get(str(e.get("kind")), "marauder"), bool(e.get("downed")))
+            for e in pair[1][1]
+        }
+        return (pair[0][0], pair[0][2]), (pair[1][0], pair[1][2])
 
     def sight(self) -> Sight:
         """The base's sight, with where the field lies (level, edge, and the places known)."""
         seen = super().sight()
         if self.level_seen is None:
             return seen
-        own = self.places.get(self.stream.cube)
         mine = self.stream.cube
-        others = tuple((key, *place) for key, place in self.places.items() if key != mine)
+        places = {**getattr(self.stream, "places", {}), **self.places}  # what it is told wins
+        own = places.get(mine)
+        others = tuple((key, *place) for key, place in places.items() if key != mine)
         world = SightWorld(
             self.level_seen, self.field.side, None if own is None else own[:3], others
         )
         return dataclasses.replace(seen, world=world)
 
     def _glide(self, before: _Report, after: _Report) -> None:
-        """The others and the heading as before; the body on a spline where its speeds fit."""
+        """The others and the heading as before; the body on a spline where its speeds fit,
+        but never nearer to a living body than the straight way between the reports is."""
         super()._glide(before, after)
         spot = _posture.spline_at(before, after, self.hero, self.clock)
         if spot is not None:
-            self.x, self.y = spot
+            self.x, self.y = _kept_off(spot, (self.x, self.y), self._living())
         self.true_x, self.true_y = self.x, self.y
+
+    def _living(self) -> list[tuple[float, float, float]]:
+        """Where the bodies are that stand or walk, and how near the camera's body may come to
+        each: ``(x, y, reach)`` in cells, the two body radii added."""
+        found = [
+            (m[0], m[1], "marauder")
+            for m, key in zip(self.field.marauders, self.keys, strict=True)
+            if key not in self.down
+        ]
+        found += [(b.x, b.y, b.kind) for b in self.foes if not b.downed]
+        return [(x, y, (_RADIUS_M["marauder"] + _RADIUS_M[kind]) / _METRES) for x, y, kind in found]
 
     def _pose(self, now: float, reports: list[tuple[float, list[dict[str, Any]]]]) -> None:
         """Look and posture at the real place: tension, gaze, gait and the events of a fight."""
@@ -854,7 +1043,8 @@ class Live(Follow):
             self.hero_id,
         )
         pose = self._posture.update(now, view)
-        self.x, self.y = self.true_x + pose.dx, self.true_y + pose.dy
+        spot = (self.true_x + pose.dx, self.true_y + pose.dy)
+        self.x, self.y = _kept_off(spot, (self.true_x, self.true_y), self._living())
         self.angle, self.tilt = self._heading + pose.yaw, pose.tilt
 
     def _keep_or_choose(self, out: dict[Any, dict[str, Any]]) -> None:
@@ -987,6 +1177,7 @@ class Flight(Live):
         self.step_no += 1
         if self.level is None:
             self.level = self._pick(self.stream.levels())
+        self._locate()
         field = None if self.level is None else self.stream.field(self.level)
         if field is None:
             self.note = "flying to the next cube"
