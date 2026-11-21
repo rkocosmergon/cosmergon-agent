@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo
 from cosmergon_agent import pov_place
 
 if TYPE_CHECKING:
-    from cosmergon_agent.scope import Sight
+    from cosmergon_agent.scope import Sight, SightWorld
 
 GRID = 48  # squares on a side of the program's window
 MARGIN = 22  # squares: ceil(scope._FAR) = 22, how far a look reaches (the test compares both)
@@ -40,8 +40,9 @@ _NAMES = {".": "empty", "#": "cell", "=": "wall", "T": "tower", "O": "own"}
 _CHARS = {0: ".", 1: "#", 2: "#", 3: "=", 4: "T"}  # _posture: EMPTY, CELL, OWN, WALL, TOWER
 _CHARS_OWN = {**_CHARS, 2: "O"}  # for a program that knows its own kind of square
 # What a program may be able to do beyond the first protocol, named in its ``capabilities`` file:
-# ``own`` (``O`` in a row, ``own`` as a kind), ``origin``, ``daytime``, ``clouds``.
-CAPABILITIES = frozenset({"own", "origin", "daytime", "clouds"})
+# ``own`` (``O`` in a row, ``own`` as a kind), ``origin``, ``daytime``, ``clouds``, ``world``
+# (``world``, ``cube`` and ``nocube`` lines).
+CAPABILITIES = frozenset({"own", "origin", "daytime", "clouds", "world"})
 _CAPS_FILE = "capabilities"  # next to the program; a program without it gets the first protocol
 _CAPS_MOST = 1024  # bytes read of that file
 _THEME_NAME = re.compile(r"[a-z0-9]{1,32}")
@@ -59,6 +60,9 @@ _ENV_KEYS = (
 )
 _PATH = "/usr/bin:/bin"
 _POS_MOST = 47.9999  # a position is below 48
+_GRID_MOST = 10_000  # a cube's grid position is within +-10,000 (the program's limit)
+_DIM_LEAST, _DIM_MOST = 8, 1024  # a cube's edge in cells (the program's limit)
+MAX_CUBES = 64  # ids 0..63 of the program's neighbour cubes
 
 
 # --- finding the program ------------------------------------------------------------------------
@@ -247,11 +251,13 @@ class Window:
         self._cooling: set[int] = set()  # freed in the last update, not yet to be given again
         self._free: set[int] = set(range(MAX_THINGS))
         self._cam = ""
+        self._world = _WorldTold()
 
     def reset(self) -> None:
         """The program may have missed lines: the next update is the whole window."""
         self._origin = None
         self._text, self._cam = {}, ""
+        self._world.forget()
 
     def update(self, sight: Sight | None) -> list[str]:
         """The lines that bring the program to ``sight``; empty when nothing changed."""
@@ -266,7 +272,8 @@ class Window:
         full = old != origin
         rows = _rows(sight, origin, "own" in self._caps)
         things = self._things(sight, origin)
-        lines = [_origin_line(sight, origin)] if full and "origin" in self._caps else []
+        lines = self._world.lines(sight.world) if "world" in self._caps else []
+        lines += [_origin_line(sight, origin)] if full and "origin" in self._caps else []
         lines += _all_rows(rows) if full else _changed_rows(self._rows, rows)
         lines += self._thing_lines(things, full)
         cam = f"cam {_cam(sight, origin)}"
@@ -318,6 +325,89 @@ class Window:
         ident = min(pool)
         pool.discard(ident)
         return ident
+
+
+def _whole(*values: object) -> bool:
+    return all(isinstance(v, int) and not isinstance(v, bool) for v in values)
+
+
+def _cube_ok(x: int, y: int, z: int, dim: int) -> bool:
+    """Whether the program takes a cube at this grid position with this edge."""
+    return (
+        _whole(x, y, z, dim)
+        and max(abs(x), abs(y), abs(z)) <= _GRID_MOST
+        and _DIM_LEAST <= dim <= _DIM_MOST
+    )
+
+
+class _WorldTold:
+    """Where the field lies in the world and the neighbour cubes, as the program was told.
+
+    ``lines`` gives ``world`` when cube, level or edge changed, then ``nocube`` for neighbours
+    that went and ``cube`` for those new or moved. A neighbour keeps its id while it is among
+    the nearest ``MAX_CUBES``. A value the program would reject is not sent at all.
+    """
+
+    def __init__(self) -> None:
+        self._told: tuple[int, ...] | None = None
+        self._ids: dict[object, int] = {}
+        self._held: set[int] = set()  # ids the program may hold a cube under
+        self._sent: dict[int, tuple[int, int, int, int]] = {}
+
+    def forget(self) -> None:
+        """Lines were lost: everything is said again (cubes that went are removed then)."""
+        self._told, self._sent = None, {}
+
+    def lines(self, world: SightWorld | None) -> list[str]:
+        if world is None:
+            return []
+        cube = (0, 0, 0) if world.cube is None else world.cube  # the program's own default
+        here = (*cube, world.level, world.dim)
+        level_ok = _whole(world.level) and 0 <= world.level < world.dim
+        if not (_cube_ok(*cube, world.dim) and level_ok):
+            return []
+        out = []
+        if here != self._told:
+            out.append("world " + " ".join(str(v) for v in here))
+            self._told = here
+        wanted = self._nearest(world, cube) if world.cube is not None else {}
+        return out + self._cube_lines(wanted)
+
+    @staticmethod
+    def _nearest(world: SightWorld, cube: tuple[int, ...]) -> dict[object, tuple[int, ...]]:
+        """The neighbours the program takes, the nearest ``MAX_CUBES`` by grid distance."""
+        found: dict[object, tuple[int, ...]] = {}
+        for key, *place in world.neighbours:
+            if len(place) == 4 and _cube_ok(*place) and tuple(place[:3]) != cube:
+                found.setdefault(key, tuple(place))
+        cx, cy, cz = cube
+
+        def distance(key: object) -> tuple[int, str]:
+            x, y, z = found[key][:3]
+            return (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2, repr(key)
+
+        order = sorted(found, key=distance)
+        return {key: found[key] for key in order[:MAX_CUBES]}
+
+    def _cube_lines(self, wanted: dict[object, tuple[int, ...]]) -> list[str]:
+        for key in [k for k in self._ids if k not in wanted]:
+            del self._ids[key]
+        taken = set(self._ids.values())
+        free = iter(i for i in range(MAX_CUBES) if i not in taken)
+        for key in wanted:
+            if key not in self._ids:
+                self._ids[key] = next(free)
+        now = set(self._ids.values())
+        lines = [f"nocube {i}" for i in sorted(self._held - now)]
+        self._held = now
+        for key, place in wanted.items():
+            ident = self._ids[key]
+            if self._sent.get(ident) != place:
+                lines.append(f"cube {ident} " + " ".join(str(v) for v in place))
+                self._sent[ident] = place  # type: ignore[assignment]
+        for ident in [i for i in self._sent if i not in now]:
+            del self._sent[ident]
+        return lines
 
 
 def _axis(c: float, side: int, torus: bool, old: int | None) -> int:

@@ -276,10 +276,27 @@ class SightThing:
 
 
 @dataclasses.dataclass(frozen=True)
+class SightWorld:
+    """Where the shown field lies in the world, for a reader outside (cos20 #799).
+
+    ``level`` is the field's level in its cube and ``dim`` the cube's edge in cells. ``cube`` is
+    the cube's grid position in its room, ``None`` while it is not known; ``neighbours`` are the
+    other cubes of the room as ``(key, x, y, z, dim)``. The public render routes name neither
+    the grid position nor the room, so a caller that knows them hands them in (``Live.places``).
+    """
+
+    level: int
+    dim: int
+    cube: tuple[int, int, int] | None = None
+    neighbours: tuple[tuple[Any, int, int, int, int], ...] = ()
+
+
+@dataclasses.dataclass(frozen=True)
 class Sight:
     """What the view shows, read only: the squares, the camera and the things (cos20 #799).
 
     ``at(x, y)`` is ``Field.at``: what stands on a square (EMPTY, CELL, OWN, WALL, TOWER).
+    ``world`` is where the field lies in the world, ``None`` where that is not known.
     """
 
     side: int
@@ -289,6 +306,7 @@ class Sight:
     y: float
     angle: float
     things: tuple[SightThing, ...]
+    world: SightWorld | None = None
 
 
 class Pov:
@@ -741,6 +759,9 @@ class Live(Follow):
 
     def __init__(self, stream: Stream, hero: str = "", label: str = "") -> None:
         self.stream, self.fixed, self.label = stream, hero, label
+        self.level_seen: int | None = None  # the level of the field shown, once there is one
+        # cube id -> (grid x, y, z, dim): what the routes do not say; the one who knows sets it
+        self.places: dict[str, tuple[int, int, int, int]] = {}
         self.note = "waiting for the world"
         self.hero_id = hero
         self.idle_since = time.monotonic()  # since when nobody walked in front of the camera
@@ -778,6 +799,7 @@ class Live(Follow):
             self.note = "loading the level"
             return
         self.note, self.field, self.hero = "", field, self.hero_id
+        self.level_seen = int(level // _METRES)
         now = self._timer()
         self.clock = now - self._BEHIND
         later = [i for i, (t, _) in enumerate(reports) if t >= self.clock]
@@ -791,6 +813,19 @@ class Live(Follow):
             self._glide(before, after)
             self._heading = self.angle
             self._pose(now, reports)
+
+    def sight(self) -> Sight:
+        """The base's sight, with where the field lies (level, edge, and the places known)."""
+        seen = super().sight()
+        if self.level_seen is None:
+            return seen
+        own = self.places.get(self.stream.cube)
+        mine = self.stream.cube
+        others = tuple((key, *place) for key, place in self.places.items() if key != mine)
+        world = SightWorld(
+            self.level_seen, self.field.side, None if own is None else own[:3], others
+        )
+        return dataclasses.replace(seen, world=world)
 
     def _glide(self, before: _Report, after: _Report) -> None:
         """The others and the heading as before; the body on a spline where its speeds fit."""
@@ -961,7 +996,7 @@ class Flight(Live):
             self.x = self.y = field.side / 2 + 0.5
             while not field.free(self.x, self.y) and self.x < field.side - 1:
                 self.x += 1.0
-        self.field = field
+        self.field, self.level_seen = field, self.level
         bodies = self.stream.reports[-1][1] if self.stream.reports else []
         here = (b for b in bodies if int(b["z"] // _METRES) == self.level)
         here_now = list(here)
