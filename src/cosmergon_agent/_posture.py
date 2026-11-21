@@ -55,6 +55,7 @@ _WALK_LOOK = 0.6  # radians a walker looks aside at most (about 35 degrees)
 _STAND_LOOK = 1.2  # radians a standing body looks aside at most; further only over the shoulder
 _BACK_LIMIT = 2.5  # radians of a look over the shoulder while walking
 _GAZE_FAR = 10.0  # cells a gaze ray reaches
+_FRONT_MIN = 2.0  # cells a standing body's front must reach, else it picks a new one
 _CORNER_JUMP = 3.0  # cells by which two neighbouring rays differ at an edge
 _OPEN_REACH = 7.0  # cells a ray must reach to count as an open line of sight
 _TOWER_TILT = 0.1  # share of the picture's height looked up at a tower
@@ -187,12 +188,23 @@ def spline_at(
 # --- what can be seen --------------------------------------------------------------------------
 
 
+def stands(world: Any, x: int, y: int) -> int:
+    """What a look meets on a square: like ``world.at``, but the edge of a field that is no torus
+    is a wall (the drawer shows one there). ``at`` itself keeps saying EMPTY out there: the
+    rules of the field and the walk rely on it."""
+    side = getattr(world, "side", None)
+    outside = side is not None and not (0 <= x < side and 0 <= y < side)
+    if outside and not getattr(world, "torus", True):
+        return WALL
+    return int(world.at(x, y))
+
+
 def sees(world: Any, ax: float, ay: float, bx: float, by: float, stop: float = 0.0) -> bool:
     """Whether nothing stands between two places; ``stop`` leaves out the last stretch."""
     full = math.hypot(bx - ax, by - ay)
     for i in range(1, int((full - stop) / _SAMPLE) + 1):
         share = i * _SAMPLE / full
-        if world.at(math.floor(ax + (bx - ax) * share), math.floor(ay + (by - ay) * share)):
+        if stands(world, math.floor(ax + (bx - ax) * share), math.floor(ay + (by - ay) * share)):
             return False
     return True
 
@@ -202,7 +214,7 @@ def reach(world: Any, x: float, y: float, angle: float, far: float) -> float:
     dx, dy, d = math.cos(angle), math.sin(angle), 0.0
     while d < far:
         d += 0.5
-        if world.at(math.floor(x + dx * d), math.floor(y + dy * d)):
+        if stands(world, math.floor(x + dx * d), math.floor(y + dy * d)):
             return d
     return far
 
@@ -415,11 +427,43 @@ class Gaze:
         self.target, self.kind, self.aim_tilt, self.lean_to = 0.0, "idle", 0.0, 0.0
         self.until = -1e18  # the first look is chosen at once
         self.last_hold = 0.0
+        self.front: float | None = None  # where a standing body faces; ``None`` while it walks
+
+    def _stand(self, view: View) -> View:
+        """The view as the gaze sees it: a standing body faces its most open direction, not the
+        way it last walked (that ends at a block). Picked once when it stops, kept until it
+        walks again or the way ahead is closed; the spring turns the head there."""
+        if view.walking:
+            self.front = None
+            return view
+        shut = self.front is not None and self._reach(view, self.front) < _FRONT_MIN
+        if self.front is None or shut:
+            self.front = self._most_open(view)
+        return dataclasses.replace(view, heading=self.front)
+
+    def facing(self, view: View) -> View:
+        """The view with the heading the body faces now: where it goes, or its front at rest."""
+        if self.front is None:
+            return view
+        return dataclasses.replace(view, heading=self.front)
+
+    @staticmethod
+    def _reach(view: View, angle: float) -> float:
+        return reach(view.world, view.x, view.y, angle, _GAZE_FAR)
+
+    @staticmethod
+    def _most_open(view: View) -> float:
+        """Of 16 directions the one that reaches farthest; a tie goes to the least turn."""
+        angles = [view.heading + k * math.pi / 8 for k in range(16)]
+        rays = [(Gaze._reach(view, a), -abs(_wrap(a - view.heading)), a) for a in angles]
+        return max(rays)[2]
 
     def update(
         self, now: float, dt: float, tension: float, scan: Scan, view: View, react: bool
     ) -> tuple[float, float, float]:
         """The look now: (yaw against the heading, tilt, lean to the side in cells)."""
+        real, view = view, self._stand(view)
+        shift = _wrap(view.heading - real.heading)
         if react:
             self._react(now, scan, view)
         elif now >= self.until:
@@ -429,7 +473,7 @@ class Gaze:
         limit = _BACK_LIMIT if self.kind == "back" else math.pi if self.kind == "hit" else aside
         omega = (_OMEGA + _OMEGA_TENSE * tension) * (_OMEGA_HIT if self.kind == "hit" else 1.0)
         return (
-            self.yaw.step(_clamp(off, -limit, limit), dt, omega),
+            self.yaw.step(_wrap(shift + _clamp(off, -limit, limit)), dt, omega),
             self.tilt.step(self.aim_tilt, dt, omega),
             self.lean.step(self.lean_to, dt, omega / 2),
         )
@@ -520,7 +564,7 @@ class Posture:
         kick_tilt, kick_yaw, fall = self._events(now)
         nx, ny, nyaw = self._noise(now, t, view.walking)
         idle = sum(a * math.sin(2 * math.pi * now / p) for a, p in _IDLE) * (1 + t)
-        dx, dy = self._offset(view, (nx, ny), lean + sway)
+        dx, dy = self._offset(self.gaze.facing(view), (nx, ny), lean + sway)
         total = tilt + idle + tilt_bob + kick_tilt + fall
         return Pose(dx, dy, yaw + nyaw + kick_yaw, _clamp(total, *_TILT_LIMIT))
 
