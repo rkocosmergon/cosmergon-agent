@@ -14,13 +14,16 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import select
 import stat
 import subprocess  # nosec B404 - the one program of this module, started without a shell
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 from cosmergon_agent import pov_place
 
@@ -33,8 +36,18 @@ MAX_THINGS = 256  # ids 0..255 of the program
 _LINE_MOST = 255
 _ROW_ABOVE = 4  # more changed squares in a row than this: one ``row`` line is shorter
 _PIPE_BUF = getattr(select, "PIPE_BUF", 512)  # a write up to this size is whole or not at all
-_NAMES = {".": "empty", "#": "cell", "=": "wall", "T": "tower"}
+_NAMES = {".": "empty", "#": "cell", "=": "wall", "T": "tower", "O": "own"}
 _CHARS = {0: ".", 1: "#", 2: "#", 3: "=", 4: "T"}  # _posture: EMPTY, CELL, OWN, WALL, TOWER
+_CHARS_OWN = {**_CHARS, 2: "O"}  # for a program that knows its own kind of square
+# What a program may be able to do beyond the first protocol, named in its ``capabilities`` file:
+# ``own`` (``O`` in a row, ``own`` as a kind), ``origin``, ``daytime``, ``clouds``.
+CAPABILITIES = frozenset({"own", "origin", "daytime", "clouds"})
+_CAPS_FILE = "capabilities"  # next to the program; a program without it gets the first protocol
+_CAPS_MOST = 1024  # bytes read of that file
+_THEME_NAME = re.compile(r"[a-z0-9]{1,32}")
+_THEME_DEFAULT = "wueste"
+_TZ_DEFAULT = "Europe/Berlin"
+_NOON = 720  # minutes: the time sent when no zone can be had
 _ENV_KEYS = (
     "HOME",
     "XDG_RUNTIME_DIR",
@@ -71,6 +84,23 @@ def _ours(info: os.stat_result, uid: int) -> bool:
     return info.st_uid in (uid, 0) and not info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
 
 
+def _safe_file(wanted: Path, uid: int, *, executable: bool = False) -> Path | None:
+    """The resolved file when it is a regular file of this user or root that group and others
+    cannot write, in a directory of the same kind (and executable when asked); else None."""
+    try:
+        real = Path(os.path.realpath(wanted))
+        file_info, dir_info = os.stat(real), os.stat(real.parent)
+    except (OSError, ValueError):
+        return None
+    if not stat.S_ISREG(file_info.st_mode) or not stat.S_ISDIR(dir_info.st_mode):
+        return None
+    if executable and not os.access(real, os.X_OK):
+        return None
+    if not _ours(file_info, uid) or not _ours(dir_info, uid):
+        return None
+    return real
+
+
 def program_path() -> Path | None:
     """The renderer's file, or None unless it is a safe thing to start.
 
@@ -81,16 +111,44 @@ def program_path() -> Path | None:
     wanted = _candidate()
     if uid is None or wanted is None:
         return None
+    return _safe_file(wanted, uid, executable=True)
+
+
+def theme_name() -> str | None:
+    """The theme asked for: ``COSMERGON_POV_THEME`` (``[a-z0-9]{1,32}``), else ``wueste``.
+
+    ``none`` is no theme. A value of any other shape (unset, empty, unsafe) counts as not set.
+    """
+    name = os.environ.get("COSMERGON_POV_THEME", "")
+    if not _THEME_NAME.fullmatch(name):
+        name = _THEME_DEFAULT
+    return None if name == "none" else name
+
+
+def theme_path(program: Path) -> Path | None:
+    """``theme-<name>.wad`` next to the program, if it is safe by the program's own rules."""
+    name, uid = theme_name(), _uid()
+    if name is None or uid is None:
+        return None
+    return _safe_file(program.parent / f"theme-{name}.wad", uid)
+
+
+def capabilities(program: Path) -> frozenset[str]:
+    """What the program says it can: the words of ``capabilities`` next to it.
+
+    The file must be safe like the program. No file, an unsafe one or an unreadable one: the
+    empty set, i.e. the first protocol only (what an older program understands).
+    """
+    uid = _uid()
+    real = None if uid is None else _safe_file(program.parent / _CAPS_FILE, uid)
+    if real is None:
+        return frozenset()
     try:
-        real = Path(os.path.realpath(wanted))
-        file_info, dir_info = os.stat(real), os.stat(real.parent)
-    except (OSError, ValueError):
-        return None
-    if not stat.S_ISREG(file_info.st_mode) or not stat.S_ISDIR(dir_info.st_mode):
-        return None
-    if not os.access(real, os.X_OK) or not _ours(file_info, uid) or not _ours(dir_info, uid):
-        return None
-    return real
+        with open(real, "rb") as handle:
+            words = handle.read(_CAPS_MOST).decode("ascii", "replace").split()
+    except OSError:
+        return frozenset()
+    return CAPABILITIES.intersection(words)
 
 
 # --- the window follower ------------------------------------------------------------------------
@@ -179,7 +237,8 @@ class Window:
     what was sent (lines were lost), so that the next ``update`` sends everything anew.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, caps: frozenset[str] = frozenset()) -> None:
+        self._caps = caps  # what the program can beyond the first protocol (``capabilities``)
         self._origin: tuple[int, int] | None = None  # field square at the window's west, south
         self._rows: list[str] = []
         self._ids: dict[object, int] = {}
@@ -205,9 +264,10 @@ class Window:
             _axis(sight.y, sight.side, sight.torus, oy),
         )
         full = old != origin
-        rows = _rows(sight, origin)
+        rows = _rows(sight, origin, "own" in self._caps)
         things = self._things(sight, origin)
-        lines = _all_rows(rows) if full else _changed_rows(self._rows, rows)
+        lines = [_origin_line(sight, origin)] if full and "origin" in self._caps else []
+        lines += _all_rows(rows) if full else _changed_rows(self._rows, rows)
         lines += self._thing_lines(things, full)
         cam = f"cam {_cam(sight, origin)}"
         if full or cam != self._cam:
@@ -279,11 +339,25 @@ def _axis(c: float, side: int, torus: bool, old: int | None) -> int:
     return centred if torus else min(max(centred, 0), side - GRID)
 
 
-def _rows(sight: Sight, origin: tuple[int, int]) -> list[str]:
+def _origin_line(sight: Sight, origin: tuple[int, int]) -> str:
+    """``origin``: the world place of the window's square 0, 0 (it sets what a square looks like).
+
+    World x is the field's x; world y points north, so it is the field's y negated (the window's
+    row 0 is the field row ``origin y + GRID - 1``). On a torus the place is taken modulo the
+    side, so that a square keeps its world place however often the camera went around.
+    """
+    x, y = origin[0], -(origin[1] + GRID - 1)
+    if sight.torus:
+        x, y = x % sight.side, y % sight.side - sight.side
+    return f"origin {x} {y}"
+
+
+def _rows(sight: Sight, origin: tuple[int, int], own: bool = False) -> list[str]:
     """The window's rows, south (program y 0) first, each 48 characters west to east."""
     ox, oy = origin
+    chars = _CHARS_OWN if own else _CHARS
     return [
-        "".join(_CHARS.get(sight.at(ox + px, oy + GRID - 1 - py), ".") for px in range(GRID))
+        "".join(chars.get(sight.at(ox + px, oy + GRID - 1 - py), ".") for px in range(GRID))
         for py in range(GRID)
     ]
 
@@ -340,6 +414,59 @@ def _chunks(lines: Sequence[str]) -> Iterator[bytes]:
         yield piece
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _zone() -> ZoneInfo | None:
+    """The zone the user chose in ``COSMERGON_POV_TZ``, else Berlin, else None.
+
+    Never the system's zone and never a guess from the place: only an explicit choice.
+    """
+    for name in (os.environ.get("COSMERGON_POV_TZ", ""), _TZ_DEFAULT):
+        try:
+            if name:
+                return ZoneInfo(name)
+        except (KeyError, ValueError, OSError):  # not found (a KeyError), no data, bad key
+            continue
+    return None
+
+
+class Sky:
+    """The time of day and the cloud clock for the program: ``daytime`` once a minute,
+    ``clouds`` once (at the start), both from one clock that tests may replace."""
+
+    def __init__(self, clock: Callable[[], datetime] = _utc_now) -> None:
+        self._clock = clock
+        self._zone = _zone()
+        self._minute: int | None = None
+        self._clouds = False
+
+    def forget(self) -> None:
+        """Lines were lost: the next ``lines`` says everything again."""
+        self._minute, self._clouds = None, False
+
+    def lines(self, caps: frozenset[str]) -> list[str]:
+        """``clouds`` the first time, ``daytime`` when the minute is not the one sent last."""
+        out = []
+        try:
+            now = self._clock().astimezone(timezone.utc)
+            if "clouds" in caps and not self._clouds:
+                out.append(f"clouds {now.hour * 3600 + now.minute * 60 + now.second}")
+                self._clouds = True
+            minute = _NOON if self._zone is None else self._local_minute(now)
+            if "daytime" in caps and minute != self._minute:
+                out.append(f"daytime {minute}")
+                self._minute = minute
+        except (OSError, ValueError, OverflowError):  # a clock that fails sends nothing
+            return out
+        return out
+
+    def _local_minute(self, now: datetime) -> int:
+        local = now.astimezone(self._zone)
+        return local.hour * 60 + local.minute
+
+
 def _environment() -> dict[str, str]:
     """What a window program needs of the environment; the dashboard's may hold secrets."""
     env = {key: os.environ[key] for key in _ENV_KEYS if key in os.environ}
@@ -356,9 +483,11 @@ class Bridge:
     program ends the bridge for good: ``alive`` is False and nothing restarts it.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, clock: Callable[[], datetime] = _utc_now) -> None:
         self.path = path
-        self.window = Window()
+        self.caps = capabilities(path)  # fixed for the life of the bridge
+        self.window = Window(self.caps)
+        self.sky = Sky(clock)
         self.dropped = False
         self._proc: subprocess.Popen[bytes] | None = None
         self._owes_newline = False
@@ -368,7 +497,7 @@ class Bridge:
         """Start the program; False (and the bridge is over) when that is not possible."""
         try:
             self._proc = subprocess.Popen(  # noqa: S603  # nosec B603 - no shell, path from program_path
-                [str(self.path), "-pov-control"],
+                self._argv(),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -386,6 +515,11 @@ class Bridge:
             return False
         return True
 
+    def _argv(self) -> list[str]:
+        theme = theme_path(self.path)
+        argv = [str(self.path), "-pov-control"]
+        return argv if theme is None else [*argv, "-pov-theme", str(theme)]
+
     def alive(self) -> bool:
         """Whether the program runs and its pipe stands."""
         proc = self._proc
@@ -401,8 +535,11 @@ class Bridge:
             return
         if self.dropped:
             self.window.reset()
+            self.sky.forget()
             self.dropped = False
-        self.send(self.window.update(sight))
+        if sight is None:
+            return
+        self.send(self.sky.lines(self.caps) + self.window.update(sight))
 
     def send(self, lines: Sequence[str]) -> bool:
         """Write the lines; False when some were dropped or the program is gone. Never raises."""
