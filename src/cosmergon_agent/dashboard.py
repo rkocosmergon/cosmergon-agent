@@ -34,6 +34,7 @@ import re
 import shlex
 import sys
 import textwrap
+import threading
 import time
 import traceback
 import webbrowser
@@ -3330,6 +3331,17 @@ class CosmergonDashboard(_PrivateApp):
         self.set_interval(60, self._partner_holen)
         # The first figures right after connecting, not a minute later (0.32.1).
         self.set_timer(3, self._partner_holen)
+        self._ui_thread = threading.get_ident()
+        if _terminal_log is not None:  # warnings now go into the log, not over the picture (#801)
+            _terminal_log.ziel = self._log_warning
+
+    def _log_warning(self, text: str) -> None:
+        """A SDK warning as one line of the world log; from another thread via the event loop."""
+        zeile = "⚠ " + " ".join(text.split())  # one line; _roh in _log_line strips control chars
+        if threading.get_ident() == self._ui_thread:  # call_from_thread raises in its own thread
+            self._log_line("world", zeile, self._theme.warn)
+        else:
+            self.call_from_thread(self._log_line, "world", zeile, self._theme.warn)
 
     # ── Marauder action sub-menu (S212 action parity) ──────────────────────
     # The table of sell prices that stood here (a copy of the house's prices) is gone: the sale
@@ -6138,6 +6150,8 @@ class CosmergonDashboard(_PrivateApp):
             logger.debug("reporting the place failed", exc_info=True)
 
     def on_unmount(self) -> None:
+        if _terminal_log is not None and _terminal_log.ziel == self._log_warning:
+            _terminal_log.ziel = None  # the terminal is the user's again
         self._scope_bridge_end()
         if self._scope_extern_on:
             _pov.remove_place()
@@ -8121,9 +8135,32 @@ class _PrintableLog(logging.Formatter):
         return printable(super().format(record), keep="\n")
 
 
+class _TerminalLog(logging.StreamHandler):
+    """The one handler. While the dashboard runs, ``ziel`` is set and a warning goes into its
+    log as one line; before the start and after the end it goes to stderr as it always did
+    (cos20 #801: a raw line in the middle of the picture)."""
+
+    ziel: Callable[[str], None] | None = None
+
+    def emit(self, record: logging.LogRecord) -> None:
+        ziel = self.ziel
+        if ziel is not None and record.levelno >= logging.WARNING:
+            try:
+                ziel(record.getMessage())
+                return
+            except Exception:  # the app is gone or going: stderr, as before
+                pass
+        super().emit(record)
+
+
+_terminal_log: _TerminalLog | None = None
+
+
 def _log_to_terminal() -> None:
-    handler = logging.StreamHandler()
+    global _terminal_log
+    handler = _TerminalLog()
     handler.setFormatter(_PrintableLog(logging.BASIC_FORMAT))
+    _terminal_log = handler
     logging.basicConfig(level=logging.WARNING, handlers=[handler])
 
 
