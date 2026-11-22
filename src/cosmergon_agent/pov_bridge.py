@@ -36,14 +36,27 @@ MAX_THINGS = 256  # ids 0..255 of the program
 _LINE_MOST = 255
 _ROW_ABOVE = 4  # more changed squares in a row than this: one ``row`` line is shorter
 _PIPE_BUF = getattr(select, "PIPE_BUF", 512)  # a write up to this size is whole or not at all
-_NAMES = {".": "empty", "#": "cell", "=": "wall", "T": "tower", "O": "own"}
+_NAMES = {
+    ".": "empty",
+    "#": "cell",
+    "=": "wall",
+    "T": "tower",
+    "O": "own",
+    "R": "ring",
+    "K": "alcove",
+    "P": "shaftlo",
+    "Q": "shafthi",
+}
 _CHARS = {0: ".", 1: "#", 2: "#", 3: "=", 4: "T"}  # _posture: EMPTY, CELL, OWN, WALL, TOWER
 _CHARS_OWN = {**_CHARS, 2: "O"}  # for a program that knows its own kind of square
 # What a program may be able to do beyond the first protocol, named in its ``capabilities`` file:
 # ``own`` (``O`` in a row, ``own`` as a kind), ``origin``, ``daytime``, ``clouds``, ``world``
 # (``world``, ``cube`` and ``nocube`` lines), ``kinds`` (the kinds of thing ``monster``, ``bird``
-# and ``corpse``; a ``thing`` line may give a known id another kind).
-CAPABILITIES = frozenset({"own", "origin", "daytime", "clouds", "world", "kinds"})
+# and ``corpse``; a ``thing`` line may give a known id another kind) and ``ring`` (the kinds of
+# square of the field's rim: ``R`` ring, ``K`` alcove, ``P`` shaftlo, ``Q`` shafthi in a row).
+CAPABILITIES = frozenset({"own", "origin", "daytime", "clouds", "world", "kinds", "ring"})
+_BUNKS = 16  # bunks on a wall of the rim
+_SHAFT = (1, 2)  # the positions along a wall (from its start) of the two squares of a shaft
 _LIKE_MARAUDER = frozenset({"monster", "bird"})  # what a program without ``kinds`` draws so
 _CAPS_FILE = "capabilities"  # next to the program; a program without it gets the first protocol
 _CAPS_MOST = 1024  # bytes read of that file
@@ -267,12 +280,13 @@ class Window:
             return []
         old = self._origin
         ox, oy = (None, None) if old is None else old
+        ring = "ring" in self._caps
         origin = (
-            _axis(sight.x, sight.side, sight.torus, ox),
-            _axis(sight.y, sight.side, sight.torus, oy),
+            _axis(sight.x, sight.side, sight.torus, ox, ring),
+            _axis(sight.y, sight.side, sight.torus, oy, ring),
         )
         full = old != origin
-        rows = _rows(sight, origin, "own" in self._caps)
+        rows = _rows(sight, origin, "own" in self._caps, ring)
         things = self._things(sight, origin)
         lines = self._world.lines(sight.world) if "world" in self._caps else []
         lines += [_origin_line(sight, origin)] if full and "origin" in self._caps else []
@@ -425,23 +439,27 @@ class _WorldTold:
         return lines
 
 
-def _axis(c: float, side: int, torus: bool, old: int | None) -> int:
+def _axis(c: float, side: int, torus: bool, old: int | None, ring: bool = False) -> int:
     """Where the window starts on one axis: the old place while the camera has ``MARGIN``
     squares of window on both sides (or the field has no more there), else centred on it.
 
     The reach of a look is ``scope._FAR`` = 22 squares; the window is 48 wide, so the camera may
     stand between 22 and 26 squares from the west edge, and is put at 24 when it leaves that.
+
+    With ``ring`` the window may reach one square beyond the field on each side (the squares of
+    its rim), and a field of at most ``GRID - 2`` squares lies in the middle of it.
     """
-    if not torus and side <= GRID:
-        return 0
+    first, last = (-1, side + 1 - GRID) if ring else (0, side - GRID)  # the window's start
+    if not torus and (side <= GRID if not ring else last < first):
+        return (first + last) // 2 if ring else 0
     if old is not None:
         rel = c - old
-        low = rel >= MARGIN or (not torus and old <= 0)
-        high = GRID - rel >= MARGIN or (not torus and old + GRID >= side)
+        low = rel >= MARGIN or (not torus and old <= first)
+        high = GRID - rel >= MARGIN or (not torus and old >= last)
         if low and high:
             return old
     centred = math.floor(c) - GRID // 2
-    return centred if torus else min(max(centred, 0), side - GRID)
+    return centred if torus else min(max(centred, first), last)
 
 
 def _origin_line(sight: Sight, origin: tuple[int, int]) -> str:
@@ -457,14 +475,51 @@ def _origin_line(sight: Sight, origin: tuple[int, int]) -> str:
     return f"origin {x} {y}"
 
 
-def _rows(sight: Sight, origin: tuple[int, int], own: bool = False) -> list[str]:
-    """The window's rows, south (program y 0) first, each 48 characters west to east."""
+def _rim(side: int, x: int, y: int) -> str | None:
+    """The row character of a square of the field's rim, or None for any other square.
+
+    The rim is the ring of squares at index -1 and ``side`` around the field (corners included).
+    A wall has ``_BUNKS`` bunks at ``i * spacing + spacing // 2`` with ``spacing = side // 16``
+    (none when that is 0) and a shaft on the positions 1 and 2 from its start; a shaft beats a
+    bunk. A position counts along the field's x on the north (y = -1) and south (y = side) walls
+    and along its y on the west (x = -1) and east (x = side) walls. The program's ``shaftlo`` is
+    the square with the lower program coordinate along the wall (x east, y north); the field's y
+    points south, so on the east and west walls that is position 2, on the others position 1.
+    """
+    if not (-1 <= x <= side and -1 <= y <= side):
+        return None
+    if 0 <= x < side and 0 <= y < side:
+        return None
+    along = x if y in (-1, side) and 0 <= x < side else y if 0 <= y < side else None
+    if along is None:
+        return "R"  # a corner
+    low, high = _SHAFT
+    if along in _SHAFT:
+        flipped = x in (-1, side)  # the field's y runs against the program's
+        return "P" if along == (high if flipped else low) else "Q"
+    spacing = side // _BUNKS
+    if spacing and along % spacing == spacing // 2 and along // spacing < _BUNKS:
+        return "K"
+    return "R"
+
+
+def _rows(
+    sight: Sight, origin: tuple[int, int], own: bool = False, ring: bool = False
+) -> list[str]:
+    """The window's rows, south (program y 0) first, each 48 characters west to east.
+
+    With ``ring`` the squares of the field's rim that lie in the window are drawn (not on a
+    torus, which has no edge); no square of the field is ever replaced by one.
+    """
     ox, oy = origin
     chars = _CHARS_OWN if own else _CHARS
-    return [
-        "".join(chars.get(sight.at(ox + px, oy + GRID - 1 - py), ".") for px in range(GRID))
-        for py in range(GRID)
-    ]
+    rim = ring and not sight.torus
+
+    def char(x: int, y: int) -> str:
+        found = _rim(sight.side, x, y) if rim else None
+        return found or chars.get(sight.at(x, y), ".")
+
+    return ["".join(char(ox + px, oy + GRID - 1 - py) for px in range(GRID)) for py in range(GRID)]
 
 
 def _all_rows(rows: list[str]) -> list[str]:
