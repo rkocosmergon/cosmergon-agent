@@ -311,6 +311,7 @@ class Sight:
     angle: float
     things: tuple[SightThing, ...]
     world: SightWorld | None = None
+    lift: float = 0.0  # metres the camera's body stands above the floor of its level (in a shaft)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -965,6 +966,7 @@ class Live(Follow):
             return
         self.note, self.field, self.hero = "", field, self.hero_id
         self.level_seen = int(level // _METRES)
+        self.lift = float(level) - _METRES * self.level_seen  # above 0 only between two levels
         now = self._timer()
         self.clock = now - self._BEHIND
         later = [i for i, (t, _) in enumerate(reports) if t >= self.clock]
@@ -975,6 +977,8 @@ class Live(Follow):
             self._glide(before, after)
             self._heading = self.angle
             self._pose(now, reports)
+
+    lift = 0.0  # the hero's height above the floor of its level, in metres
 
     def _around(self, at: int, level: float) -> tuple[_Report, _Report]:
         """The two reports before and at ``at``, on one level, with the stream's monsters and
@@ -1002,7 +1006,7 @@ class Live(Follow):
         world = SightWorld(
             self.level_seen, self.field.side, None if own is None else own[:3], others
         )
-        return dataclasses.replace(seen, world=world)
+        return dataclasses.replace(seen, world=world, lift=self.lift)
 
     def _glide(self, before: _Report, after: _Report) -> None:
         """The others and the heading as before; the body on a spline where its speeds fit,

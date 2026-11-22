@@ -54,9 +54,11 @@ _CHARS_OWN = {**_CHARS, 2: "O"}  # for a program that knows its own kind of squa
 # (``world``, ``cube`` and ``nocube`` lines), ``kinds`` (the kinds of thing ``monster``, ``bird``
 # and ``corpse``; a ``thing`` line may give a known id another kind) and ``ring`` (the kinds of
 # square of the field's rim: ``R`` ring, ``K`` alcove, ``P`` shaftlo, ``Q`` shafthi in a row).
-CAPABILITIES = frozenset({"own", "origin", "daytime", "clouds", "world", "kinds", "ring"})
+CAPABILITIES = frozenset({"own", "origin", "daytime", "clouds", "world", "kinds", "ring", "shaft"})
 _BUNKS = 16  # bunks on a wall of the rim
 _SHAFT = (1, 2)  # the positions along a wall (from its start) of the two squares of a shaft
+_UNITS_M = 32  # the program's units a metre
+_SHAFT_MOST = 100  # the highest floor of a shaft the program takes (its ceiling is at 109)
 _LIKE_MARAUDER = frozenset({"monster", "bird"})  # what a program without ``kinds`` draws so
 _CAPS_FILE = "capabilities"  # next to the program; a program without it gets the first protocol
 _CAPS_MOST = 1024  # bytes read of that file
@@ -266,12 +268,13 @@ class Window:
         self._cooling: set[int] = set()  # freed in the last update, not yet to be given again
         self._free: set[int] = set(range(MAX_THINGS))
         self._cam = ""
+        self._shaft = ""  # the shaft line last sent with a floor off the ground, "" for none
         self._world = _WorldTold()
 
     def reset(self) -> None:
         """The program may have missed lines: the next update is the whole window."""
         self._origin = None
-        self._text, self._cam = {}, ""
+        self._text, self._cam, self._shaft = {}, "", ""
         self._world.forget()
 
     def update(self, sight: Sight | None) -> list[str]:
@@ -292,11 +295,28 @@ class Window:
         lines += [_origin_line(sight, origin)] if full and "origin" in self._caps else []
         lines += _all_rows(rows) if full else _changed_rows(self._rows, rows)
         lines += self._thing_lines(things, full)
+        lines += self._shaft_lines(sight, origin, full) if ring and "shaft" in self._caps else []
         cam = f"cam {_cam(sight, origin)}"
         if full or cam != self._cam:
             lines.append(cam)
         self._origin, self._rows, self._cam = origin, rows, cam
         return lines
+
+    def _shaft_lines(self, sight: Sight, origin: tuple[int, int], full: bool) -> list[str]:
+        """The floor of the shaft the camera's body rides in: its height while it stands there
+        between two levels, the ground again when it has left. A window set anew has forgotten
+        every floor, so only a floor off the ground is said again."""
+        was = "" if full else self._shaft
+        cx, cy = math.floor(sight.x), math.floor(sight.y)
+        height = min(_SHAFT_MOST, round(sight.lift * _UNITS_M)) if math.isfinite(sight.lift) else 0
+        now = ""
+        if height > 0 and _rim(sight.side, cx, cy) in ("P", "Q"):
+            now = f"shaft {cx - origin[0]} {GRID - 1 - (cy - origin[1])} {height}"
+        self._shaft = now
+        if now == was:
+            return []
+        down = [] if not was or was.split()[1:3] == now.split()[1:3] else [_grounded(was)]
+        return down + ([now] if now else [])
 
     def _things(self, sight: Sight, origin: tuple[int, int]) -> dict[object, tuple[str, str]]:
         """The things in the window, the nearest ``MAX_THINGS``: key -> (kind, "x y angle")."""
@@ -553,6 +573,12 @@ def _place(sight: Sight, origin: tuple[int, int], x: float, y: float) -> tuple[f
         y = sight.y + (y - sight.y + n / 2) % n - n / 2
     px, py = x - origin[0], GRID - (y - origin[1])
     return (px, py) if 0.0 <= px < GRID and 0.0 <= py < GRID else None
+
+
+def _grounded(line: str) -> str:
+    """The shaft line that sets the floor of ``line``'s shaft back on the ground."""
+    _, px, py, _ = line.split()
+    return f"shaft {px} {py} 0"
 
 
 def _cam(sight: Sight, origin: tuple[int, int]) -> str:
