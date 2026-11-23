@@ -155,6 +155,7 @@ _ACTION_WORDS: dict[str, tuple[str, str]] = {
     "resume": ("resume", "resumed"),
     "say": ("say something", "said something"),
     "set_compass": ("set the compass", "set the compass"),
+    "set_plague": ("set a plague", "set a plague"),
     "set_tournament_compass": ("set the tournament compass", "set the tournament compass"),
     "shoot_spore": ("shoot a spore", "shot a spore"),
     "start_mission": ("start a mission", "started a mission"),
