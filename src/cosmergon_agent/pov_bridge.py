@@ -501,8 +501,9 @@ def _rim(side: int, x: int, y: int) -> str | None:
     The rim is the ring of squares at index -1 and ``side`` around the field (corners included).
     A wall has ``_BUNKS`` bunks at ``i * spacing + spacing // 2`` with ``spacing = side // 16``
     (none when that is 0) and a shaft on the positions 1 and 2 from its start; a shaft beats a
-    bunk, and the square right beside a shaft is plain wall even where the server has a bunk. A position counts along the field's x on the north (y = -1) and south (y = side) walls
-    and along its y on the west (x = -1) and east (x = side) walls. The program's ``shaftlo`` is
+    bunk, and the square right beside a shaft is plain wall even where the server has a bunk.
+    A position counts along the field's x on the north (y = -1) and south (y = side) walls and
+    along its y on the west (x = -1) and east (x = side) walls. The program's ``shaftlo`` is
     the square with the lower program coordinate along the wall (x east, y north); the field's y
     points south, so on the east and west walls that is position 2, on the others position 1.
     """
