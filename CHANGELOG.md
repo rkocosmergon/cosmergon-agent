@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+## [0.35.0] — 2026-11-23
+
+### Added
+
+- Dashboard, through a marauder's eyes: a native program can draw the picture in its own window
+  over the view. When `cosmergon-pov` lies at its fixed place
+  (`${XDG_DATA_HOME:-~/.local/share}/cosmergon-pov/cosmergon-pov`, or `COSMERGON_POV` with an
+  absolute path) and a window follower is running, the dashboard starts it without a shell, keeps
+  the view's area empty and writes the field, the bodies and the camera to its stdin. Without the
+  program or the follower nothing changes: the character picture stays. `COSMERGON_POV_WINDOW=beside`
+  starts the program without a follower.
+- The bridge to that program sends, to a program that asks for them in its capabilities file: own
+  squares, the place of the field in the world and its neighbour cubes, the time of day
+  (`COSMERGON_POV_TZ`, default Europe/Berlin), clouds, a theme (`COSMERGON_POV_THEME`), the kind
+  and state of a body (marauder, monster, bird, fallen), and the field's rim with bunks and shaft
+  portals. An older program gets the first protocol and draws as before.
+- Words for the action `set_plague` in the log.
+
+### Changed
+
+- README: the head says what the package is, how to start, and what you can do with it.
+
+### Fixed
+
+- First-person view: monsters and birds reach the view (they were dropped from the stream), and
+  the camera never enters a living body. A standing body faces its most open direction; it used to
+  keep its last walking direction and look at a wall for seconds.
+- Dashboard: a warning goes into the log while the dashboard runs. A line such as
+  "Server error 502" landed in the middle of the picture.
+
 ## [0.34.3] — 2026-11-20
 
 ### Fixed
