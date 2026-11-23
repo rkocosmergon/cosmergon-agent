@@ -8147,9 +8147,9 @@ class _TerminalLog(logging.StreamHandler):
         if ziel is not None and record.levelno >= logging.WARNING:
             try:
                 ziel(record.getMessage())
-                return
             except Exception:  # the app is gone or going: stderr, as before
-                pass
+                super().emit(record)
+            return
         super().emit(record)
 
 
