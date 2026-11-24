@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import hmac
 import json
+import socketserver
 import time
 from hashlib import sha256
+from http.server import HTTPServer
 
 from cosmergon_agent.exceptions import WebhookSignatureError, WebhookTimestampError
 
@@ -123,3 +125,19 @@ class CosmergonWebhook:
             return json.loads(payload)  # type: ignore[no-any-return]
         except json.JSONDecodeError as exc:
             raise ValueError(f"Webhook payload is not valid JSON: {exc}") from exc
+
+
+class WebhookHTTPServer(HTTPServer):
+    """HTTP server for ``CosmergonAgent.listen`` that starts without a reverse lookup.
+
+    ``HTTPServer.server_bind`` resolves the bind address backwards (``socket.getfqdn``).
+    Where that lookup hangs, the server accepts its first webhook only after the resolver
+    gives up; 35 s were measured on macOS for ``0.0.0.0``. Nothing in the listener uses
+    the resolved name, so this server binds and keeps the address it was given.
+    """
+
+    def server_bind(self) -> None:
+        """Bind the socket and record address and port, without ``socket.getfqdn``."""
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = str(self.server_address[0])
+        self.server_port = int(self.server_address[1])

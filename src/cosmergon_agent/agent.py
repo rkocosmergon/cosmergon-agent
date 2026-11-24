@@ -42,7 +42,7 @@ from cosmergon_agent.exceptions import (
     ConnectionError as CsgConnectionError,
 )
 from cosmergon_agent.state import GameState
-from cosmergon_agent.webhook import CosmergonWebhook
+from cosmergon_agent.webhook import CosmergonWebhook, WebhookHTTPServer
 
 logger = logging.getLogger(__name__)
 
@@ -1846,7 +1846,7 @@ class CosmergonAgent:
                             env var. If neither set: WARNING + signature check skipped.
             path:           URL path for webhook endpoint (default /webhook).
         """
-        from http.server import BaseHTTPRequestHandler, HTTPServer
+        from http.server import BaseHTTPRequestHandler
 
         secret = webhook_secret or os.environ.get("COSMERGON_WEBHOOK_SECRET")
         if not secret:
@@ -1908,7 +1908,7 @@ class CosmergonAgent:
             def log_message(self, format: str, *args: object) -> None:
                 logger.debug(format, *args)
 
-        server = HTTPServer((host, port), _WebhookHandler)
+        server = WebhookHTTPServer((host, port), _WebhookHandler)
         logger.info("Webhook server listening on %s:%d%s", host, port, path)
         try:
             server.serve_forever()

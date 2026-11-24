@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `CosmergonAgent.listen` accepts its first webhook at once. The standard HTTP server resolved
+  the bind address backwards before it started; where that lookup hangs (35 s measured on macOS
+  for `0.0.0.0`), webhooks were refused until the resolver gave up. The listener now binds
+  without the lookup.
+
 ## [0.35.0] — 2026-11-23
 
 ### Added
