@@ -652,7 +652,10 @@ _PATIENCE = 4.0  # seconds the random cam stays with one that stopped walking
 _LOOK_BACK = 6  # reports back the way of a body is measured over (about three seconds)
 _STEP_M = 1.0  # metres made in that time from which a body counts as walking
 _DWELL = 60.0  # seconds a flight stays in one cube (konzept-space-night.md: the shortest preset)
-_NEEDS_EXTRA = "this view needs: pip install 'cosmergon-agent[pov]'"
+_NEEDS_EXTRA = (
+    "this view needs websockets: pip install 'cosmergon-agent[pov]', "
+    "pipx inject cosmergon-agent websockets, or uv tool install --with websockets cosmergon-agent"
+)
 _LEVEL_AGE = 10.0  # seconds until a level of the world is read again
 _REPORTS_KEPT = 40
 # Where the cube lies in its room is asked once per stream (so once per cube shown). When that

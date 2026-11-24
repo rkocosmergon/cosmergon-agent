@@ -35,6 +35,7 @@ dependencies = [
 ]
 
 [project.scripts]
+cosmergon = "cosmergon_agent.start:main"
 cosmergon-agent = "cosmergon_agent.cli:main"
 cosmergon-dashboard = "cosmergon_agent.dashboard:main"
 cosmergon-mcp = "cosmergon_agent.mcp:run"
@@ -43,11 +44,13 @@ cosmergon-mcp = "cosmergon_agent.mcp:run"
 dashboard = [
     "textual>=2.0.0",  # text-wrap/text-overflow (cos20 #508)
     "rich>=13.0.0",  # the crash picture without values (cos20 #631); textual brings it anyway
+    "websockets>=13.0",  # the first-person view is a key inside the dashboard (cos20 #853)
 ]
 # U5 (#232 K4, 2026-09-05): every product beyond the client is an extra.
 # `pip install cosmergon-agent` imports client + MCP server with httpx alone.
 # The view through a marauder's eyes in the dashboard (cos20 #789) reads the world's public
 # entity stream, a WebSocket; neither the standard library nor httpx has a client for it.
+# Kept as a name: the dashboard extra now carries the same package.
 pov = [
     "websockets>=13.0",
 ]

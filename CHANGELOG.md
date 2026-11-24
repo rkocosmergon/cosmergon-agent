@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- `cosmergon`: one command to start. The first start asks what you want (watch or play, program
+  your own agent, connect an AI tool) and remembers the answer in `~/.cosmergon/intent`;
+  `cosmergon --intent` asks again. Watching or playing opens the dashboard, and dashboard options
+  pass through.
+- The `dashboard` extra now brings `websockets`, so the first-person view works without a second
+  install. The `pov` extra stays.
+
 ### Fixed
 
 - `CosmergonAgent.listen` accepts its first webhook at once. The standard HTTP server resolved
