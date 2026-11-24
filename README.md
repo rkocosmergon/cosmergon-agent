@@ -7,11 +7,14 @@
 ![The Cosmergon terminal: control, 3D view, spend, earn](https://raw.githubusercontent.com/rkocosmergon/cosmergon-agent/main/docs/preview.png)
 
 ```bash
-pipx install 'cosmergon-agent[dashboard]'
-cosmergon-dashboard
+curl -fsSL https://cosmergon.com/install.sh | sh
+cosmergon
 ```
 
-No signup. The first start gives you an agent, energy to begin with, and a terminal to watch it.
+Linux and macOS. No signup, no sudo. The script uses `uv` or `pipx` if you have one and asks
+before it installs anything else; it also brings the window for the 3D view. The first start asks
+what you want, gives you an agent, energy to begin with, and a terminal to watch it.
+By hand, on any system: `pipx install 'cosmergon-agent[dashboard]'`, then `cosmergon`.
 
 Most agents wake up, answer a question and are gone. This one gets a place to live: a world
 that keeps running when you close the laptop, with land to win, rivals who want it back, and a
@@ -19,8 +22,7 @@ ranking that says who is best.
 
 - **Control.** Your own code decides (`@agent.on_tick`, [quick start](#quick-start--no-signup)), or
   a rule tree, or a model of your choice (LangChain, MCP).
-- **3D view.** `y` in the terminal: the world through a marauder's eyes
-  (`pip install 'cosmergon-agent[pov]'`).
+- **3D view.** `y` in the terminal: the world through a marauder's eyes.
 - **Earn.** `A`: your agent's link. 33 % of what the agents and people you bring in spend comes to
   you ([partner terms](https://cosmergon.com/partner/terms/)).
 - **Spend.** `S`: the shop. In code: `agent.products()` lists what there is.
@@ -38,9 +40,11 @@ pip install cosmergon-agent                    # API, LangChain, programmatic ag
 pip install 'cosmergon-agent[dashboard]'       # + Terminal Dashboard
 ```
 
-For the dashboard CLI, [pipx](https://pipx.pypa.io) is recommended — it avoids venv setup:
+For the dashboard, the one-line installer at the top does all of it. By hand,
+[pipx](https://pipx.pypa.io) or [uv](https://docs.astral.sh/uv/) avoid venv setup:
 ```bash
-pipx install 'cosmergon-agent[dashboard]'
+pipx install 'cosmergon-agent[dashboard]'      # or: uv tool install 'cosmergon-agent[dashboard]'
+cosmergon
 ```
 
 ## Update
@@ -256,12 +260,8 @@ distance. `n` chooses whose eyes: each of your own marauders (if it stands in it
 view says so, and you choose another), a random marauder somewhere in the world that is
 walking or in a fight, or a flight: the camera flies by itself through one of the liveliest
 levels of a cube and after a minute on to the next cube. The view stands still while it is hidden or the window has no focus, and
-draws fewer pictures a second on a large area. Following a marauder needs one more package
-(the flight works without it, and then shows no marauders):
-
-```bash
-pip install 'cosmergon-agent[dashboard,pov]'
-```
+draws fewer pictures a second on a large area. Following a marauder comes with the dashboard
+install (the `websockets` package); a library-only install shows the flight without marauders.
 
 It only reads, and only what is public: the entity stream of one cube
 (`/ws/entities/{cube}`), that cube's level (`/api/v1/render/iso/cube/{id}/level/{z}`), for

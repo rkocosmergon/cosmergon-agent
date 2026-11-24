@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-11-24
+
 ### Added
 
 - `cosmergon`: one command to start. The first start asks what you want (watch or play, program
