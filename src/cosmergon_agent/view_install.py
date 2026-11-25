@@ -12,8 +12,9 @@ What it does, and nothing else:
   * takes from the archives only the files named below, as plain files (no path from an
     archive is ever used, no link is followed);
   * puts them into ``$XDG_DATA_HOME/cosmergon-pov`` (else ``~/.local/share/cosmergon-pov``), the
-    folder the dashboard starts the program from (``pov_bridge.program_path``): the folder and
-    the program 0755, the rest 0644. No sudo, nothing outside your home directory.
+    folder the dashboard starts the program from (``pov_bridge.program_path``): the program
+    0755, the rest 0644, the folder closed to writes by others. No sudo, nothing outside your
+    home directory.
 
 Standard library only.
 """
@@ -24,6 +25,7 @@ import hashlib
 import io
 import os
 import platform
+import stat
 import sys
 import tarfile
 import tempfile
@@ -171,7 +173,8 @@ def _place(folder: Path, files: dict[str, tuple[bytes, int]]) -> None:
     folder.mkdir(mode=0o755, parents=True, exist_ok=True)
     if folder.is_symlink() or not folder.is_dir():
         raise InstallError(f"{folder} is not a folder")
-    os.chmod(folder, 0o755)  # noqa: S103 - closed to writes by others, as the dashboard demands
+    # Closed to writes by group and others, as the dashboard demands; a private folder stays so.
+    os.chmod(folder, stat.S_IMODE(folder.stat().st_mode) & ~0o022)
     staged: list[Path] = []
     try:
         for name, (data, mode) in files.items():
