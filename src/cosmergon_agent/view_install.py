@@ -7,7 +7,8 @@ there and later, when someone said no at first and wants it now.
 
 What it does, and nothing else:
   * fetches the built program for this system from the release named below, and Freedoom (the
-    game data, BSD licence), over https only, each with a limit of time and size;
+    game data, BSD licence), over https only, each with a limit of size and of time for the whole
+    download; a redirect is followed only to https, at most three times, and its body is never read;
   * compares each download with the SHA-256 written in this file, before anything is unpacked;
   * takes from the archives only the files named below, as plain files (no path from an
     archive is ever used, no link is followed);
@@ -29,6 +30,9 @@ import stat
 import sys
 import tarfile
 import tempfile
+import time
+import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from collections.abc import Callable
@@ -37,20 +41,20 @@ from typing import IO
 
 from cosmergon_agent import pov_bridge
 
-POV_TAG = "v0.1.0-pre.1"
+POV_TAG = "v0.1.0-pre.2"
 POV_BASE = f"https://github.com/rkocosmergon/cosmergon-pov/releases/download/{POV_TAG}"
 POV_BUILDS = {  # (system, machine) -> (archive name, SHA-256)
     ("Linux", "x86_64"): (
         "cosmergon-pov-linux-x86_64",
-        "cf6e29d030141ad95e9c9d33bb800cdca102324da8f6ab7c080a557a03c03f57",
+        "257505a9ad5d433e2915c1099db0c28e0f288db4f686ba2d65e63dca4c7cf0bd",
     ),
     ("Darwin", "arm64"): (
         "cosmergon-pov-macos-arm64",
-        "999e3f04db2b5a0d8dcf01732ca0b736972bece0f126ff30ecf5fb9240f3c4ab",
+        "338e657ece568288435ef0de2ec8ae9f43147c4f448e3fdc675af178567b0234",
     ),
     ("Darwin", "x86_64"): (
         "cosmergon-pov-macos-x86_64",
-        "aafa1c6687d9aa0f089b012b1264d2e7accdd8a2b12f3e3569fdccf0afd592eb",
+        "07298c6bbb0fe0885b3e8512c5caa1cfb717d49e7fa791d5bcf84d7416aea60b",
     ),
 }
 POV_FILES = {  # file in the archive's folder -> mode
@@ -73,7 +77,9 @@ FREEDOOM_FILES = {  # member of the zip -> file in the folder
 }
 POV_MOST = 16 * 1024 * 1024  # the archives are 1 to 4 MB
 FREEDOOM_MOST = 48 * 1024 * 1024  # the zip is 24 MB
-SECONDS = 120.0  # the socket's limit for connecting and for each read
+SECONDS = 30.0  # the socket's limit for connecting and for each read
+TOTAL_SECONDS = 600.0  # the whole download, redirects included; over by at most one read (SECONDS)
+REDIRECTS = 3  # GitHub sends one, to its file host
 _CHUNK = 64 * 1024
 
 HINT = "3D picture: cosmergon --install-view"
@@ -85,22 +91,44 @@ class InstallError(Exception):
     """Said to the user in one sentence; nothing half installed stays behind."""
 
 
-class _HttpsOnly(urllib.request.HTTPRedirectHandler):
-    """Follows a redirect (GitHub sends one to its file host) only to another https address."""
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Follows no redirect itself: urllib would read the redirect's body first, without a limit.
+
+    Returning None makes urllib raise the redirect as an HTTPError, whose body nobody reads;
+    ``_open`` follows the address in its header.
+    """
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
-        if not str(newurl).startswith("https://"):
-            raise InstallError(f"a download was sent to a non-https address: {str(newurl)[:80]}")
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect())
+
+
+def _once(url: str) -> IO[bytes]:
+    """One request to ``url``, no redirect followed. Replaced in tests."""
+    request = urllib.request.Request(url)  # noqa: S310 - only https reaches here (_open)
+    return _OPENER.open(request, timeout=SECONDS)  # type: ignore[no-any-return]
 
 
 def _open(url: str) -> IO[bytes]:
-    """The response to ``url`` (https only). Replaced in tests."""
-    if not url.startswith("https://"):
-        raise InstallError(f"not an https address: {url[:80]}")
-    opener = urllib.request.build_opener(_HttpsOnly())
-    request = urllib.request.Request(url)  # noqa: S310 - https checked above, redirects too
-    return opener.open(request, timeout=SECONDS)  # type: ignore[no-any-return]
+    """The response to ``url``: https only, redirects to https only, at most ``REDIRECTS``.
+
+    The body of a redirect or of an error is never read. Replaced in tests.
+    """
+    for _ in range(REDIRECTS + 1):
+        if not url.startswith("https://"):
+            raise InstallError(f"not an https address: {url[:80]}")
+        try:
+            return _once(url)
+        except urllib.error.HTTPError as exc:
+            moved = exc.code in (301, 302, 303, 307, 308)
+            location = exc.headers.get("Location") if moved else None
+            exc.close()
+            if not location:
+                raise InstallError(f"{url[:80]} answered {exc.code}") from None
+            url = urllib.parse.urljoin(url, location)
+    raise InstallError(f"more than {REDIRECTS} redirects")
 
 
 def fetch(url: str, sha256: str, most: int, opener: Opener | None = None) -> bytes:
@@ -110,9 +138,13 @@ def fetch(url: str, sha256: str, most: int, opener: Opener | None = None) -> byt
         InstallError: the download failed, is larger than ``most`` or does not match ``sha256``.
     """
     digest, parts, size = hashlib.sha256(), [], 0
+    until = time.monotonic() + TOTAL_SECONDS
     try:
         with (opener or _open)(url) as answer:
             while chunk := answer.read(_CHUNK):
+                if time.monotonic() > until:
+                    limit = f"{TOTAL_SECONDS:.0f} s"
+                    raise InstallError(f"the file from {url} took longer than {limit}")
                 size += len(chunk)
                 if size > most:
                     raise InstallError(f"the file from {url} is larger than {most} bytes")

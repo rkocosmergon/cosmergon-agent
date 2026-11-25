@@ -268,7 +268,8 @@ install (the `websockets` package); a library-only install shows the flight with
 **The 3D picture.** `cosmergon --install-view` fetches the program `cosmergon-pov` (GPL-2.0, built
 from [cosmergon-pov](https://github.com/rkocosmergon/cosmergon-pov)) and its game data
 (Freedoom, BSD), each checked against a SHA-256 written in this package, into
-`${XDG_DATA_HOME:-~/.local/share}/cosmergon-pov`. Then `y` shows a real picture in its own window:
+`${XDG_DATA_HOME:-~/.local/share}/cosmergon-pov`. The program's archives are attested by the
+workflow that built them: `gh attestation verify <archive> --repo rkocosmergon/cosmergon-pov`. Then `y` shows a real picture in its own window:
 over the view where a window follower runs (Shikigon on Omarchy), else beside the terminal. Without
 it, or on a system without a built program, the view stays in characters.
 

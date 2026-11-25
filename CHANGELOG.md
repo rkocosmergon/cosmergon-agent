@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.37.1] — 2026-11-25
+
+### Changed
+- `cosmergon --install-view` has one limit of time for the whole download (600 s; each read
+  30 s), not only for each read: a server that sends a little at a time no longer holds it.
+- It follows a redirect itself, only to https and at most three times, and never reads the body
+  of a redirect or of an error (urllib reads a redirect's body without a limit before following).
+- The 3D picture is fetched from `cosmergon-pov` v0.1.0-pre.2, whose archives carry a build
+  provenance attestation of the workflow that built them; check one with
+  `gh attestation verify <archive> --repo rkocosmergon/cosmergon-pov`.
+
 ## [0.37.0] — 2026-11-25
 
 ### Added
