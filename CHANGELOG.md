@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [0.37.0] — 2026-11-25
+
+### Added
+
+- `cosmergon --install-view` fetches the 3D picture of the first-person view: the program
+  `cosmergon-pov` built for this system (Linux x86_64, macOS on Apple chips and Intel) and its game
+  data (Freedoom). Each download goes over https, has a limit of size, and must match a SHA-256
+  written in the package before anything is unpacked; only the named files are taken from the
+  archives. They go to `${XDG_DATA_HOME:-~/.local/share}/cosmergon-pov`. Also
+  `python -m cosmergon_agent.view_install` (`--if-missing` leaves a program that is there).
+  Without it the view is drawn in characters, as before; its title then names the command.
+
+### Changed
+
+- With the program installed, its window opens without a window follower too: beside the
+  terminal, instead of not at all. It is there only because you installed it, so the window is
+  asked for. `COSMERGON_POV_WINDOW=follow` keeps the old rule (only with a follower; Shikigon sets
+  it).
+
 ## [0.36.0] — 2026-11-24
 
 ### Added

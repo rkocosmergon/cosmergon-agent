@@ -91,6 +91,7 @@ from cosmergon_agent import (
 from cosmergon_agent import pov_bridge as _bridge
 from cosmergon_agent import pov_place as _pov
 from cosmergon_agent import scope as _scope
+from cosmergon_agent import view_install as _view_install
 from cosmergon_agent.action import (
     action_done_word,
     action_word,
@@ -2854,6 +2855,7 @@ class ScopeView(Widget):
         self._rate = 0.0
         self._timer: Any = None
         self._extern = False
+        self._hint: str | None = None  # how to get the 3D picture, while it is not installed
 
     @property
     def extern(self) -> bool:
@@ -2920,7 +2922,10 @@ class ScopeView(Widget):
         if self._extern and push is not None:
             push(view)
         self._step += 1
-        self.border_title = f"EYES · {view.title()}"
+        if self._hint is None:  # asked once a view: the program is looked for, not followed
+            missing = _bridge.program_path() is None and _view_install.build_for_this_system()
+            self._hint = f" · {_view_install.HINT}" if missing else ""
+        self.border_title = f"EYES · {view.title()}{self._hint}"
         if not self.border_subtitle:
             self.border_subtitle = r"\[N] cam  \[J] other  \[B] blocks  \[Y] place"
         self.refresh()

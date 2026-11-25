@@ -12,7 +12,9 @@ cosmergon
 ```
 
 Linux and macOS. No signup, no sudo. The script uses `uv` or `pipx` if you have one and asks
-before it installs anything else; it also brings the window for the 3D view. The first start asks
+before it installs anything else; it asks whether you want the 3D picture of the first-person
+view too (without it the view is drawn in characters, and `cosmergon --install-view` adds it
+later). The first start asks
 what you want, gives you an agent, energy to begin with, and a terminal to watch it.
 By hand, on any system: `pipx install 'cosmergon-agent[dashboard]'`, then `cosmergon`.
 
@@ -262,6 +264,13 @@ walking or in a fight, or a flight: the camera flies by itself through one of th
 levels of a cube and after a minute on to the next cube. The view stands still while it is hidden or the window has no focus, and
 draws fewer pictures a second on a large area. Following a marauder comes with the dashboard
 install (the `websockets` package); a library-only install shows the flight without marauders.
+
+**The 3D picture.** `cosmergon --install-view` fetches the program `cosmergon-pov` (GPL-2.0, built
+from [cosmergon-pov](https://github.com/rkocosmergon/cosmergon-pov)) and its game data
+(Freedoom, BSD), each checked against a SHA-256 written in this package, into
+`${XDG_DATA_HOME:-~/.local/share}/cosmergon-pov`. Then `y` shows a real picture in its own window:
+over the view where a window follower runs (Shikigon on Omarchy), else beside the terminal. Without
+it, or on a system without a built program, the view stays in characters.
 
 It only reads, and only what is public: the entity stream of one cube
 (`/ws/entities/{cube}`), that cube's level (`/api/v1/render/iso/cube/{id}/level/{z}`), for

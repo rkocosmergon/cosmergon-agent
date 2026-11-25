@@ -15,6 +15,7 @@ MCP = "mcp"
 _CHOICES = {"1": PLAY, "2": CODE, "3": MCP}
 _OWN_FLAGS = ("--intent",)
 _HELP_FLAGS = ("-h", "--help")
+_VIEW_FLAG = "--install-view"
 _DOCS_URL = "https://cosmergon.com/getting-started.html"
 
 _QUESTION = """\
@@ -59,11 +60,14 @@ _CLOSING = "`cosmergon-dashboard` opens the dashboard any time; `cosmergon --int
 
 _HELP = """\
 usage: cosmergon [--intent] [dashboard options]
+       cosmergon --install-view
 
 Starts Cosmergon. The first start asks what you want and remembers it.
 
-  --intent    ask again what you want
-  -h, --help  show this help
+  --intent        ask again what you want
+  --install-view  fetch the 3D picture of the first-person view (checked by SHA-256);
+                  without it the view is drawn in characters
+  -h, --help      show this help
 
 Every other option is passed to the dashboard (see `cosmergon-dashboard --help`).
 """
@@ -148,6 +152,10 @@ def main() -> int:
     if any(a in _HELP_FLAGS for a in args):
         _out(_HELP)
         return 0
+    if _VIEW_FLAG in args:
+        from cosmergon_agent import view_install
+
+        return view_install.main([a for a in args if a != _VIEW_FLAG])
     again = any(a in _OWN_FLAGS for a in args)
     sys.argv = [sys.argv[0], *[a for a in args if a not in _OWN_FLAGS]]
     word = None if again else _read_intent()

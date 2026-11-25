@@ -224,8 +224,16 @@ def follower_alive() -> bool:
 
 
 def window_allowed() -> bool:
-    """May the program be started? With a follower, or when the window is asked for beside."""
-    return os.environ.get("COSMERGON_POV_WINDOW") == "beside" or follower_alive()
+    """May the program be started? Over the view with a follower, else in a window beside.
+
+    The program lies in its folder only when the user chose it (``cosmergon --install-view``, the
+    guided installation), so its window is asked for (cos20 #853). ``COSMERGON_POV_WINDOW=follow``
+    allows it only with a living follower: Shikigon sets it, so that no window is tiled beside
+    the terminal while its follower is still starting (cos20 #799, 21.11.2026).
+    """
+    if os.environ.get("COSMERGON_POV_WINDOW") == "follow":
+        return follower_alive()
+    return True
 
 
 # --- the translation ----------------------------------------------------------------------------
