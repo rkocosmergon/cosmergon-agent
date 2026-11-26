@@ -39,7 +39,7 @@ import time
 import traceback
 import webbrowser
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from functools import partial, wraps
@@ -63,7 +63,7 @@ try:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
     from textual.containers import Horizontal, Vertical, VerticalScroll
-    from textual.events import Key
+    from textual.events import Key, Paste
     from textual.markup import MarkupError
     from textual.screen import ModalScreen
     from textual.strip import Strip
@@ -1633,7 +1633,7 @@ class HelpModal(_Dialog):
             "[cyan]\\[Shift+L][/cyan]  Log on the full screen",
             "[cyan]\\[X][/cyan]  Pause / Resume agent (asks twice; resume only after a wait)",
             "[cyan]\\[U][/cyan]  Keep this agent / upgrade (checkout in browser)",
-            "[cyan]\\[K][/cyan]  Show API key + config path; A there switches agent",
+            "[cyan]\\[K][/cyan]  Key + config; paste another key there (or E); A switches agent",
             "[cyan]\\[S][/cyan]  Shop: what you can buy, the price, checkout in the browser",
             "[cyan]\\[A][/cyan]  Earn: share your agent's link — real money and energy",
             "[cyan]\\[O][/cyan]  Public showcase: show or hide your agent's card",
@@ -1674,6 +1674,7 @@ class KeyModal(_Dialog):
         Binding("space", "close_key", "Close", show=False),
         Binding("r", "rotate_key", "Rotate", show=False),
         Binding("a", "agents", "Agents", show=False),
+        Binding("e", "other_key", "Another key", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -1706,6 +1707,7 @@ class KeyModal(_Dialog):
         referral_code: str = "",
     ) -> None:
         super().__init__()
+        self.pasted = ""  # a key pasted straight into this window (SDK issue 23)
         self._referral_code = referral_code
         self._api_key = api_key
         self._config_path = config_path
@@ -1755,6 +1757,12 @@ class KeyModal(_Dialog):
                 f"  [dim]Invite others: cosmergon.com/ref/{code}/dashboard[/dim]",
                 "  [dim]Voluntary partner program — terms: cosmergon.com/partner/terms[/dim]",
             ]
+        # SDK issue 23: the one place to change the key, also for a player who has no Master Key.
+        lines += [
+            "",
+            "[bold]Another agent?[/bold] Press [bold]E[/bold] or paste its key here",
+            "  [dim](AGENT-… or Master Key CSMR-…)[/dim]",
+        ]
         # Paket 4.1: Rotate hint (only for Paid users with a saved Master Key)
         can_rotate = self._has_token and self._tier not in ("free", "")
         footer = "[dim]Enter · Space · Esc close"
@@ -1784,6 +1792,94 @@ class KeyModal(_Dialog):
         """[A] here switches agent (cos20 #757: the main window's [A] is Earn now)."""
         if self._has_token:
             self.dismiss("agents")
+
+    def action_other_key(self) -> None:
+        self.dismiss("other")
+
+    def on_paste(self, event: Paste) -> None:
+        """A key pasted at once, as a tester did (SDK issue 23): it goes into the key field."""
+        event.stop()
+        self.pasted = event.text
+        self.dismiss("other")
+
+
+class KeyEntryModal(_Dialog):
+    """Another key for this dashboard: an agent's key or a Master Key (SDK issue 23).
+
+    *use* does the work and answers ``None`` when the dashboard runs with the key now, else
+    the line to show; the window stays open for the next paste until it worked or Esc.
+    """
+
+    DEFAULT_CSS = """
+    KeyEntryModal {
+        align: center middle;
+    }
+    KeyEntryModal > #ke-wrap {
+        width: 64;
+        height: auto;
+        max-height: 100%;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    KeyEntryModal > #ke-wrap > #ke-error {
+        display: none;
+        height: auto;
+    }
+    """
+
+    def __init__(self, use: Callable[[str], Awaitable[str | None]], pasted: str = "") -> None:
+        super().__init__()
+        self._use = use
+        self._pasted = pasted
+        self._busy = False
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="ke-wrap"):
+            yield Label("[bold]Use another key[/bold]")
+            yield Label("[dim]The dashboard switches to that agent and keeps the key.[/dim]")
+            yield Label("")
+            yield Input(placeholder="Paste key (AGENT-... or CSMR-...)", id="ke-input")
+            yield Label("", id="ke-error")
+            yield Label("[dim]Enter use · Esc cancel[/dim]")
+
+    def on_mount(self) -> None:
+        inp = self.query_one("#ke-input", Input)
+        inp.focus()
+        if self._pasted:
+            inp.value = self._pasted
+            inp.action_end()
+
+    def on_key(self, event: Any) -> None:
+        if event.key == "escape":
+            event.stop()
+            event.prevent_default()
+            self.dismiss(False)
+
+    def _say(self, text: str) -> None:
+        err = self.query_one("#ke-error", Label)
+        err.update(text)
+        err.display = bool(text)
+
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        if self._busy:
+            return
+        key = _key_from_input(event.value)
+        self.query_one("#ke-input", Input).value = ""
+        if key is None:
+            self._say("[bold]Paste the whole key[/bold] — it starts with AGENT- or CSMR-.")
+            return
+        self._busy = True
+        self._say("[dim]Checking…[/dim]")
+        try:
+            fehler = await self._use(key)
+        finally:
+            self._busy = False
+        if fehler:
+            self._say(fehler)
+            return
+        self.dismiss(True)
 
 
 class UnsavedKeyModal(_Dialog):
@@ -5715,22 +5811,54 @@ class CosmergonDashboard(_PrivateApp):
         has_stripe = state.has_stripe_customer if state else False
         downgrade = state.subscription_downgrade_at if state else None
         token = load_token(base_url=self.agent.base_url)
-        result = await self.push_screen_wait(
-            KeyModal(
-                self._get_plain_key(),
-                str(CONFIG_PATH),
-                tier,
-                name,
-                has_stripe_customer=has_stripe,
-                downgrade_at=downgrade,
-                has_token=bool(token),
-                referral_code=state.referral_code if state else "",
-            )
+        key_modal = KeyModal(
+            self._get_plain_key(),
+            str(CONFIG_PATH),
+            tier,
+            name,
+            has_stripe_customer=has_stripe,
+            downgrade_at=downgrade,
+            has_token=bool(token),
+            referral_code=state.referral_code if state else "",
         )
+        result = await self.push_screen_wait(key_modal)
         if result == "rotate":
             await self._rotate_master_key(token)
         elif result == "agents":
             await self._agent_selector_open()
+        elif result == "other":
+            await self.push_screen_wait(KeyEntryModal(self._use_key, pasted=key_modal.pasted))
+
+    async def _use_key(self, key: str) -> str | None:
+        """Switch this dashboard to *key* and keep it (SDK issue 23). ``None`` = done, else why not.
+
+        An agent's key is asked about first: a key the server refuses or could not confirm is
+        never switched to nor written. A Master Key loads the account's agents as at the start.
+        """
+        if key == self._get_plain_key():
+            return "That is the key in use now."
+        base = self.agent.base_url
+        if key.upper().startswith("CSMR-"):
+            from cosmergon_agent._token import TokenResolutionError
+
+            try:
+                # as the reconnect does: the agent is switched in this thread, not another
+                name = self._reconnect_with_token(key, None)
+            except (TokenResolutionError, OSError) as exc:
+                return _roh(str(exc))
+        else:
+            accepted, agent_id, name = await asyncio.to_thread(_check_key, key, base)
+            if not accepted:
+                return "[bold]This key was not accepted.[/bold] Check it and paste it again."
+            if agent_id is None:
+                return "The server could not confirm the key right now. Try again in a moment."
+            name = name or agent_id
+            save_agent(name, key, agent_id, base_url=base, activate=True)
+            self.agent.reconnect(key, agent_id)
+        await self._now_another_agent()
+        self._redraw()
+        self._set_feedback(f"Switched to {_roh(name)}")
+        return None
 
     async def _rotate_master_key(self, token: str) -> None:
         """Paket 4.1: Rotate Master Key via POST /billing/regenerate-token.
@@ -8044,7 +8172,7 @@ class FirstStartApp(_PrivateApp):
                     "[bold]Could not resolve Master Key.[/bold] Check key and try again."
                 )
             return
-        accepted, agent_id = _check_key(key, self._base_url)
+        accepted, agent_id, _ = _check_key(key, self._base_url)
         if not accepted:
             self._say_error("[bold]This key was not accepted.[/bold] Check it and paste it again.")
             return
@@ -8071,8 +8199,10 @@ def _key_from_input(value: str) -> str | None:
     return found.group(0).rstrip("\"'")
 
 
-def _check_key(key: str, base_url: str) -> tuple[bool, str | None]:
-    """Ask the server about an agent key: ``(accepted, agent id when the server confirmed it)``.
+def _check_key(key: str, base_url: str) -> tuple[bool, str | None, str]:
+    """Ask the server about an agent key: ``(accepted, agent id, agent name)``.
+
+    The id and the name are there only when the server confirmed the key (200).
 
     Not accepted only on 401/403. Unreachable or any other answer counts as accepted without
     an id: the dashboard reports those itself, a first start must not hang on a network that
@@ -8090,16 +8220,19 @@ def _check_key(key: str, base_url: str) -> tuple[bool, str | None]:
             timeout=10.0,
         )
     except (_httpx.HTTPError, SendRefusedError):
-        return True, None
+        return True, None, ""
     if resp.status_code in (401, 403):
-        return False, None
+        return False, None, ""
     if resp.status_code != 200:
-        return True, None
+        return True, None, ""
     try:
-        agent_id = resp.json().get("id")
+        data = resp.json()
+        agent_id, name = data.get("id"), data.get("username")
     except (ValueError, AttributeError):
-        return True, None
-    return True, agent_id if isinstance(agent_id, str) and agent_id else None
+        return True, None, ""
+    if not (isinstance(agent_id, str) and agent_id):
+        return True, None, ""
+    return True, agent_id, name if isinstance(name, str) else ""
 
 
 # Entry point

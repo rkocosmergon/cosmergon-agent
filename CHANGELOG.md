@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.37.3] — 2026-11-26
+
+### Added
+- The key window (**K**) is where a running dashboard takes another key: paste it there, or
+  press **E**, and a field opens for an agent key (`AGENT-…`) or a Master Key (`CSMR-…`). An
+  agent key is checked with the server; once confirmed, the dashboard switches to that agent and
+  keeps the key in the config file (mode 0600), so the next start uses it. A key the server does
+  not accept or could not confirm is not switched to and not written; the field says why. Before,
+  a dashboard that had once registered an agent of its own offered no way to use an existing
+  key (#23).
+
 ## [0.37.2] — 2026-11-26
 
 ### Fixed

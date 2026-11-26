@@ -478,12 +478,17 @@ def save_agent(
     *,
     base_url: str = _DEFAULT_BASE_URL,
     instance: str | None = None,
+    activate: bool = False,
 ) -> None:
     """Save an agent's credentials in the nested multi-agent format.
 
     If an agent with the same name already exists, it is updated (upsert).
     If there's a name collision with a different agent_id, the second agent
     is stored under its agent_id as key with a warning.
+
+    With *activate* the agent becomes the active one, and the instance counts as the player's
+    own (``activated``): a key the player entered is never replaced by a new anonymous agent
+    when it fails (cos20, SDK issue 23).
     """
     data = _load_config()
     inst_name = instance or _instance_of(data, base_url)
@@ -511,8 +516,10 @@ def save_agent(
     agents[name] = {"api_key": api_key, "agent_id": agent_id}
 
     # Set active_agent to this agent if none set
-    if not inst.get("active_agent"):
+    if activate or not inst.get("active_agent"):
         inst["active_agent"] = name
+    if activate:
+        inst["activated"] = True
 
     data.setdefault("default_instance", inst_name)
 
