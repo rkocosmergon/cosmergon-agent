@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+- The first-start screen takes the key from `AGENT-` or `CSMR-` on: a K pressed again after the
+  field opened, a quote or a copied `api_key = "…"` line no longer becomes part of the key (#23).
+- It checks an agent key with the server before the dashboard starts. A key the server does not
+  accept, an empty field or text without a key now say so under the field, which is emptied for
+  the next paste; before, the dashboard started and only its log said that the key failed. When
+  the server cannot be reached, the dashboard starts as before.
+
 ## [0.37.1] — 2026-11-25
 
 ### Changed

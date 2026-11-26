@@ -2806,7 +2806,7 @@ def _scope_styles(theme: Theme) -> dict[str, Style]:
     """The view's styles in the theme's colours: every kind of thing in five steps of light."""
 
     def hex_of(color: str) -> str:
-        return Color.parse(color).get_truecolor().hex
+        return str(Color.parse(color).get_truecolor().hex)
 
     colors, _names = _scope.palette(
         {
@@ -2926,7 +2926,7 @@ class ScopeView(Widget):
             missing = _bridge.program_path() is None and _view_install.build_for_this_system()
             self._hint = f" · {_view_install.HINT}" if missing else ""
         self.border_title = f"EYES · {view.title()}{self._hint}"
-        if not self.border_subtitle:
+        if not getattr(self, "border_subtitle", ""):  # mypy cannot type Textual's reactive here
             self.border_subtitle = r"\[N] cam  \[J] other  \[B] blocks  \[Y] place"
         self.refresh()
 
@@ -7114,7 +7114,7 @@ def _als_hex(color: str, fallback: str) -> str:
     try:
         from rich.color import Color
 
-        return Color.parse(color).get_truecolor().hex
+        return str(Color.parse(color).get_truecolor().hex)
     except Exception:
         return fallback
 
@@ -8018,9 +8018,20 @@ class FirstStartApp(_PrivateApp):
         inp.display = True
         inp.focus()
 
+    def _say_error(self, text: str) -> None:
+        """Show *text* under the field and empty the field for the next paste."""
+        err = self.query_one("#fs-error", Label)
+        err.update(text)
+        err.display = True
+        self.query_one("#fs-input", Input).value = ""
+
     async def on_input_submitted(self, event: Input.Submitted) -> None:
-        key = event.value.strip()
-        if not key:
+        # cos20 #23 (cosmergon-agent): the field takes K as a letter once it is open, so a
+        # second K before the paste made the key "kAGENT-…", and the dashboard then started
+        # with a key nobody accepts. The key is taken from its prefix on and checked here.
+        key = _key_from_input(event.value)
+        if key is None:
+            self._say_error("[bold]Paste the whole key[/bold] — it starts with AGENT- or CSMR-.")
             return
         # Recognize prefix — Master Key gets resolved to agent key
         if key.upper().startswith("CSMR-"):
@@ -8029,12 +8040,52 @@ class FirstStartApp(_PrivateApp):
                 self.result_key = resolved
                 self.exit()
             else:
-                err = self.query_one("#fs-error", Label)
-                err.update("[bold]Could not resolve Master Key.[/bold] Check key and try again.")
-                err.display = True
+                self._say_error(
+                    "[bold]Could not resolve Master Key.[/bold] Check key and try again."
+                )
+            return
+        if not _key_accepted(key, self._base_url):
+            self._say_error("[bold]This key was not accepted.[/bold] Check it and paste it again.")
             return
         self.result_key = key
         self.exit()
+
+
+_KEY_IN_INPUT = re.compile(r"(?:AGENT|CSMR)-\S+", re.IGNORECASE)
+
+
+def _key_from_input(value: str) -> str | None:
+    """The key in what was typed or pasted: from ``AGENT-``/``CSMR-`` to the next space.
+
+    Anything before the prefix (a stray K, a quote, a label like ``api_key = "``) is not part
+    of a key; a trailing quote from a copied TOML line is not either. ``None``: no key there.
+    """
+    found = _KEY_IN_INPUT.search(value)
+    if found is None:
+        return None
+    return found.group(0).rstrip("\"'")
+
+
+def _key_accepted(key: str, base_url: str) -> bool:
+    """False only when the server says the key is not valid (401/403).
+
+    Unreachable or any other answer counts as accepted: the dashboard reports those itself,
+    and a first start must not hang on a network that is down for a moment.
+    """
+    import httpx as _httpx
+
+    from cosmergon_agent import _http
+    from cosmergon_agent.exceptions import SendRefusedError
+
+    try:
+        resp = _http.get(
+            f"{base_url.rstrip('/')}/api/v1/players/me",
+            headers={"Authorization": f"api-key {key}"},
+            timeout=10.0,
+        )
+    except (_httpx.HTTPError, SendRefusedError):
+        return True
+    return resp.status_code not in (401, 403)
 
 
 # Entry point
