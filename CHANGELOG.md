@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.37.2] — 2026-11-26
+
 ### Fixed
 - The first-start screen takes the key from `AGENT-` or `CSMR-` on: a K pressed again after the
   field opened, a quote or a copied `api_key = "…"` line no longer becomes part of the key (#23).
@@ -9,6 +11,8 @@
   accept, an empty field or text without a key now say so under the field, which is emptied for
   the next paste; before, the dashboard started and only its log said that the key failed. When
   the server cannot be reached, the dashboard starts as before.
+- An agent key the server confirms is kept in the config file (mode 0600) like a Master Key,
+  so the next start goes straight to the dashboard instead of asking for it again.
 
 ## [0.37.1] — 2026-11-25
 

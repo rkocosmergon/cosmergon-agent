@@ -8044,9 +8044,14 @@ class FirstStartApp(_PrivateApp):
                     "[bold]Could not resolve Master Key.[/bold] Check key and try again."
                 )
             return
-        if not _key_accepted(key, self._base_url):
+        accepted, agent_id = _check_key(key, self._base_url)
+        if not accepted:
             self._say_error("[bold]This key was not accepted.[/bold] Check it and paste it again.")
             return
+        if agent_id is not None:  # the server knows it: kept like a Master Key's (#23)
+            from cosmergon_agent.config import save_credentials
+
+            save_credentials(key, agent_id, base_url=self._base_url, activated=True)
         self.result_key = key
         self.exit()
 
@@ -8066,11 +8071,12 @@ def _key_from_input(value: str) -> str | None:
     return found.group(0).rstrip("\"'")
 
 
-def _key_accepted(key: str, base_url: str) -> bool:
-    """False only when the server says the key is not valid (401/403).
+def _check_key(key: str, base_url: str) -> tuple[bool, str | None]:
+    """Ask the server about an agent key: ``(accepted, agent id when the server confirmed it)``.
 
-    Unreachable or any other answer counts as accepted: the dashboard reports those itself,
-    and a first start must not hang on a network that is down for a moment.
+    Not accepted only on 401/403. Unreachable or any other answer counts as accepted without
+    an id: the dashboard reports those itself, a first start must not hang on a network that
+    is down for a moment, and only a confirmed key is written to the config file.
     """
     import httpx as _httpx
 
@@ -8084,8 +8090,16 @@ def _key_accepted(key: str, base_url: str) -> bool:
             timeout=10.0,
         )
     except (_httpx.HTTPError, SendRefusedError):
-        return True
-    return resp.status_code not in (401, 403)
+        return True, None
+    if resp.status_code in (401, 403):
+        return False, None
+    if resp.status_code != 200:
+        return True, None
+    try:
+        agent_id = resp.json().get("id")
+    except (ValueError, AttributeError):
+        return True, None
+    return True, agent_id if isinstance(agent_id, str) and agent_id else None
 
 
 # Entry point
