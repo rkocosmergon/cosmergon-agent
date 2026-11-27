@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.37.4] — 2026-11-27
+
 ### Fixed
 - A `config.toml` that exists but cannot be read (wrong owner after a run with `sudo`, no
   permission, a folder in its place) is no longer treated as an empty one. The CLI, the

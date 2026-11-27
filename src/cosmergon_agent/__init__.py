@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-__version__ = "0.37.3"
+__version__ = "0.37.4"
 
 if TYPE_CHECKING:
     # CosmergonAgent is lazy-loaded at runtime via __getattr__ to avoid
