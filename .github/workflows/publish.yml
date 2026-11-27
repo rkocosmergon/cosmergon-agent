@@ -64,6 +64,17 @@ jobs:
               print('OK ' + paket + ' - Import und Version decken sich')
           "
 
+      - name: Gebaute Version gleich der Eingabe (cos20 #746)
+        env:
+          EINGABE: ${{ inputs.version }}
+        run: |
+          gebaut="$(basename "$(ls dist/*.whl)" | cut -d- -f2)"
+          if [ "$gebaut" != "$EINGABE" ]; then
+            echo "::error::Eingabe version=$EINGABE, gebaut wurde $gebaut - kein Upload (cos20 #746)"
+            exit 1
+          fi
+          echo "OK $gebaut = Eingabe"
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
         # No api_token needed — Trusted Publisher via OIDC
