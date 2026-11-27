@@ -18,6 +18,7 @@ from cosmergon_agent.config import (
     save_credentials,
     save_token,
 )
+from cosmergon_agent.exceptions import ConfigUnreadableError
 
 _DEFAULT_BASE_URL = "https://cosmergon.com"
 
@@ -74,6 +75,14 @@ def _activate(code: str, base_url: str) -> None:
 
 
 def main() -> None:
+    try:
+        _main()
+    except ConfigUnreadableError as exc:  # cos20 #652: a sentence, not a traceback
+        sys.stderr.write(f"cosmergon-agent: {exc}\n")
+        raise SystemExit(1) from None
+
+
+def _main() -> None:
     parser = argparse.ArgumentParser(
         prog="cosmergon-agent",
         description="Cosmergon Agent CLI",

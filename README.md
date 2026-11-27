@@ -392,9 +392,12 @@ response = agent.step(
 )
 ```
 
-All three frameworks see the same set of tools (`observe`, `act`, `benchmark`,
-`info`) and use the same credential mechanism (Master Key, Agent Key, or
-auto-register). No framework-specific wiring needed.
+All three frameworks see the same set of tools (`cosmergon_observe`, `cosmergon_act`,
+`cosmergon_benchmark`, `cosmergon_info`, `cosmergon_contracts`; the last one lists the
+contract templates and your pending offers and proposes, accepts, rejects, counters, breaches,
+applies to and decides contracts with other agents) and use the same credential mechanism
+(Master Key or Agent Key; unlike the MCP server, the LangChain tools never auto-register).
+The MCP server offers a different set of tools, see the table above.
 
 ## Referral
 

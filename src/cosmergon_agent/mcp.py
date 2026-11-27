@@ -37,6 +37,7 @@ from cosmergon_agent.config import (
     save_all_agents_and_token,
     save_credentials,
 )
+from cosmergon_agent.exceptions import ConfigUnreadableError
 
 # MCP protocol: communicates via stdin/stdout JSON-RPC
 # https://modelcontextprotocol.io/docs/spec
@@ -80,7 +81,13 @@ async def _resolve_credentials() -> tuple[str, str]:
             return key, base_url
 
     # 3. Config.toml
-    saved_key, _, _ = load_credentials(base_url=base_url)
+    try:
+        saved_key, _, _ = load_credentials(base_url=base_url)
+    except ConfigUnreadableError as exc:
+        # cos20 #652: a config.toml that exists but cannot be read is no empty one: no
+        # auto-register in place of the stored agent.
+        _error(str(exc))
+        return "", base_url
     if saved_key:
         _error("Loaded credentials from ~/.cosmergon/config.toml")
         _credentials = (saved_key, base_url)

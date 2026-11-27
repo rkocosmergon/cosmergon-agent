@@ -26,6 +26,14 @@ class AuthenticationError(CosmergonError):
     """401 — invalid or expired API key."""
 
 
+class ConfigUnreadableError(CosmergonError):
+    """``config.toml`` exists but cannot be read (owner, permissions, a folder in its place).
+
+    Raised instead of treating the file as empty: an empty answer would register a new agent
+    in place of the stored one (cos20 #652).
+    """
+
+
 class PermissionError(CosmergonError):
     """403 — not authorized for this resource."""
 

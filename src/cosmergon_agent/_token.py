@@ -62,6 +62,7 @@ class ResolvedAgent:
     persona: str = ""
     energy: float = 0.0
     tier: str = ""
+    is_active: bool = True  # cos20 #734: False = paused; a server without the field means active
 
 
 @dataclass
@@ -146,6 +147,7 @@ def _parse_agents_response(
                 persona=a.get("persona", ""),
                 energy=float(a.get("energy", 0)),
                 tier=a.get("tier", ""),
+                is_active=bool(a.get("is_active", True)),
             )
             for a in raw_agents
         ]
@@ -155,7 +157,7 @@ def _parse_agents_response(
             status_code=resp.status_code,
         ) from None
 
-    # Select agent: named → match, unnamed → oldest (Panel decision S110 #7+#9)
+    # Select agent: named → match, unnamed → oldest *active* (Panel decision S110 #7+#9, cos20 #734)
     if agent_name:
         matches = [a for a in agents if a.agent_name == agent_name]
         if not matches:
@@ -167,13 +169,29 @@ def _parse_agents_response(
                 status_code=200,
             )
         selected = matches[0]
-    else:
-        selected = agents[0]
-        if len(agents) > 1:
+        if not selected.is_active:
             logger.warning(
-                "Multiple agents found (%d), using oldest: %s. "
+                "Agent '%s' is paused; using it as asked. Resume it at cosmergon.com or press "
+                "[X] in the dashboard.",
+                selected.agent_name,
+            )
+    else:
+        active = [a for a in agents if a.is_active]
+        paused = len(agents) - len(active)
+        selected = active[0] if active else agents[0]
+        if not active:
+            logger.warning(
+                "All %d agents of this account are paused; using the oldest, %s. "
+                "Resume it at cosmergon.com or press [X] in the dashboard.",
+                len(agents),
+                selected.agent_name,
+            )
+        elif len(agents) > 1:
+            logger.warning(
+                "Multiple agents found (%d%s), using oldest active: %s. "
                 "Specify agent_name= to select a different agent.",
                 len(agents),
+                f", {paused} paused" if paused else "",
                 selected.agent_name,
             )
 

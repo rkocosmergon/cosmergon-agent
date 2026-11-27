@@ -1943,7 +1943,8 @@ class CosmergonAgent:
             agent = CosmergonAgent()   # auto-registers if no key saved
             for event in agent.events():
                 if event["event_type"] == "catastrophe.warning":
-                    asyncio.run(agent.act("evacuate"))
+                    print("Catastrophe warning:", event.get("data"))
+                    # what to do about it, the agent decides in its next turn
         """
         # Resolve agent_id synchronously if not yet known
         if not self.agent_id:

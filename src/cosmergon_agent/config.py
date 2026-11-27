@@ -52,6 +52,8 @@ else:
 
 import tomli_w
 
+from cosmergon_agent.exceptions import ConfigUnreadableError
+
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path.home() / ".cosmergon" / "config.toml"
@@ -130,19 +132,46 @@ def _instance_cfg(data: dict, instance: str | None, base_url: str | None) -> dic
     return cfg or next(iter(instances.values()), {})  # type: ignore[no-any-return]
 
 
+def _unreadable(exc: OSError) -> ConfigUnreadableError:
+    return ConfigUnreadableError(
+        f"{CONFIG_PATH} exists but cannot be read ({exc.__class__.__name__}: "
+        f"{exc.strerror or exc}). Fix its owner or permissions \u2014 e.g. after a run with "
+        f"sudo: sudo chown $USER {CONFIG_PATH}. Not starting, so no new agent is registered "
+        "in place of yours."
+    )
+
+
 def _read_raw() -> dict:
-    """Read config.toml as a dict.  Returns {} if the file is missing or broken."""
-    if not CONFIG_PATH.exists():
-        return {}
+    """Read config.toml as a dict.
+
+    ``{}`` if the file is missing or its content is broken (TOML or encoding; the next save
+    sets it aside as ``.broken``, cos20 #587). A file that exists but cannot be read (owner,
+    permissions, a folder) raises ``ConfigUnreadableError``: ``{}`` would register a new agent
+    in place of the stored one (cos20 #652).
+    """
     try:
         CONFIG_PATH.chmod(0o600)
+    except FileNotFoundError:
+        return {}
     except OSError:
         # cos20 #652: hardening only — a read-only mount must not make the stored keys vanish
         # (that silently registered a new anonymous agent on every start).
         logger.debug("Could not tighten %s to 0600", CONFIG_PATH, exc_info=True)
     try:
         return tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
-    except Exception:
+    except FileNotFoundError:
+        return {}
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError):
+        return {}
+    except OSError as exc:
+        raise _unreadable(exc) from exc
+
+
+def _read_raw_soft() -> dict:
+    """``_read_raw`` for display preferences: an unreadable file means defaults, not a stop."""
+    try:
+        return _read_raw()
+    except ConfigUnreadableError:
         return {}
 
 
@@ -188,7 +217,7 @@ def display_currency() -> str:
     One setting for the dashboard and Shikigon (cos20 #757). Display only: the server counts
     and pays out in euros.
     """
-    value = (_read_raw().get("display") or {}).get("currency")
+    value = (_read_raw_soft().get("display") or {}).get("currency")
     if isinstance(value, str) and len(value) == 3 and value.isalpha():
         return value.upper()
     return "EUR"
@@ -200,7 +229,10 @@ def set_display_currency(currency: str) -> bool:
     A file that exists but did not read must not be rewritten from nothing — that would drop
     the stored keys (``_read_raw`` answers ``{}`` on any error).
     """
-    data = _read_raw()
+    try:
+        data = _read_raw()
+    except ConfigUnreadableError:
+        return False
     if CONFIG_PATH.exists() and not data:
         return False
     data.setdefault("display", {})["currency"] = currency.upper()
@@ -215,7 +247,7 @@ def display_scope() -> tuple[str, str]:
     """Where the view through a marauder's eyes is shown and which cam it had: ``[display]``
     ``scope_place`` (one of ``SCOPE_PLACES``) and ``scope_cam``. ``("off", "")`` if never set.
     """
-    display = _read_raw().get("display") or {}
+    display = _read_raw_soft().get("display") or {}
     place, cam = display.get("scope_place"), display.get("scope_cam")
     return (
         place if place in SCOPE_PLACES else "off",
@@ -226,7 +258,10 @@ def display_scope() -> tuple[str, str]:
 def set_display_scope(place: str, cam: str) -> bool:
     """Store place and cam of the view; ``False`` if config.toml was not readable (see
     ``set_display_currency``)."""
-    data = _read_raw()
+    try:
+        data = _read_raw()
+    except ConfigUnreadableError:
+        return False
     if CONFIG_PATH.exists() and not data:
         return False
     data.setdefault("display", {}).update(scope_place=place, scope_cam=cam)
@@ -236,12 +271,15 @@ def set_display_scope(place: str, cam: str) -> bool:
 
 def display_scope_blocks() -> bool:
     """Whether the view is drawn in half blocks, not signs: ``[display]`` ``scope_blocks``."""
-    return (_read_raw().get("display") or {}).get("scope_blocks") is True
+    return (_read_raw_soft().get("display") or {}).get("scope_blocks") is True
 
 
 def set_display_scope_blocks(blocks: bool) -> bool:
     """Store the choice of signs or half blocks; ``False`` if config.toml was not readable."""
-    data = _read_raw()
+    try:
+        data = _read_raw()
+    except ConfigUnreadableError:
+        return False
     if CONFIG_PATH.exists() and not data:
         return False
     data.setdefault("display", {}).update(scope_blocks=bool(blocks))
@@ -260,6 +298,8 @@ def _set_aside_unreadable() -> None:
         tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return
+    except OSError as exc:
+        raise _unreadable(exc) from exc  # cos20 #652: the same rule as _read_raw
     except (tomllib.TOMLDecodeError, UnicodeDecodeError):
         broken = CONFIG_PATH.with_suffix(".toml.broken")
         os.replace(CONFIG_PATH, broken)

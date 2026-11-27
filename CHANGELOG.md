@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Fixed
+- A `config.toml` that exists but cannot be read (wrong owner after a run with `sudo`, no
+  permission, a folder in its place) is no longer treated as an empty one. The CLI, the
+  dashboard and the MCP server say so in one sentence and register nothing; before, the stored
+  keys vanished and a new anonymous agent was registered in place of yours. `CosmergonAgent()`
+  raises the new `ConfigUnreadableError`. A file with broken TOML is still set aside as
+  `.broken` on the next save (cos20 #652).
+- Without `agent_name`, a Master Key picks the oldest *active* agent, not the oldest. When all
+  agents are paused, it takes the oldest and warns; a named paused agent is used as asked, with
+  a warning (cos20 #734).
+- The `events()` docstring example no longer calls `act("evacuate")`, an action that does not
+  exist, from inside a generator (cos20 #724).
+- The README names all five LangChain tools, `cosmergon_contracts` included, and says that the
+  MCP server has a different set (cos20 #741).
+
 ## [0.37.3] — 2026-11-26
 
 ### Added

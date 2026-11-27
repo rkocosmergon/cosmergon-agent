@@ -199,8 +199,8 @@ def cosmergon_tools(
         base_url: API server URL.
         player_token: Master Key (CSMR-...) for multi-agent access.
         agent_name: Select a specific agent when using player_token.
-            If omitted and multiple agents exist, the oldest is used
-            with a warning log.
+            If omitted and multiple agents exist, the oldest active one is used
+            with a warning log (cos20 #734).
 
     Returns:
         List of LangChain Tool objects.

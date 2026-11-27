@@ -116,8 +116,8 @@ from cosmergon_agent.config import (
     set_display_scope_blocks,
     set_onboarding_dismissed,
 )
+from cosmergon_agent.exceptions import ConfigUnreadableError, RateLimitError
 from cosmergon_agent.exceptions import ConnectionError as CsgConnectionError
-from cosmergon_agent.exceptions import RateLimitError
 from cosmergon_agent.state import AgentSituation, Field, GameState, Ranking
 
 # A worker's exception must not end the dashboard, whichever of the keys started it: one
@@ -8368,6 +8368,14 @@ def _log_to_terminal() -> None:
 
 
 def main() -> None:
+    try:
+        _main()
+    except ConfigUnreadableError as exc:  # cos20 #652: a sentence, not a traceback
+        print(f"\n\u2717  {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
+
+
+def _main() -> None:
     parser = argparse.ArgumentParser(
         description="Cosmergon Agent Dashboard",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -8427,6 +8435,8 @@ def main() -> None:
         agent = CosmergonAgent(api_key=resolved_key, base_url=args.base_url, poll_interval=10.0)
         _secrets_leave_environment()
         CosmergonDashboard(agent=agent, theme=theme).run()
+    except ConfigUnreadableError:
+        raise
     except CosmergonError as exc:
         msg = str(exc)
         if "429" in msg or "Max" in msg:
